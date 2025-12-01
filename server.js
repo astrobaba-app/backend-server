@@ -30,9 +30,15 @@ app.use(express.urlencoded({ extended: false }));
 // Routes
 const phoneAuthRoute = require("./routes/authRoute/phoneAuthRoute");
 const userProfileRoute = require("./routes/profileRoute/userProfileRoute");
+const kundliRoute = require("./routes/horoscope/kundliRoute");
+const dailyHoroscopeRoute = require("./routes/horoscope/dailyHoroscopeRoute");
+const kundliMatchRoute = require("./routes/horoscope/matchingRoute")
 
 app.use("/api/auth", phoneAuthRoute);
-app.use("/api/profile", userProfileRoute);
+app.use("/api/user", userProfileRoute);
+app.use("/api/kundli", kundliRoute);
+app.use("/api/horoscope", dailyHoroscopeRoute);
+app.use("/api/kundli-matching", kundliMatchRoute);
 
 initDB(() => {
   app.listen(PORT, () => {

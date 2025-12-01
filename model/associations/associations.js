@@ -1,7 +1,7 @@
 const User = require("../user/userAuth");
 const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
-const KundliMatch = require("../horoscope/kundliMatching");
+const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
 
 
@@ -30,26 +30,6 @@ const GoogleAuth = require("../user/googleAuth");
     as: "userRequest",
   });
 
-  // KundliMatch belongs to two UserRequests
-  KundliMatch.belongsTo(UserRequest, {
-    foreignKey: "request1Id",
-    as: "userRequest1",
-  });
-
-  KundliMatch.belongsTo(UserRequest, {
-    foreignKey: "request2Id",
-    as: "userRequest2",
-  });
-
-  UserRequest.hasMany(KundliMatch, {
-    foreignKey: "request1Id",
-    as: "kundliMatchesAsRequest1",
-  });
-
-  UserRequest.hasMany(KundliMatch, {
-    foreignKey: "request2Id",
-    as: "kundliMatchesAsRequest2",
-  });
 
     User.hasOne(GoogleAuth, {
     foreignKey: "userId",
@@ -62,4 +42,15 @@ const GoogleAuth = require("../user/googleAuth");
     as: "user",
   });
 
+  // MatchingProfile belongs to User
+  User.hasMany(MatchingProfile, {
+    foreignKey: "userId",
+    as: "matchingProfiles",
+    onDelete: "CASCADE",
+  });
+
+  MatchingProfile.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
 

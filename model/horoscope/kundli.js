@@ -23,6 +23,11 @@ const Kundli = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true,
     },
+    astroDetails: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Contains house cusps, ascendant, and detailed astrological info",
+    },
     manglikAnalysis: {
       type: DataTypes.JSON,
       allowNull: true,

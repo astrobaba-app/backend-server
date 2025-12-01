@@ -7,7 +7,7 @@ const {
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // All profile routes are protected
-router.get("/", checkForAuthenticationCookie(), getProfile);
-router.put("/", checkForAuthenticationCookie(), updateProfile);
+router.get("/profile", checkForAuthenticationCookie(), getProfile);
+router.put("/profile", checkForAuthenticationCookie(), updateProfile);
 
 module.exports = router;

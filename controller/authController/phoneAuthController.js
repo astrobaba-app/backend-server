@@ -5,7 +5,7 @@ const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 
 
-const handleGenerateOtp = async (req, res) => {
+const generateOtp = async (req, res) => {
   try {
     const { mobile } = req.body;
 
@@ -51,6 +51,7 @@ const handleGenerateOtp = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "OTP sent successfully",
+      otp: otp, 
     });
   } catch (error) {
     console.error("Generate OTP error:", error);
@@ -62,22 +63,20 @@ const handleGenerateOtp = async (req, res) => {
   }
 };
 
-/**
- * Verify OTP and login/register user
- */
+
 const verifyOtp = async (req, res) => {
   try {
-    const { mobile, otp } = req.body;
+    const {  otp } = req.body;
 
-    if (!mobile || !otp) {
+    if (!otp) {
       return res.status(400).json({
         success: false,
-        message: "Mobile number and OTP are required",
+        message: "OTP is required",
       });
     }
 
     // Check if user exists
-    let user = await User.findOne({ where: { mobile } });
+    let user = await User.findOne({ where: { otp } });
 
     if (!user || !user.otp) {
       return res.status(400).json({
@@ -119,6 +118,8 @@ const verifyOtp = async (req, res) => {
       success: true,
       message: isNewUser ? "Registration successful" : "Login successful",
       isNewUser,
+      token: token,
+      middlewareToken: middlewareToken,
       user: {
         id: user.id,
         fullName: user.fullName,
@@ -138,9 +139,7 @@ const verifyOtp = async (req, res) => {
   }
 };
 
-/**
- * Logout user
- */
+
 const logout = async (req, res) => {
   try {
     clearTokenCookie(res);
@@ -160,7 +159,7 @@ const logout = async (req, res) => {
 };
 
 module.exports = {
-  generateOtp: handleGenerateOtp,
+  generateOtp,
   verifyOtp,
   logout,
 };

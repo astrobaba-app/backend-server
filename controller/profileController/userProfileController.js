@@ -1,16 +1,13 @@
 const User = require("../../model/user/userAuth");
 
-/**
- * Get user profile
- */
+
 const getProfile = async (req, res) => {
   try {
-    const userId = req.user.id; // Assuming auth middleware adds user to req
+    const userId = req.user.id; 
 
     const user = await User.findByPk(userId, {
       attributes: [
         "id",
-        "googleId",
         "fullName",
         "email",
         "mobile",
@@ -18,8 +15,6 @@ const getProfile = async (req, res) => {
         "dateOfbirth",
         "timeOfbirth",
         "placeOfBirth",
-        "latitude",
-        "longitude",
         "isUserRequested",
         "createdAt",
       ],
@@ -46,9 +41,6 @@ const getProfile = async (req, res) => {
   }
 };
 
-/**
- * Update user profile
- */
 const updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -59,8 +51,6 @@ const updateProfile = async (req, res) => {
       dateOfbirth,
       timeOfbirth,
       placeOfBirth,
-      latitude,
-      longitude,
     } = req.body;
 
     const user = await User.findByPk(userId);
@@ -79,9 +69,6 @@ const updateProfile = async (req, res) => {
     if (dateOfbirth !== undefined) user.dateOfbirth = dateOfbirth;
     if (timeOfbirth !== undefined) user.timeOfbirth = timeOfbirth;
     if (placeOfBirth !== undefined) user.placeOfBirth = placeOfBirth;
-    if (latitude !== undefined) user.latitude = latitude;
-    if (longitude !== undefined) user.longitude = longitude;
-
     await user.save();
 
     res.status(200).json({
@@ -96,8 +83,6 @@ const updateProfile = async (req, res) => {
         dateOfbirth: user.dateOfbirth,
         timeOfbirth: user.timeOfbirth,
         placeOfBirth: user.placeOfBirth,
-        latitude: user.latitude,
-        longitude: user.longitude,
       },
     });
   } catch (error) {

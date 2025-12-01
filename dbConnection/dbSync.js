@@ -2,7 +2,7 @@ const {sequelize} = require("../dbConnection/dbConfig");
 const User = require("../model/user/userAuth");
 const UserRequest = require("../model/user/userRequest");
 const Kundli = require("../model/horoscope/kundli");
-const KundliMatch = require("../model/horoscope/kundliMatching");
+const MatchingProfile = require("../model/horoscope/matchingProfile");
 const horoscope = require("../model/horoscope/horoscope");
 
 
@@ -13,7 +13,7 @@ const initDB = (callback) => {
     .then(() => {
       console.log('Connected to PostgreSQL');
       require('../model/associations/associations');
-      return sequelize.sync(); // Creates tables if not exist {alter:true}
+      return sequelize.sync(); // Alters tables to match models
     })
     .then(() => {
       console.log('All models synced');
