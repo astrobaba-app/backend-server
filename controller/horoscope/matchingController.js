@@ -1,20 +1,36 @@
 const MatchingProfile = require("../../model/horoscope/matchingProfile");
-const astro = require("../../config/astroapi/astro");
+const axios = require('axios');
 
+// Astro Engine configuration
+const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || 'http://localhost:8000/api/v1';
 
-const getBirthDetailsPayload = (dob, tob, lat, lon) => {
-  const [hour, minute] = tob.split(":");
-  const date = new Date(dob);
-  
+/**
+ * Format date from string to YYYY-MM-DD
+ */
+const formatDate = (dateString) => {
+  const date = new Date(dateString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Format time to HH:MM:SS
+ */
+const formatTime = (timeString) => {
+  const [hour, minute] = timeString.split(":");
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+};
+
+const getBirthDataPayload = (name, dob, tob, lat, lon) => {
   return {
-    day: date.getDate(),
-    month: date.getMonth() + 1,
-    year: date.getFullYear(),
-    hour: parseInt(hour),
-    min: parseInt(minute),
-    lat: parseFloat(lat),
-    lon: parseFloat(lon),
-    tzone: 5.5,
+    name: name,
+    date: formatDate(dob),
+    time: formatTime(tob),
+    latitude: parseFloat(lat),
+    longitude: parseFloat(lon),
+    timezone: "Asia/Kolkata",
   };
 };
 
@@ -55,110 +71,40 @@ const createMatching = async (req, res) => {
     }
 
     // Prepare birth details for both
-    const boyDetails = getBirthDetailsPayload(
+    const maleData = getBirthDataPayload(
+      boyName,
       boyDateOfBirth,
       boyTimeOfBirth,
       boyLatitude,
       boyLongitude
     );
 
-    const girlDetails = getBirthDetailsPayload(
+    const femaleData = getBirthDataPayload(
+      girlName,
       girlDateOfBirth,
       girlTimeOfBirth,
       girlLatitude,
       girlLongitude
     );
 
-    console.log("Fetching matching data from AstroAPI...");
+    console.log("Fetching matching data from Astro Engine...");
 
-    // Call matching APIs
-    const [ashtakootMatch, dashakootMatch, manglikMatch] = await Promise.allSettled([
-      astro.customRequest({
-        method: "POST",
-        endpoint: "match_ashtakoot_points",
-        params: {
-          m_day: boyDetails.day,
-          m_month: boyDetails.month,
-          m_year: boyDetails.year,
-          m_hour: boyDetails.hour,
-          m_min: boyDetails.min,
-          m_lat: boyDetails.lat,
-          m_lon: boyDetails.lon,
-          m_tzone: boyDetails.tzone,
-          f_day: girlDetails.day,
-          f_month: girlDetails.month,
-          f_year: girlDetails.year,
-          f_hour: girlDetails.hour,
-          f_min: girlDetails.min,
-          f_lat: girlDetails.lat,
-          f_lon: girlDetails.lon,
-          f_tzone: girlDetails.tzone,
-        },
-      }),
-      astro.customRequest({
-        method: "POST",
-        endpoint: "match_dashakoot_points",
-        params: {
-          m_day: boyDetails.day,
-          m_month: boyDetails.month,
-          m_year: boyDetails.year,
-          m_hour: boyDetails.hour,
-          m_min: boyDetails.min,
-          m_lat: boyDetails.lat,
-          m_lon: boyDetails.lon,
-          m_tzone: boyDetails.tzone,
-          f_day: girlDetails.day,
-          f_month: girlDetails.month,
-          f_year: girlDetails.year,
-          f_hour: girlDetails.hour,
-          f_min: girlDetails.min,
-          f_lat: girlDetails.lat,
-          f_lon: girlDetails.lon,
-          f_tzone: girlDetails.tzone,
-        },
-      }),
-      astro.customRequest({
-        method: "POST",
-        endpoint: "match_manglik_report",
-        params: {
-          m_day: boyDetails.day,
-          m_month: boyDetails.month,
-          m_year: boyDetails.year,
-          m_hour: boyDetails.hour,
-          m_min: boyDetails.min,
-          m_lat: boyDetails.lat,
-          m_lon: boyDetails.lon,
-          m_tzone: boyDetails.tzone,
-          f_day: girlDetails.day,
-          f_month: girlDetails.month,
-          f_year: girlDetails.year,
-          f_hour: girlDetails.hour,
-          f_min: girlDetails.min,
-          f_lat: girlDetails.lat,
-          f_lon: girlDetails.lon,
-          f_tzone: girlDetails.tzone,
-        },
-      }),
-    ]);
+    // Call Astro Engine matching API
+    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/matching/ashtakoot`, {
+      male_data: maleData,
+      female_data: femaleData
+    });
 
-    // Extract values
-    const extractValue = (result, name) => {
-      if (result.status === "fulfilled") {
-        return result.value;
-      } else {
-        console.error(`${name} failed:`, result.reason?.message || result.reason);
-        return null;
-      }
-    };
-
-    const ashtakootData = extractValue(ashtakootMatch, "Ashtakoot Match");
-    const dashakootData = extractValue(dashakootMatch, "Dashakoot Match");
-    const manglikData = extractValue(manglikMatch, "Manglik Match");
+    const matchingData = response.data;
+    const ashtakootData = matchingData.ashtakoot_matching;
+    const dashakootData = matchingData.dashakoot_matching;
+    const maleMangal = matchingData.male_mangal_dosha;
+    const femaleMangal = matchingData.female_mangal_dosha;
 
     // Calculate compatibility score
     let compatibilityScore = null;
-    if (ashtakootData?.total) {
-      compatibilityScore = parseFloat(((ashtakootData.total / 36) * 100).toFixed(2));
+    if (ashtakootData?.total_points) {
+      compatibilityScore = parseFloat(((ashtakootData.total_points / 36) * 100).toFixed(2));
     }
 
     // Generate conclusion
@@ -174,6 +120,14 @@ const createMatching = async (req, res) => {
         conclusion = "Below average match. Careful consideration recommended.";
       }
     }
+
+    // Prepare manglik details
+    const manglikData = {
+      male_manglik: maleMangal?.present || false,
+      female_manglik: femaleMangal?.present || false,
+      male_manglik_details: maleMangal,
+      female_manglik_details: femaleMangal
+    };
 
     // Create matching profile
     const matchingProfile = await MatchingProfile.create({

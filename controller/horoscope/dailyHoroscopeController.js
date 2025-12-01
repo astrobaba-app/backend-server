@@ -1,8 +1,12 @@
-const astro = require("../../config/astroapi/astro");
+const axios = require('axios');
+
+// Astro Engine configuration
+const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || 'http://localhost:8000/api/v1';
 
 const getDailyHoroscope = async (req, res) => {
   try {
     const { zodiacSign } = req.params;
+    const { date } = req.query; // Optional date parameter
     
     // Valid zodiac signs
     const validSigns = [
@@ -18,34 +22,27 @@ const getDailyHoroscope = async (req, res) => {
       });
     }
 
-    // Fetch daily horoscope from AstroAPI
-    const horoscope = await astro.customRequest({
-      method: "POST",
-      endpoint: `sun_sign_prediction/daily/${zodiacSign.toLowerCase()}`,
-      params: {},
-    });
+    // Capitalize first letter for astro-engine API
+    const capitalizedSign = zodiacSign.charAt(0).toUpperCase() + zodiacSign.slice(1).toLowerCase();
+    
+    // Fetch daily horoscope from Astro Engine
+    const url = `${ASTRO_ENGINE_BASE_URL}/horoscope/daily/${capitalizedSign}`;
+    const params = date ? { date } : {};
+    
+    const response = await axios.get(url, { params });
 
     res.status(200).json({
       success: true,
       zodiacSign: zodiacSign.toLowerCase(),
-      horoscope,
+      horoscope: response.data.data,
     });
   } catch (error) {
     console.error("Daily horoscope error:", error);
     
-    // Check if it's a subscription error
-    if (error.status === false || error.msg?.includes("not authorized")) {
-      return res.status(403).json({
-        success: false,
-        message: "Daily horoscope feature is not available in your API subscription plan",
-        error: error.msg || error.message,
-      });
-    }
-
     res.status(500).json({
       success: false,
       message: "Failed to fetch daily horoscope",
-      error: error.message,
+      error: error.response?.data?.detail || error.message,
     });
   }
 };
@@ -54,6 +51,7 @@ const getDailyHoroscope = async (req, res) => {
 const getWeeklyHoroscope = async (req, res) => {
   try {
     const { zodiacSign } = req.params;
+    const { start_date } = req.query; // Optional start_date parameter
     
     const validSigns = [
       "aries", "taurus", "gemini", "cancer", 
@@ -68,32 +66,26 @@ const getWeeklyHoroscope = async (req, res) => {
       });
     }
 
-    const horoscope = await astro.customRequest({
-      method: "POST",
-      endpoint: `sun_sign_prediction/weekly/${zodiacSign.toLowerCase()}`,
-      params: {},
-    });
+    // Capitalize first letter for astro-engine API
+    const capitalizedSign = zodiacSign.charAt(0).toUpperCase() + zodiacSign.slice(1).toLowerCase();
+    
+    const url = `${ASTRO_ENGINE_BASE_URL}/horoscope/weekly/${capitalizedSign}`;
+    const params = start_date ? { start_date } : {};
+    
+    const response = await axios.get(url, { params });
 
     res.status(200).json({
       success: true,
       zodiacSign: zodiacSign.toLowerCase(),
-      horoscope,
+      horoscope: response.data.data,
     });
   } catch (error) {
     console.error("Weekly horoscope error:", error);
-    
-    if (error.status === false || error.msg?.includes("not authorized")) {
-      return res.status(403).json({
-        success: false,
-        message: "Weekly horoscope feature is not available in your API subscription plan",
-        error: error.msg || error.message,
-      });
-    }
 
     res.status(500).json({
       success: false,
       message: "Failed to fetch weekly horoscope",
-      error: error.message,
+      error: error.response?.data?.detail || error.message,
     });
   }
 };
@@ -102,6 +94,7 @@ const getWeeklyHoroscope = async (req, res) => {
 const getMonthlyHoroscope = async (req, res) => {
   try {
     const { zodiacSign } = req.params;
+    const { year, month } = req.query; // Optional year and month parameters
     
     const validSigns = [
       "aries", "taurus", "gemini", "cancer", 
@@ -116,32 +109,28 @@ const getMonthlyHoroscope = async (req, res) => {
       });
     }
 
-    const horoscope = await astro.customRequest({
-      method: "POST",
-      endpoint: `sun_sign_prediction/monthly/${zodiacSign.toLowerCase()}`,
-      params: {},
-    });
+    // Capitalize first letter for astro-engine API
+    const capitalizedSign = zodiacSign.charAt(0).toUpperCase() + zodiacSign.slice(1).toLowerCase();
+    
+    const url = `${ASTRO_ENGINE_BASE_URL}/horoscope/monthly/${capitalizedSign}`;
+    const params = {};
+    if (year) params.year = year;
+    if (month) params.month = month;
+    
+    const response = await axios.get(url, { params });
 
     res.status(200).json({
       success: true,
       zodiacSign: zodiacSign.toLowerCase(),
-      horoscope,
+      horoscope: response.data.data,
     });
   } catch (error) {
     console.error("Monthly horoscope error:", error);
-    
-    if (error.status === false || error.msg?.includes("not authorized")) {
-      return res.status(403).json({
-        success: false,
-        message: "Monthly horoscope feature is not available in your API subscription plan",
-        error: error.msg || error.message,
-      });
-    }
 
     res.status(500).json({
       success: false,
       message: "Failed to fetch monthly horoscope",
-      error: error.message,
+      error: error.response?.data?.detail || error.message,
     });
   }
 };
@@ -150,6 +139,7 @@ const getMonthlyHoroscope = async (req, res) => {
 const getYearlyHoroscope = async (req, res) => {
   try {
     const { zodiacSign } = req.params;
+    const { year } = req.query; // Optional year parameter
     
     const validSigns = [
       "aries", "taurus", "gemini", "cancer", 
@@ -164,32 +154,26 @@ const getYearlyHoroscope = async (req, res) => {
       });
     }
 
-    const horoscope = await astro.customRequest({
-      method: "POST",
-      endpoint: `sun_sign_prediction/yearly/${zodiacSign.toLowerCase()}`,
-      params: {},
-    });
+    // Capitalize first letter for astro-engine API
+    const capitalizedSign = zodiacSign.charAt(0).toUpperCase() + zodiacSign.slice(1).toLowerCase();
+    
+    const url = `${ASTRO_ENGINE_BASE_URL}/horoscope/yearly/${capitalizedSign}`;
+    const params = year ? { year } : {};
+    
+    const response = await axios.get(url, { params });
 
     res.status(200).json({
       success: true,
       zodiacSign: zodiacSign.toLowerCase(),
-      horoscope,
+      horoscope: response.data.data,
     });
   } catch (error) {
     console.error("Yearly horoscope error:", error);
-    
-    if (error.status === false || error.msg?.includes("not authorized")) {
-      return res.status(403).json({
-        success: false,
-        message: "Yearly horoscope feature is not available in your API subscription plan",
-        error: error.msg || error.message,
-      });
-    }
 
     res.status(500).json({
       success: false,
       message: "Failed to fetch yearly horoscope",
-      error: error.message,
+      error: error.response?.data?.detail || error.message,
     });
   }
 };

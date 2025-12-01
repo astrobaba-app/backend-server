@@ -12,7 +12,7 @@ const {
   getAscendantReport,
   getGemstoneRemedies,
   getRudrakshaSuggestion,
-} = require("../../services/astroService");
+} = require("../../services/astroEngineService");
 
 
 
