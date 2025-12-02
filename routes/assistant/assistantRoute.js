@@ -13,7 +13,6 @@ const {
   cancelAssistantPlan,
 } = require("../../controller/assistant/assistantController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
-const validateAstrologerToken = require("../../middleware/validateAstrologerToken");
 
 // User routes - Chat with assistant
 router.post("/chat", checkForAuthenticationCookie(), sendMessage);
@@ -23,10 +22,9 @@ router.get("/my-spending", checkForAuthenticationCookie(), getMyChatSpending);
 router.get("/check/:astrologerId", checkAssistantAvailability);
 
 // Astrologer routes - Manage assistant
-router.post("/subscribe", validateAstrologerToken, subscribeToPlan);
-router.get("/my-plan", validateAstrologerToken, getMyAssistantPlan);
-router.put("/config", validateAstrologerToken, updateAssistantConfig);
-router.get("/analytics", validateAstrologerToken, getAssistantAnalytics);
-router.delete("/cancel", validateAstrologerToken, cancelAssistantPlan);
-
+router.post("/subscribe", subscribeToPlan);
+router.get("/my-plan", getMyAssistantPlan);
+router.put("/config", updateAssistantConfig);
+router.get("/analytics", getAssistantAnalytics);
+router.delete("/cancel", cancelAssistantPlan);
 module.exports = router;

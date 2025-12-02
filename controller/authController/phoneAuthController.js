@@ -35,12 +35,12 @@ const generateOtp = async (req, res) => {
     
     // Store OTP in Redis with 5 minutes expiry
     const otpKey = `user:otp:${mobile}`;
-    await redis.setex(otpKey, 300, JSON.stringify({
+    await redis.setex(otpKey, 300, {
       otp,
       mobile,
       isNewUser,
       createdAt: Date.now()
-    }));
+    });
 
     // Send OTP via Twilio
     await handleSendAuthOTP(mobile, otp);
@@ -83,7 +83,8 @@ const verifyOtp = async (req, res) => {
     for (const key of keys) {
       const data = await redis.get(key);
       if (data) {
-        const parsed = JSON.parse(data);
+        // Upstash Redis automatically parses JSON, so data is already an object
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
         if (parsed.otp === otp) {
           mobile = parsed.mobile;
           otpData = parsed;

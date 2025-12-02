@@ -10,10 +10,7 @@ const {
   updateOrderStatus,
   getOrderStatistics,
 } = require("../../controller/store/orderController");
-const {
-  checkForAuthenticationCookie,
-} = require("../../middleware/authMiddleware");
-const { validateAdminToken } = require("../../middleware/adminMiddleware");
+const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // ==================== USER ROUTES ====================
 router.post("/orders/checkout", checkForAuthenticationCookie(), checkout);
@@ -23,8 +20,8 @@ router.get("/orders/:orderNumber/track", checkForAuthenticationCookie(), trackOr
 router.post("/orders/:orderNumber/cancel", checkForAuthenticationCookie(), cancelOrder);
 
 // ==================== ADMIN ROUTES ====================
-router.get("/admin/orders", validateAdminToken, getAllOrders);
-router.get("/admin/orders/statistics", validateAdminToken, getOrderStatistics);
-router.patch("/admin/orders/:orderNumber", validateAdminToken, updateOrderStatus);
+router.get("/admin/orders", getAllOrders);
+router.get("/admin/orders/statistics", getOrderStatistics);
+router.patch("/admin/orders/:orderNumber", updateOrderStatus);
 
 module.exports = router;

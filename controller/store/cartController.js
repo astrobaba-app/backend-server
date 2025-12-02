@@ -1,6 +1,6 @@
 const Cart = require("../../model/store/cart");
 const Product = require("../../model/store/product");
-const User = require("../../model/user/user");
+const User = require("../../model/user/userAuth");
 
 // Add product to cart
 exports.addToCart = async (req, res) => {

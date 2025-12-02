@@ -1,8 +1,8 @@
 const ProductReview = require("../../model/store/productReview");
 const Product = require("../../model/store/product");
 const Order = require("../../model/store/order");
-const User = require("../../model/user/user");
-const sequelize = require("../../config/database/database");
+const User = require("../../model/user/userAuth");
+const { sequelize } = require("../../dbConnection/dbConfig");
 
 // Add product review
 exports.addReview = async (req, res) => {

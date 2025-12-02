@@ -7,7 +7,7 @@ const WalletTransaction = require("../../model/wallet/walletTransaction");
 const assistantService = require("../../services/assistantService");
 const { v4: uuidv4 } = require("uuid");
 const { Op } = require("sequelize");
-const sequelize = require("../../config/database");
+const { sequelize } = require("../../dbConnection/dbConfig");
 const OpenAI = require("openai");
 
 const openai = new OpenAI({

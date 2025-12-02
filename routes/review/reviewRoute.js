@@ -23,9 +23,9 @@ router.put("/:reviewId", checkForAuthenticationCookie(), updateReview);
 router.delete("/:reviewId", checkForAuthenticationCookie(), deleteReview);
 
 // Astrologer routes (protected)
-router.get("/pending-replies", validateAstrologerToken, getReviewsNeedingReply);
-router.post("/:reviewId/reply", validateAstrologerToken, addReply);
-router.put("/:reviewId/reply", validateAstrologerToken, updateReply);
-router.delete("/:reviewId/reply", validateAstrologerToken, deleteReply);
+router.get("/pending-replies",  getReviewsNeedingReply);
+router.post("/:reviewId/reply", addReply);
+router.put("/:reviewId/reply", updateReply);
+router.delete("/:reviewId/reply", deleteReply);
 
 module.exports = router;

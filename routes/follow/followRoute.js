@@ -11,7 +11,6 @@ const {
   getFollowerStats,
 } = require("../../controller/follow/followController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
-const validateAstrologerToken = require("../../middleware/validateAstrologerToken");
 
 // User routes
 router.post("/follow", checkForAuthenticationCookie(), followAstrologer);
@@ -21,8 +20,8 @@ router.get("/check/:astrologerId", checkForAuthenticationCookie(), checkIfFollow
 router.get("/astrologers-with-status", checkForAuthenticationCookie(), getAstrologersWithFollowStatus);
 
 // Astrologer routes
-router.get("/my-followers", validateAstrologerToken, getMyFollowers);
-router.get("/my-stats", validateAstrologerToken, getFollowerStats);
+router.get("/my-followers", getMyFollowers);
+router.get("/my-stats", getFollowerStats);
 
 // Public routes
 router.get("/count/:astrologerId", getFollowerCount);

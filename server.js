@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
-const path = require("path");
 const initDB = require("./dbConnection/dbSync");
 
 const PORT = process.env.PORT || 6001;

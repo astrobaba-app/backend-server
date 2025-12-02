@@ -8,9 +8,7 @@ const {
   clearCart,
   getCartCount,
 } = require("../../controller/store/cartController");
-const {
-  checkForAuthenticationCookie,
-} = require("../../middleware/authMiddleware");
+const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // All cart routes require authentication
 router.use(checkForAuthenticationCookie());

@@ -8,7 +8,7 @@ const {
   sendTicketReplyEmail,
   sendTicketStatusUpdateEmail,
 } = require("../../emailService/supportTicketEmail");
-const { uploadToSupabase } = require("../../config/supabaseStorage/supabaseStorageConfig");
+const { uploadToSupabase } = require("../../config/uploadConfig/supabaseUpload");
 
 /**
  * Generate unique ticket number

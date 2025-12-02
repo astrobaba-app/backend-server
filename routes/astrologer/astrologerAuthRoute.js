@@ -13,7 +13,6 @@ const {
   goOffline,
   getOnlineStatus,
 } = require("../../controller/astrologer/astrologerAuthController");
-const validateAstrologerToken = require("../../middleware/validateAstrologerToken");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 
 // Public routes
@@ -23,14 +22,14 @@ router.post("/register", upload.single("photo"), completeRegistration);
 router.post("/login", login);
 
 // Protected routes
-router.get("/profile", validateAstrologerToken, getProfile);
-router.put("/profile", validateAstrologerToken, upload.single("photo"), updateProfile);
-router.post("/logout", validateAstrologerToken, logout);
+router.get("/profile",  getProfile);
+router.put("/profile", upload.single("photo"), updateProfile);
+router.post("/logout", logout);
 
 // Availability routes
-router.post("/toggle-status", validateAstrologerToken, toggleOnlineStatus);
-router.post("/go-online", validateAstrologerToken, goOnline);
-router.post("/go-offline", validateAstrologerToken, goOffline);
-router.get("/status", validateAstrologerToken, getOnlineStatus);
+router.post("/toggle-status", toggleOnlineStatus);
+router.post("/go-online", goOnline);
+router.post("/go-offline", goOffline);
+router.get("/status",  getOnlineStatus);
 
 module.exports = router;

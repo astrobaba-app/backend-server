@@ -1,6 +1,8 @@
 const Product = require("../../model/store/product");
 const Cart = require("../../model/store/cart");
-const User = require("../../model/user/user");
+const User = require("../../model/user/userAuth");
+const { sequelize } = require("../../dbConnection/dbConfig");
+const { Op } = require("sequelize");
 
 // Helper function to generate slug
 const generateSlug = (productName) => {
@@ -233,16 +235,16 @@ exports.getAllProducts = async (req, res) => {
     // Price range filter
     if (minPrice || maxPrice) {
       where.price = {};
-      if (minPrice) where.price[sequelize.Op.gte] = minPrice;
-      if (maxPrice) where.price[sequelize.Op.lte] = maxPrice;
+      if (minPrice) where.price[Op.gte] = minPrice;
+      if (maxPrice) where.price[Op.lte] = maxPrice;
     }
 
     // Search filter
     if (search) {
-      where[sequelize.Op.or] = [
-        { productName: { [sequelize.Op.iLike]: `%${search}%` } },
-        { description: { [sequelize.Op.iLike]: `%${search}%` } },
-        { shortDescription: { [sequelize.Op.iLike]: `%${search}%` } },
+      where[Op.or] = [
+        { productName: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } },
+        { shortDescription: { [Op.iLike]: `%${search}%` } },
       ];
     }
 

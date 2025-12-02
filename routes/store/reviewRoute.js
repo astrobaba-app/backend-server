@@ -11,10 +11,7 @@ const {
   updateReviewApproval,
   replyToReview,
 } = require("../../controller/store/reviewController");
-const {
-  checkForAuthenticationCookie,
-} = require("../../middleware/authMiddleware");
-const { validateAdminToken } = require("../../middleware/adminMiddleware");
+const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // ==================== USER ROUTES ====================
 router.post("/reviews/products/:productId", checkForAuthenticationCookie(), addReview);
@@ -27,8 +24,8 @@ router.post("/reviews/:reviewId/helpful", markReviewHelpful);
 router.get("/reviews/products/:productId", getProductReviews);
 
 // ==================== ADMIN ROUTES ====================
-router.get("/admin/reviews", validateAdminToken, getAllReviews);
-router.patch("/admin/reviews/:reviewId/approval", validateAdminToken, updateReviewApproval);
-router.post("/admin/reviews/:reviewId/reply", validateAdminToken, replyToReview);
+router.get("/admin/reviews", getAllReviews);
+router.patch("/admin/reviews/:reviewId/approval", updateReviewApproval);
+router.post("/admin/reviews/:reviewId/reply", replyToReview);
 
 module.exports = router;

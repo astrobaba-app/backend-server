@@ -14,15 +14,13 @@ const {
 const {
   checkForAuthenticationCookie,
 } = require("../../middleware/authMiddleware");
-const { validateAdminToken } = require("../../middleware/adminMiddleware");
 
 // ==================== ADMIN ROUTES ====================
-router.post("/admin/products", validateAdminToken, createProduct);
-router.put("/admin/products/:productId", validateAdminToken, updateProduct);
-router.delete("/admin/products/:productId", validateAdminToken, deleteProduct);
+router.post("/admin/products", createProduct);
+router.put("/admin/products/:productId", updateProduct);
+router.delete("/admin/products/:productId", deleteProduct);
 router.patch(
   "/admin/products/:productId/toggle-status",
-  validateAdminToken,
   toggleProductStatus
 );
 

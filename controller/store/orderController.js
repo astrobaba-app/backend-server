@@ -1,10 +1,11 @@
 const Order = require("../../model/store/order");
 const Cart = require("../../model/store/cart");
 const Product = require("../../model/store/product");
-const User = require("../../model/user/user");
+const User = require("../../model/user/userAuth");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
-const sequelize = require("../../config/database/database");
+const { sequelize } = require("../../dbConnection/dbConfig");
+const { Op } = require("sequelize");
 const {
   sendOrderConfirmationEmail,
   sendDigitalProductEmail,
@@ -635,7 +636,7 @@ exports.getAllOrders = async (req, res) => {
 
     // Search by order number
     if (search) {
-      where.orderNumber = { [sequelize.Op.iLike]: `%${search}%` };
+      where.orderNumber = { [Op.iLike]: `%${search}%` };
     }
 
     const { count, rows: orders } = await Order.findAndCountAll({
@@ -792,7 +793,7 @@ exports.getOrderStatistics = async (req, res) => {
     const recentOrders = await Order.count({
       where: {
         createdAt: {
-          [sequelize.Op.gte]: startDate,
+          [Op.gte]: startDate,
         },
       },
     });
