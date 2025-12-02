@@ -3,6 +3,8 @@ const User = require("../model/user/userAuth");
 const UserRequest = require("../model/user/userRequest");
 const Kundli = require("../model/horoscope/kundli");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
+const Wallet = require("../model/wallet/wallet");
+const WalletTransaction = require("../model/wallet/walletTransaction");
 const horoscope = require("../model/horoscope/horoscope");
 
 

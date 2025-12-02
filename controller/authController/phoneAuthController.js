@@ -3,6 +3,7 @@ const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
 const { createToken, createMiddlewareToken } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
+const redis = require("../../config/redis/redis");
 
 
 const generateOtp = async (req, res) => {
@@ -27,23 +28,19 @@ const generateOtp = async (req, res) => {
 
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
 
-    // Find or create user to store OTP
+    // Check if user exists (for determining new vs existing user)
     let user = await User.findOne({ where: { mobile } });
+    const isNewUser = !user;
     
-    if (user) {
-      // Update existing user with new OTP
-      await user.update({ otp, otpExpiry });
-    } else {
-      // Create new user with OTP (will be completed after verification)
-      user = await User.create({
-        mobile,
-        otp,
-        otpExpiry,
-        isUserRequested: false,
-      });
-    }
+    // Store OTP in Redis with 5 minutes expiry
+    const otpKey = `user:otp:${mobile}`;
+    await redis.setex(otpKey, 300, JSON.stringify({
+      otp,
+      mobile,
+      isNewUser,
+      createdAt: Date.now()
+    }));
 
     // Send OTP via Twilio
     await handleSendAuthOTP(mobile, otp);
@@ -51,7 +48,7 @@ const generateOtp = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "OTP sent successfully",
-      otp: otp, 
+      otp: otp, // Remove in production
     });
   } catch (error) {
     console.error("Generate OTP error:", error);
@@ -66,7 +63,7 @@ const generateOtp = async (req, res) => {
 
 const verifyOtp = async (req, res) => {
   try {
-    const {  otp } = req.body;
+    const { otp } = req.body;
 
     if (!otp) {
       return res.status(400).json({
@@ -75,35 +72,45 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    // Check if user exists
-    let user = await User.findOne({ where: { otp } });
+    // Find the mobile number associated with this OTP in Redis
+    // We need to scan all user OTP keys to find the matching OTP
+    let mobile = null;
+    let otpData = null;
+    
+    // Get all keys matching the pattern
+    const keys = await redis.keys('user:otp:*');
+    
+    for (const key of keys) {
+      const data = await redis.get(key);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed.otp === otp) {
+          mobile = parsed.mobile;
+          otpData = parsed;
+          // Delete OTP from Redis after successful verification
+          await redis.del(key);
+          break;
+        }
+      }
+    }
 
-    if (!user || !user.otp) {
+    if (!otpData) {
       return res.status(400).json({
         success: false,
-        message: "OTP not found. Please request a new OTP",
+        message: "Invalid or expired OTP",
       });
     }
 
-    // Check if OTP has expired
-    if (!user.otpExpiry || new Date() > user.otpExpiry) {
-      await user.update({ otp: null, otpExpiry: null });
-      return res.status(400).json({
-        success: false,
-        message: "OTP has expired. Please request a new OTP",
+    // Find or create user
+    let user = await User.findOne({ where: { mobile } });
+    
+    if (!user) {
+      // Create new user
+      user = await User.create({
+        mobile,
+        isUserRequested: false,
       });
     }
-
-    // Verify OTP
-    if (user.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    // OTP is valid, clear it from database
-    await user.update({ otp: null, otpExpiry: null });
 
     // Generate tokens and set cookies
     const token = createToken(user);

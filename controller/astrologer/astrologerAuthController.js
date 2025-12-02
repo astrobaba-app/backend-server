@@ -1,0 +1,545 @@
+const Astrologer = require("../../model/astrologer/astrologer");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const redis = require("../../config/redis/redis");
+const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
+const { createToken, createMiddlewareToken } = require("../../services/authService");
+const clearTokenCookie = require("../../services/clearTokenCookie");
+const setTokenCookie = require("../../services/setTokenCookie");
+
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+const sendRegistrationOTP = async (req, res) => {
+  try {
+    const { phoneNumber } = req.body;
+
+    if (!phoneNumber || !/^\d{10}$/.test(phoneNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 10-digit phone number",
+      });
+    }
+
+    // Check if astrologer already exists
+    const existingAstrologer = await Astrologer.findOne({
+      where: { phoneNumber },
+    });
+
+    if (existingAstrologer) {
+      return res.status(400).json({
+        success: false,
+        message: "Astrologer with this phone number already exists",
+      });
+    }
+
+    const otp = generateOTP();
+    
+    // Store OTP in Redis with 10 minutes expiry
+    const otpKey = `astrologer:otp:${phoneNumber}`;
+    await redis.setex(otpKey, 600, JSON.stringify({
+      otp,
+      type: "registration",
+      createdAt: Date.now()
+    }));
+
+    // Send OTP via Twilio
+    await handleSendAuthOTP(phoneNumber, otp);
+
+    res.status(200).json({
+      success: true,
+      message: "OTP sent successfully to your phone number",
+      // Remove in production
+      devOtp: process.env.NODE_ENV === "development" ? otp : undefined,
+    });
+  } catch (error) {
+    console.error("Send registration OTP error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to send OTP",
+      error: error.message,
+    });
+  }
+};
+
+// Verify OTP
+const verifyOTP = async (req, res) => {
+  try {
+    const { phoneNumber, otp } = req.body;
+
+    if (!phoneNumber || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number and OTP are required",
+      });
+    }
+
+    // Get OTP from Redis
+    const otpKey = `astrologer:otp:${phoneNumber}`;
+    const storedData = await redis.get(otpKey);
+
+    if (!storedData) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found or expired. Please request a new OTP",
+      });
+    }
+
+    const otpData = JSON.parse(storedData);
+
+    if (otpData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    // OTP verified successfully - delete from Redis
+    await redis.del(otpKey);
+
+    res.status(200).json({
+      success: true,
+      message: "OTP verified successfully",
+      phoneNumber,
+    });
+  } catch (error) {
+    console.error("Verify OTP error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to verify OTP",
+      error: error.message,
+    });
+  }
+};
+
+// Complete registration
+const completeRegistration = async (req, res) => {
+  try {
+    const {
+      phoneNumber,
+      email,
+      password,
+      fullName,
+      dateOfBirth,
+      languages,
+      skills,
+      yearsOfExperience,
+      bio,
+    } = req.body;
+
+    // Validation
+    if (!phoneNumber || !email || !password || !fullName) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number, email, password, and full name are required",
+      });
+    }
+
+    if (!languages || languages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one language",
+      });
+    }
+
+    if (!skills || skills.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one skill",
+      });
+    }
+
+    // Check if astrologer already exists
+    const existingAstrologer = await Astrologer.findOne({
+      where: { phoneNumber },
+    });
+
+    if (existingAstrologer) {
+      return res.status(400).json({
+        success: false,
+        message: "Astrologer with this phone number already exists",
+      });
+    }
+
+    const existingEmail = await Astrologer.findOne({
+      where: { email },
+    });
+
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already registered",
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Get photo URL from uploaded file (if any)
+    const photo = req.fileUrl || null;
+
+    // Create astrologer
+    const astrologer = await Astrologer.create({
+      phoneNumber,
+      email,
+      password: hashedPassword,
+      fullName,
+      photo,
+      dateOfBirth: dateOfBirth || null,
+      languages,
+      skills,
+      yearsOfExperience: yearsOfExperience || 0,
+      bio: bio || null,
+      isApproved: false,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Registration successful. Your profile is pending approval.",
+      astrologer: {
+        id: astrologer.id,
+        phoneNumber: astrologer.phoneNumber,
+        email: astrologer.email,
+        fullName: astrologer.fullName,
+        photo: astrologer.photo,
+        isApproved: astrologer.isApproved,
+        languages: astrologer.languages,
+        skills: astrologer.skills,
+      },
+    });
+  } catch (error) {
+    console.error("Complete registration error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to complete registration",
+      error: error.message,
+    });
+  }
+};
+
+// Login with email and password
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required",
+      });
+    }
+
+    // Find astrologer
+    const astrologer = await Astrologer.findOne({ where: { email } });
+
+    if (!astrologer) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+
+
+    // Check password
+    const isPasswordValid = await bcrypt.compare(password, astrologer.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+  if (!astrologer.isApproved) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been Pending approval. Please wait for admin approval.",
+      });
+    }
+
+    // Check if account is active
+    if (!astrologer.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been deactivated. Please contact support.",
+      });
+    }
+
+    // Generate JWT token
+    const token = createToken(astrologer);
+    const middlewareToken = createMiddlewareToken(astrologer);
+  
+    setTokenCookie(res, token, middlewareToken);
+
+
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      astrologer: {
+        id: astrologer.id,
+        phoneNumber: astrologer.phoneNumber,
+        email: astrologer.email,
+        fullName: astrologer.fullName,
+        photo: astrologer.photo,
+        isApproved: astrologer.isApproved,
+        isActive: astrologer.isActive,
+        isOnline: astrologer.isOnline,
+        languages: astrologer.languages,
+        skills: astrologer.skills,
+        yearsOfExperience: astrologer.yearsOfExperience,
+        rating: parseFloat(astrologer.rating),
+        totalConsultations: astrologer.totalConsultations,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to login",
+      error: error.message,
+    });
+  }
+};
+
+// Get profile
+const getProfile = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+
+    const astrologer = await Astrologer.findByPk(astrologerId, {
+      attributes: { exclude: ["password"] },
+    });
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      astrologer,
+    });
+  } catch (error) {
+    console.error("Get profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch profile",
+      error: error.message,
+    });
+  }
+};
+
+// Update profile
+const updateProfile = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+    const {
+      fullName,
+      dateOfBirth,
+      languages,
+      skills,
+      yearsOfExperience,
+      bio,
+      pricePerMinute,
+      availability,
+    } = req.body;
+
+    const astrologer = await Astrologer.findByPk(astrologerId);
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    // Update fields
+    const updateData = {};
+    if (fullName) updateData.fullName = fullName;
+    if (req.fileUrl) updateData.photo = req.fileUrl;
+    if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
+    if (languages) updateData.languages = languages;
+    if (skills) updateData.skills = skills;
+    if (yearsOfExperience !== undefined) updateData.yearsOfExperience = yearsOfExperience;
+    if (bio !== undefined) updateData.bio = bio;
+    if (pricePerMinute !== undefined) updateData.pricePerMinute = pricePerMinute;
+    if (availability) updateData.availability = availability;
+
+    await astrologer.update(updateData);
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      astrologer: {
+        id: astrologer.id,
+        fullName: astrologer.fullName,
+        photo: astrologer.photo,
+        dateOfBirth: astrologer.dateOfBirth,
+        languages: astrologer.languages,
+        skills: astrologer.skills,
+        yearsOfExperience: astrologer.yearsOfExperience,
+        bio: astrologer.bio,
+        pricePerMinute: parseFloat(astrologer.pricePerMinute),
+        availability: astrologer.availability,
+      },
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update profile",
+      error: error.message,
+    });
+  }
+};
+
+// Logout
+const logout = async (req, res) => {
+  try {
+    clearTokenCookie(res);
+
+    res.status(200).json({
+      success: true,
+      message: "Logout successful",
+    });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to logout",
+      error: error.message,
+    });
+  }
+};
+
+// Toggle online/offline status
+const toggleOnlineStatus = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+
+    const astrologer = await Astrologer.findByPk(astrologerId);
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    // Toggle the status
+    const newStatus = !astrologer.isOnline;
+    await astrologer.update({ isOnline: newStatus });
+
+    res.status(200).json({
+      success: true,
+      message: `Status changed to ${newStatus ? "online" : "offline"}`,
+      isOnline: newStatus,
+    });
+  } catch (error) {
+    console.error("Toggle online status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to toggle online status",
+      error: error.message,
+    });
+  }
+};
+
+// Set online status (go online)
+const goOnline = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+
+    await Astrologer.update(
+      { isOnline: true },
+      { where: { id: astrologerId } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "You are now online",
+      isOnline: true,
+    });
+  } catch (error) {
+    console.error("Go online error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to go online",
+      error: error.message,
+    });
+  }
+};
+
+// Set offline status (go offline)
+const goOffline = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+
+    await Astrologer.update(
+      { isOnline: false },
+      { where: { id: astrologerId } }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "You are now offline",
+      isOnline: false,
+    });
+  } catch (error) {
+    console.error("Go offline error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to go offline",
+      error: error.message,
+    });
+  }
+};
+
+// Get online status
+const getOnlineStatus = async (req, res) => {
+  try {
+    const astrologerId = req.astrologer.id;
+
+    const astrologer = await Astrologer.findByPk(astrologerId, {
+      attributes: ["id", "fullName", "isOnline"],
+    });
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      isOnline: astrologer.isOnline,
+    });
+  } catch (error) {
+    console.error("Get online status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get online status",
+      error: error.message,
+    });
+  }
+};
+
+module.exports = {
+  sendRegistrationOTP,
+  verifyOTP,
+  completeRegistration,
+  login,
+  getProfile,
+  updateProfile,
+  logout,
+  toggleOnlineStatus,
+  goOnline,
+  goOffline,
+  getOnlineStatus,
+};
