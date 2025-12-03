@@ -7,6 +7,8 @@ const {
   sendAstrologerApprovalEmail,
   sendAstrologerRejectionEmail,
 } = require("../../emailService/adminApproval");
+const { createMiddlewareToken, createToken } = require("../../services/authService");
+const setTokenCookie = require("../../services/setTokenCookie");
 
 
 const register = async (req, res) => {

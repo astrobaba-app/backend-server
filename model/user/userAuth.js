@@ -58,6 +58,18 @@ const User = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+      currentAddress: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+        cityStateCountry: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    pincode: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     tableName: "users",

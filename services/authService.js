@@ -8,6 +8,7 @@ function createToken(user) {
 
     const payload = {
       id:user.id,
+      role: user.role || null
     };
     return JWT.sign(payload, process.env.JWT_SECRET, { expiresIn: "30d" });
   } catch (error) {
@@ -18,7 +19,9 @@ function createToken(user) {
 
 const createMiddlewareToken = (user) => {
   return JWT.sign(
-    { id: user.id }, 
+    { id: user.id,
+      role: user.role || null
+     }, 
     process.env.JWT_SECRET,
     { expiresIn: "30d" }
   );

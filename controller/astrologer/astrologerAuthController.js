@@ -38,11 +38,11 @@ const sendRegistrationOTP = async (req, res) => {
     
     // Store OTP in Redis with 10 minutes expiry
     const otpKey = `astrologer:otp:${phoneNumber}`;
-    await redis.setex(otpKey, 600, JSON.stringify({
+    await redis.setex(otpKey, 600, {
       otp,
       type: "registration",
       createdAt: Date.now()
-    }));
+    });
 
     // Send OTP via Twilio
     await handleSendAuthOTP(phoneNumber, otp);
@@ -50,8 +50,7 @@ const sendRegistrationOTP = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "OTP sent successfully to your phone number",
-      // Remove in production
-      devOtp: process.env.NODE_ENV === "development" ? otp : undefined,
+     otp :otp
     });
   } catch (error) {
     console.error("Send registration OTP error:", error);
@@ -86,7 +85,8 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const otpData = JSON.parse(storedData);
+    // Upstash Redis automatically parses JSON, so data is already an object
+    const otpData = typeof storedData === 'string' ? JSON.parse(storedData) : storedData;
 
     if (otpData.otp !== otp) {
       return res.status(400).json({
@@ -136,14 +136,39 @@ const completeRegistration = async (req, res) => {
       });
     }
 
-    if (!languages || languages.length === 0) {
+    // Ensure languages and skills are arrays
+    let languagesArray = languages;
+    if (typeof languages === 'string') {
+      try {
+        languagesArray = JSON.parse(languages);
+      } catch (e) {
+        languagesArray = languages.split(',').map(lang => lang.trim());
+      }
+    }
+    if (!Array.isArray(languagesArray)) {
+      languagesArray = [languagesArray];
+    }
+
+    let skillsArray = skills;
+    if (typeof skills === 'string') {
+      try {
+        skillsArray = JSON.parse(skills);
+      } catch (e) {
+        skillsArray = skills.split(',').map(skill => skill.trim());
+      }
+    }
+    if (!Array.isArray(skillsArray)) {
+      skillsArray = [skillsArray];
+    }
+
+    if (!languagesArray || languagesArray.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Please select at least one language",
       });
     }
 
-    if (!skills || skills.length === 0) {
+    if (!skillsArray || skillsArray.length === 0) {
       return res.status(400).json({
         success: false,
         message: "Please select at least one skill",
@@ -187,8 +212,8 @@ const completeRegistration = async (req, res) => {
       fullName,
       photo,
       dateOfBirth: dateOfBirth || null,
-      languages,
-      skills,
+      languages: languagesArray,
+      skills: skillsArray,
       yearsOfExperience: yearsOfExperience || 0,
       bio: bio || null,
       isApproved: false,

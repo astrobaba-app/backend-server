@@ -26,6 +26,7 @@ const Product = require("../store/product");
 const Cart = require("../store/cart");
 const Order = require("../store/order");
 const ProductReview = require("../store/productReview");
+const AstrologerEarning = require("../astrologer/astrologerEarning");
 
 
   // User has many UserRequests
@@ -448,5 +449,29 @@ const ProductReview = require("../store/productReview");
   ProductReview.belongsTo(Order, {
     foreignKey: "orderId",
     as: "order",
+  });
+
+  // Astrologer - AstrologerEarning
+  Astrologer.hasMany(AstrologerEarning, {
+    foreignKey: "astrologerId",
+    as: "earnings",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerEarning.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
+  // User - AstrologerEarning
+  User.hasMany(AstrologerEarning, {
+    foreignKey: "userId",
+    as: "astrologerEarnings",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerEarning.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
   });
 
