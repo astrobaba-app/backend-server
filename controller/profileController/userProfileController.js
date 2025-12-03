@@ -5,20 +5,7 @@ const getProfile = async (req, res) => {
   try {
     const userId = req.user.id; 
 
-    const user = await User.findByPk(userId, {
-      attributes: [
-        "id",
-        "fullName",
-        "email",
-        "mobile",
-        "gender",
-        "dateOfbirth",
-        "timeOfbirth",
-        "placeOfBirth",
-        "isUserRequested",
-        "createdAt",
-      ],
-    });
+    const user = await User.findByPk(userId);
 
     if (!user) {
       return res.status(404).json({
@@ -51,6 +38,11 @@ const updateProfile = async (req, res) => {
       dateOfbirth,
       timeOfbirth,
       placeOfBirth,
+      currentAddress,
+      city,
+      state,
+      country,
+      pincode
     } = req.body;
 
     const user = await User.findByPk(userId);
@@ -69,6 +61,11 @@ const updateProfile = async (req, res) => {
     if (dateOfbirth !== undefined) user.dateOfbirth = dateOfbirth;
     if (timeOfbirth !== undefined) user.timeOfbirth = timeOfbirth;
     if (placeOfBirth !== undefined) user.placeOfBirth = placeOfBirth;
+    if (currentAddress !== undefined) user.currentAddress = currentAddress;
+    if (city !== undefined) user.city = city;
+    if (state !== undefined) user.state = state;
+    if (country !== undefined) user.country = country;
+    if (pincode !== undefined) user.pincode = pincode;
     await user.save();
 
     res.status(200).json({
@@ -83,6 +80,11 @@ const updateProfile = async (req, res) => {
         dateOfbirth: user.dateOfbirth,
         timeOfbirth: user.timeOfbirth,
         placeOfBirth: user.placeOfBirth,
+        currentAddress: user.currentAddress,
+        city: user.city,
+        state: user.state,
+        country: user.country,
+        pincode: user.pincode,
       },
     });
   } catch (error) {

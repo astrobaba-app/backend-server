@@ -332,7 +332,8 @@ const login = async (req, res) => {
 // Get profile
 const getProfile = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
+    console.log("Astrologer ID from req.astrologer:", astrologerId);
 
     const astrologer = await Astrologer.findByPk(astrologerId, {
       attributes: { exclude: ["password"] },
@@ -362,7 +363,7 @@ const getProfile = async (req, res) => {
 // Update profile
 const updateProfile = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const {
       fullName,
       dateOfBirth,
@@ -394,6 +395,7 @@ const updateProfile = async (req, res) => {
     if (bio !== undefined) updateData.bio = bio;
     if (pricePerMinute !== undefined) updateData.pricePerMinute = pricePerMinute;
     if (availability) updateData.availability = availability;
+    if (req.fileUrl) updateData.photo = req.fileUrl;  
 
     await astrologer.update(updateData);
 
@@ -445,7 +447,7 @@ const logout = async (req, res) => {
 // Toggle online/offline status
 const toggleOnlineStatus = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
 
     const astrologer = await Astrologer.findByPk(astrologerId);
 
@@ -478,7 +480,7 @@ const toggleOnlineStatus = async (req, res) => {
 // Set online status (go online)
 const goOnline = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
 
     await Astrologer.update(
       { isOnline: true },
@@ -503,7 +505,7 @@ const goOnline = async (req, res) => {
 // Set offline status (go offline)
 const goOffline = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
 
     await Astrologer.update(
       { isOnline: false },
@@ -528,7 +530,7 @@ const goOffline = async (req, res) => {
 // Get online status
 const getOnlineStatus = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
 
     const astrologer = await Astrologer.findByPk(astrologerId, {
       attributes: ["id", "fullName", "isOnline"],
