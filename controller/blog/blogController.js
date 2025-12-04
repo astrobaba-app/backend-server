@@ -1,10 +1,12 @@
 const Blog = require("../../model/blog/blog");
+const BlogLike = require("../../model/blog/blogLike");
 const Astrologer = require("../../model/astrologer/astrologer");
+const { addLikeStatusToBlogs, addLikeStatus } = require("../../services/blogLikeService");
+const { getClientInfo } = require("../../utils/clientInfo");
 
-// Create blog (astrologer only)
 const createBlog = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { title, description } = req.body;
 
     if (!title || !description) {
@@ -144,7 +146,7 @@ const getBlogById = async (req, res) => {
 // Get blogs by logged-in astrologer (astrologer only)
 const getMyBlogs = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { page = 1, limit = 10 } = req.query;
     const offset = (page - 1) * limit;
 
@@ -178,7 +180,7 @@ const getMyBlogs = async (req, res) => {
 // Update blog (astrologer only - own blogs)
 const updateBlog = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId =  req.user.id;
     const { blogId } = req.params;
     const { title, description, isPublished } = req.body;
 
@@ -220,7 +222,7 @@ const updateBlog = async (req, res) => {
 // Delete blog (astrologer only - own blogs)
 const deleteBlog = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId =  req.user.id;
     const { blogId } = req.params;
 
     const blog = await Blog.findOne({
@@ -264,6 +266,36 @@ const likeBlog = async (req, res) => {
       });
     }
 
+    // Get client information (handles proxies, load balancers, CDNs)
+    const { userId, ipAddress, userAgent } = getClientInfo(req);
+    console.log("User ID:", userId);
+    console.log("IP Address:", ipAddress);
+    console.log("User Agent:", userAgent);
+
+    // Check if user already liked this blog
+    const existingLike = await BlogLike.findOne({
+      where: {
+        blogId,
+        ...(userId ? { userId } : { ipAddress }),
+      },
+    });
+
+    if (existingLike) {
+      return res.status(400).json({
+        success: false,
+        message: "You have already liked this blog",
+      });
+    }
+
+    // Create like record
+    await BlogLike.create({
+      blogId,
+      userId,
+      ipAddress,
+      userAgent,
+    });
+
+    // Increment blog likes counter
     await blog.increment("likes");
 
     res.status(200).json({
@@ -281,6 +313,47 @@ const likeBlog = async (req, res) => {
   }
 };
 
+// Check if user has liked a blog
+const checkBlogLikeStatus = async (req, res) => {
+  try {
+    const { blogId } = req.params;
+
+    const blog = await Blog.findByPk(blogId);
+
+    if (!blog) {
+      return res.status(404).json({
+        success: false,
+        message: "Blog not found",
+      });
+    }
+
+    // Get client information (handles proxies, load balancers, CDNs)
+    const { userId, ipAddress } = getClientInfo(req);
+    console.log("User ID:", userId);
+    console.log("IP Address:", ipAddress);
+
+    const existingLike = await BlogLike.findOne({
+      where: {
+        blogId,
+        ...(userId ? { userId } : { ipAddress }),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      hasLiked: !!existingLike,
+      likes: blog.likes,
+    });
+  } catch (error) {
+    console.error("Check blog like status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check like status",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createBlog,
   getAllBlogs,
@@ -289,4 +362,5 @@ module.exports = {
   updateBlog,
   deleteBlog,
   likeBlog,
+  checkBlogLikeStatus,
 };

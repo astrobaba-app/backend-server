@@ -7,7 +7,7 @@ const { Op } = require("sequelize");
 const followAstrologer = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { astrologerId } = req.body;
+    const { astrologerId } = req.params;
 
     if (!astrologerId) {
       return res.status(400).json({

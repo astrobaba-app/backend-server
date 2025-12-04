@@ -8,6 +8,7 @@ const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
 const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
+const BlogLike = require("../blog/blogLike");
 const Review = require("../review/review");
 const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
@@ -122,6 +123,30 @@ const AstrologerEarning = require("../astrologer/astrologerEarning");
   Blog.belongsTo(Astrologer, {
     foreignKey: "astrologerId",
     as: "astrologer",
+  });
+
+  // Blog - BlogLike
+  Blog.hasMany(BlogLike, {
+    foreignKey: "blogId",
+    as: "blogLikes",
+    onDelete: "CASCADE",
+  });
+
+  BlogLike.belongsTo(Blog, {
+    foreignKey: "blogId",
+    as: "blog",
+  });
+
+  // User - BlogLike
+  User.hasMany(BlogLike, {
+    foreignKey: "userId",
+    as: "blogLikes",
+    onDelete: "CASCADE",
+  });
+
+  BlogLike.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
   });
 
   // Review associations

@@ -28,6 +28,9 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 
+// Trust proxy to get real client IP (for production with load balancers/proxies)
+app.set('trust proxy', true);
+
 
 // Routes
 const phoneAuthRoute = require("./routes/authRoute/phoneAuthRoute");

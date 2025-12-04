@@ -13,15 +13,15 @@ const {
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // User routes
-router.post("/follow", checkForAuthenticationCookie(), followAstrologer);
-router.delete("/unfollow/:astrologerId", checkForAuthenticationCookie(), unfollowAstrologer);
-router.get("/my-following", checkForAuthenticationCookie(), getMyFollowing);
+router.post("/follow-astro/:astrologerId", checkForAuthenticationCookie(), followAstrologer);
+router.delete("/unfollow-astro/:astrologerId", checkForAuthenticationCookie(), unfollowAstrologer);
+router.get("/my-following-astro", checkForAuthenticationCookie(), getMyFollowing);
 router.get("/check/:astrologerId", checkForAuthenticationCookie(), checkIfFollowing);
 router.get("/astrologers-with-status", checkForAuthenticationCookie(), getAstrologersWithFollowStatus);
 
 // Astrologer routes
-router.get("/my-followers", getMyFollowers);
-router.get("/my-stats", getFollowerStats);
+router.get("/my-followers-user",checkForAuthenticationCookie(), getMyFollowers);
+router.get("/my-stats-user", checkForAuthenticationCookie(), getFollowerStats);
 
 // Public routes
 router.get("/count/:astrologerId", getFollowerCount);
