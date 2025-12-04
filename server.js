@@ -50,8 +50,9 @@ const followRoute = require("./routes/follow/followRoute");
 const assistantRoute = require("./routes/assistant/assistantRoute");
 const supportRoute = require("./routes/support/supportRoute");
 const storeRoute = require("./routes/store/storeRoute");
+const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 
-app.use("/api/auth", phoneAuthRoute);
+app.use("/api/auth", phoneAuthRoute,googleAuthRoute);
 app.use("/api/user", userProfileRoute);
 app.use("/api/kundli", kundliRoute);
 app.use("/api/horoscope", dailyHoroscopeRoute);
