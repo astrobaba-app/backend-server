@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const multer = require("multer");
 const {
   createTicket,
   getMyTickets,
@@ -14,30 +13,48 @@ const {
   getTicketStatistics,
 } = require("../../controller/support/supportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
+const {authorizeRoles} = require("../../middleware/roleMiddleware");
+const upload = require("../../config/uploadConfig/supabaseUpload");
 
 // User routes
-router.post(
-  "/create",
+router.post("/user/create", checkForAuthenticationCookie(), ...upload.array("images", 5), createTicket);
+router.get("/user/my-tickets", checkForAuthenticationCookie(), getMyTickets);
+router.get(
+  "/user/ticket/:ticketId",
   checkForAuthenticationCookie(),
-  createTicket
+  getTicketDetails
 );
-router.get("/my-tickets", checkForAuthenticationCookie(), getMyTickets);
-router.get("/ticket/:ticketId", checkForAuthenticationCookie(), getTicketDetails);
 router.post(
-  "/ticket/:ticketId/reply",
+  "/user/ticket/:ticketId/reply",
   checkForAuthenticationCookie(),
   replyToTicket
 );
 
 // Admin routes
-router.get("/admin/tickets", getAllTickets);
-router.get("/admin/ticket/:ticketId", getTicketDetailsAdmin);
+router.get(
+  "/admin/tickets",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAllTickets
+);
+router.get(
+  "/admin/ticket/:ticketId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getTicketDetailsAdmin
+);
 router.post(
   "/admin/ticket/:ticketId/reply",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  ...upload.array("images", 5),
   replyToTicketAdmin
 );
-router.patch("/admin/ticket/:ticketId/status", updateTicketStatus);
-router.patch("/admin/ticket/:ticketId/assign", assignTicket);
-router.get("/admin/statistics", getTicketStatistics);
+router.patch(
+  "/admin/ticket/:ticketId/status",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateTicketStatus
+);
 
 module.exports = router;

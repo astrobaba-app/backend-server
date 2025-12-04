@@ -11,16 +11,35 @@ const {
   getFeaturedProducts,
   getCategories,
 } = require("../../controller/store/productController");
-const {
-  checkForAuthenticationCookie,
-} = require("../../middleware/authMiddleware");
+const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
+const { authorizeRoles } = require("../../middleware/roleMiddleware");
+const upload = require("../../config/uploadConfig/supabaseUpload");
 
 // ==================== ADMIN ROUTES ====================
-router.post("/admin/products", createProduct);
-router.put("/admin/products/:productId", updateProduct);
-router.delete("/admin/products/:productId", deleteProduct);
+router.post(
+  "/admin/products/create",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  ...upload.array("images", 10),
+  createProduct
+);
+router.put(
+  "/admin/products/:productId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  ...upload.array("images", 10),
+  updateProduct
+);
+router.delete(
+  "/admin/products/:productId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  deleteProduct
+);
 router.patch(
   "/admin/products/:productId/toggle-status",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
   toggleProductStatus
 );
 

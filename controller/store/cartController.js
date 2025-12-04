@@ -6,7 +6,7 @@ const User = require("../../model/user/userAuth");
 exports.addToCart = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { productId, quantity = 1 } = req.body;
+    const { productId } = req.body;
 
     if (!productId) {
       return res.status(400).json({
@@ -32,7 +32,7 @@ exports.addToCart = async (req, res) => {
     }
 
     // Check stock for physical products
-    if (product.productType === "physical" && product.stock < quantity) {
+    if (product.productType === "physical" && product.stock < 1) {
       return res.status(400).json({
         success: false,
         message: `Only ${product.stock} items available in stock`,
@@ -46,7 +46,7 @@ exports.addToCart = async (req, res) => {
 
     if (existingCartItem) {
       // Update quantity
-      const newQuantity = existingCartItem.quantity + quantity;
+      const newQuantity = existingCartItem.quantity + 1;
 
       // Check stock again
       if (product.productType === "physical" && product.stock < newQuantity) {
@@ -70,7 +70,6 @@ exports.addToCart = async (req, res) => {
     const cartItem = await Cart.create({
       userId,
       productId,
-      quantity,
       priceAtAdd: currentPrice,
     });
 

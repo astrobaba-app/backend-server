@@ -23,7 +23,6 @@ exports.createProduct = async (req, res) => {
       shortDescription,
       price,
       discountPrice,
-      images,
       category,
       productType,
       digitalFileUrl,
@@ -33,10 +32,38 @@ exports.createProduct = async (req, res) => {
       dimensions,
       tags,
       isFeatured,
-      seoTitle,
-      seoDescription,
-      seoKeywords,
     } = req.body;
+
+    // Get uploaded image URLs from upload middleware
+    const images = req.fileUrls || [];
+
+    // Parse tags if it's a string
+    let parsedTags = [];
+    if (tags) {
+      if (typeof tags === 'string') {
+        try {
+          parsedTags = JSON.parse(tags);
+        } catch {
+          parsedTags = tags.split(',').map(t => t.trim());
+        }
+      } else if (Array.isArray(tags)) {
+        parsedTags = tags;
+      }
+    }
+
+    // Parse dimensions if it's a string
+    let parsedDimensions = null;
+    if (dimensions) {
+      if (typeof dimensions === 'string') {
+        try {
+          parsedDimensions = JSON.parse(dimensions);
+        } catch {
+          parsedDimensions = dimensions;
+        }
+      } else {
+        parsedDimensions = dimensions;
+      }
+    }
 
     // Validate required fields
     if (!productName || !description || !price || !category || !productType) {
@@ -70,19 +97,16 @@ exports.createProduct = async (req, res) => {
       shortDescription,
       price,
       discountPrice,
-      images: images || [],
+      images,
       category,
       productType,
       digitalFileUrl,
       downloadLinkExpiry: downloadLinkExpiry || 30,
       stock: productType === "digital" ? 999999 : stock || 0, // Digital products have unlimited stock
       weight,
-      dimensions,
-      tags: tags || [],
+      dimensions: parsedDimensions,
+      tags: parsedTags,
       isFeatured: isFeatured || false,
-      seoTitle,
-      seoDescription,
-      seoKeywords: seoKeywords || [],
     });
 
     return res.status(201).json({
@@ -112,6 +136,11 @@ exports.updateProduct = async (req, res) => {
         success: false,
         message: "Product not found",
       });
+    }
+
+    // If new images uploaded, use them; otherwise keep existing
+    if (req.fileUrls && req.fileUrls.length > 0) {
+      updateData.images = req.fileUrls;
     }
 
     // Update slug if productName changed
@@ -243,8 +272,7 @@ exports.getAllProducts = async (req, res) => {
     if (search) {
       where[Op.or] = [
         { productName: { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } },
-        { shortDescription: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } }
       ];
     }
 

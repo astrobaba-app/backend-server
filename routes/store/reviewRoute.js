@@ -25,7 +25,7 @@ router.get("/reviews/products/:productId", getProductReviews);
 
 // ==================== ADMIN ROUTES ====================
 router.get("/admin/reviews", getAllReviews);
-router.patch("/admin/reviews/:reviewId/approval", updateReviewApproval);
-router.post("/admin/reviews/:reviewId/reply", replyToReview);
+// router.patch("/admin/reviews/:reviewId/approval", updateReviewApproval);
+// router.post("/admin/reviews/:reviewId/reply", replyToReview);
 
 module.exports = router;

@@ -8,11 +8,10 @@ const {
   sendTicketReplyEmail,
   sendTicketStatusUpdateEmail,
 } = require("../../emailService/supportTicketEmail");
-const { uploadToSupabase } = require("../../config/uploadConfig/supabaseUpload");
+const {
+  uploadToSupabase,
+} = require("../../config/uploadConfig/supabaseUpload");
 
-/**
- * Generate unique ticket number
- */
 const generateTicketNumber = async () => {
   const year = new Date().getFullYear();
   const randomNum = Math.floor(Math.random() * 1000000)
@@ -20,7 +19,6 @@ const generateTicketNumber = async () => {
     .padStart(6, "0");
   const ticketNumber = `TKT-${year}-${randomNum}`;
 
-  // Check if ticket number already exists (very unlikely but safe)
   const existing = await SupportTicket.findOne({
     where: { ticketNumber },
   });
@@ -34,13 +32,11 @@ const generateTicketNumber = async () => {
 
 // ============= USER ROUTES =============
 
-/**
- * Create a new support ticket (User)
- */
 const createTicket = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { subject, description, category = "general", priority = "medium" } = req.body;
+    console.log("User ID creating ticket:", userId);
+    const { subject, description, category, priority = "medium" } = req.body;
 
     if (!subject || !description) {
       return res.status(400).json({
@@ -49,21 +45,8 @@ const createTicket = async (req, res) => {
       });
     }
 
-    // Handle image uploads
-    let imageUrls = [];
-    if (req.files && req.files.length > 0) {
-      for (const file of req.files) {
-        const uploadResult = await uploadToSupabase(
-          file.buffer,
-          file.originalname,
-          "support-tickets"
-        );
-
-        if (uploadResult.success) {
-          imageUrls.push(uploadResult.url);
-        }
-      }
-    }
+    // Get uploaded image URLs from upload middleware
+    const imageUrls = req.fileUrls || [];
 
     // Generate unique ticket number
     const ticketNumber = await generateTicketNumber();
@@ -90,7 +73,8 @@ const createTicket = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: "Support ticket created successfully. Check your email for confirmation.",
+      message:
+        "Support ticket created successfully. Check your email for confirmation.",
       ticket: {
         id: ticket.id,
         ticketNumber: ticket.ticketNumber,
@@ -367,7 +351,7 @@ const getAllTickets = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "email", "phoneNumber"],
+          attributes: ["id", "fullName", "email", "mobile"],
         },
         {
           model: Admin,
@@ -410,7 +394,7 @@ const getTicketDetailsAdmin = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "email", "phoneNumber"],
+          attributes: ["id", "fullName", "email", "mobile"],
         },
         {
           model: Admin,
@@ -481,7 +465,7 @@ const getTicketDetailsAdmin = async (req, res) => {
  */
 const replyToTicketAdmin = async (req, res) => {
   try {
-    const adminId = req.admin.id;
+    const adminId = req.user.id;
     const { ticketId } = req.params;
     const { message, isInternal = false } = req.body;
 
@@ -544,7 +528,16 @@ const replyToTicketAdmin = async (req, res) => {
     // Send email to user (only if not internal note)
     if (!isInternal) {
       const admin = await Admin.findByPk(adminId, { attributes: ["name"] });
-      await sendTicketReplyEmail(ticket.user, ticket, reply, admin.name);
+      try {
+        await sendTicketReplyEmail(ticket.user, ticket, reply, admin.name);
+      } catch (error) {
+        console.error("Email send error e", error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to send mail reply",
+          error: error.message,
+        });
+      }
     }
 
     res.status(201).json({
@@ -684,7 +677,9 @@ const getTicketStatistics = async (req, res) => {
     daysAgo.setDate(daysAgo.getDate() - parseInt(days));
 
     const totalTickets = await SupportTicket.count();
-    const openTickets = await SupportTicket.count({ where: { status: "open" } });
+    const openTickets = await SupportTicket.count({
+      where: { status: "open" },
+    });
     const inProgressTickets = await SupportTicket.count({
       where: { status: "in_progress" },
     });
@@ -701,11 +696,17 @@ const getTicketStatistics = async (req, res) => {
 
     // By priority
     const urgentTickets = await SupportTicket.count({
-      where: { priority: "urgent", status: { [Op.notIn]: ["closed", "resolved"] } },
+      where: {
+        priority: "urgent",
+        status: { [Op.notIn]: ["closed", "resolved"] },
+      },
     });
 
     const highPriorityTickets = await SupportTicket.count({
-      where: { priority: "high", status: { [Op.notIn]: ["closed", "resolved"] } },
+      where: {
+        priority: "high",
+        status: { [Op.notIn]: ["closed", "resolved"] },
+      },
     });
 
     // By category

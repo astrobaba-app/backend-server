@@ -154,10 +154,9 @@ const getAstrologerReviews = async (req, res) => {
 const getMyReview = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { astrologerId } = req.params;
 
     const review = await Review.findOne({
-      where: { userId, astrologerId },
+      where: { userId},
       include: [
         {
           model: User,
@@ -285,7 +284,7 @@ const deleteReview = async (req, res) => {
 // Add reply to review (astrologer only - own reviews)
 const addReply = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { reviewId } = req.params;
     const { reply } = req.body;
 
@@ -338,7 +337,7 @@ const addReply = async (req, res) => {
 // Update reply (astrologer only - own reply)
 const updateReply = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { reviewId } = req.params;
     const { reply } = req.body;
 
@@ -390,7 +389,7 @@ const updateReply = async (req, res) => {
 // Delete reply (astrologer only - own reply)
 const deleteReply = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { reviewId } = req.params;
 
     const review = await Review.findOne({
@@ -434,7 +433,7 @@ const deleteReply = async (req, res) => {
 // Get reviews that need reply (astrologer only)
 const getReviewsNeedingReply = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { page = 1, limit = 10 } = req.query;
     const offset = (page - 1) * limit;
 
