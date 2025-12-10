@@ -22,18 +22,6 @@ const sendRegistrationOTP = async (req, res) => {
       });
     }
 
-    // Check if astrologer already exists
-    const existingAstrologer = await Astrologer.findOne({
-      where: { phoneNumber },
-    });
-
-    if (existingAstrologer) {
-      return res.status(400).json({
-        success: false,
-        message: "Astrologer with this phone number already exists",
-      });
-    }
-
     const otp = generateOTP();
     
     // Store OTP in Redis with 10 minutes expiry
