@@ -25,15 +25,13 @@ const createKundli = async (req, res) => {
       timeOfbirth,
       placeOfBirth,
       gender,
-      latitude,
-      longitude,
     } = req.body;
 
     // Validate required fields
-    if (!timeOfbirth || !placeOfBirth || !gender || !latitude || !longitude) {
+    if (!timeOfbirth || !placeOfBirth || !gender) {
       return res.status(400).json({
         success: false,
-        message: "All birth details are required (timeOfbirth, placeOfBirth, gender, latitude, longitude)",
+        message: "All birth details are required (timeOfbirth, placeOfBirth, gender)",
       });
     }
 
@@ -45,8 +43,6 @@ const createKundli = async (req, res) => {
       timeOfbirth,
       placeOfBirth,
       gender,
-      latitude,
-      longitude,
     });
 
     console.log("User request created, generating kundli data...");
