@@ -54,6 +54,7 @@ const assistantRoute = require("./routes/assistant/assistantRoute");
 const supportRoute = require("./routes/support/supportRoute");
 const storeRoute = require("./routes/store/storeRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
+const aiChatRoute = require("./routes/aiChat/aiChatRoute");
 
 app.use("/api/auth", phoneAuthRoute,googleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -75,6 +76,7 @@ app.use("/api/follow", followRoute);
 app.use("/api/assistant", assistantRoute);
 app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
+app.use("/api/ai-chat", aiChatRoute);
 
 initDB(() => {
   app.listen(PORT, () => {

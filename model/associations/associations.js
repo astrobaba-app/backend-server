@@ -28,6 +28,8 @@ const Cart = require("../store/cart");
 const Order = require("../store/order");
 const ProductReview = require("../store/productReview");
 const AstrologerEarning = require("../astrologer/astrologerEarning");
+const AIChatSession = require("../aiChat/aiChatSession");
+const AIChatMessage = require("../aiChat/aiChatMessage");
 
 
   // User has many UserRequests
@@ -498,5 +500,29 @@ const AstrologerEarning = require("../astrologer/astrologerEarning");
   AstrologerEarning.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
+  });
+
+  // User - AI Chat Sessions
+  User.hasMany(AIChatSession, {
+    foreignKey: "userId",
+    as: "aiChatSessions",
+    onDelete: "CASCADE",
+  });
+
+  AIChatSession.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // AI Chat Session - Messages
+  AIChatSession.hasMany(AIChatMessage, {
+    foreignKey: "sessionId",
+    as: "messages",
+    onDelete: "CASCADE",
+  });
+
+  AIChatMessage.belongsTo(AIChatSession, {
+    foreignKey: "sessionId",
+    as: "session",
   });
 
