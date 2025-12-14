@@ -28,7 +28,9 @@ const createKundli = async (req, res) => {
       latitude,
       longitude,
     } = req.body;
-
+    console.log("Creating kundli for user:", req.body);
+    console.log("User ID:", latitude, longitude);
+   console.log("User ID:", placeOfBirth);
     // Validate required fields
     if (!timeOfbirth || !placeOfBirth || !gender) {
       return res.status(400).json({

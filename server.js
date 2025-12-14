@@ -58,6 +58,7 @@ const supportRoute = require("./routes/support/supportRoute");
 const storeRoute = require("./routes/store/storeRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
+const mapsRoute = require("./routes/maps/mapsRoute");
 
 app.use("/api/auth", phoneAuthRoute,googleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -80,6 +81,7 @@ app.use("/api/assistant", assistantRoute);
 app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/ai-chat", aiChatRoute);
+app.use("/api/maps", mapsRoute);
 
 // WebSocket server for AI voice calls
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });

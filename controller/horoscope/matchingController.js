@@ -53,6 +53,8 @@ const createMatching = async (req, res) => {
       girlLongitude,
     } = req.body;
 
+    console.log("Creating kundli matching for user:", req.body);
+
     // Validate required fields
     const requiredFields = {
       boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude,
