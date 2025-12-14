@@ -3,9 +3,12 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const initDB = require("./dbConnection/dbSync");
+const http = require("http");
+const { WebSocketServer } = require("ws");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
+const server = http.createServer(app);
 
 const allowedOrigins = [process.env.FRONTEND_URL,process.env.FRONTEND_URL1];
 app.use(
@@ -78,8 +81,72 @@ app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/ai-chat", aiChatRoute);
 
+// WebSocket server for AI voice calls
+const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });
+const { handleVoiceWebSocket } = require("./controller/aiChat/aiVoiceProxyController");
+const { validateToken } = require("./services/authService");
+const { parse } = require("cookie");
+
+wss.on('connection', async (ws, req) => {
+  console.log('WebSocket connection attempt');
+  
+  try {
+    // Parse and authenticate token from cookies or headers
+    let token;
+    
+    if (req.headers.cookie) {
+      const parsedCookies = parse(req.headers.cookie);
+      token = parsedCookies.token;
+    }
+    
+    if (!token && req.headers.authorization) {
+      const authHeader = req.headers.authorization;
+      if (authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
+      }
+    }
+    
+    if (!token) {
+      console.error('No token found in WebSocket request');
+      ws.send(JSON.stringify({ 
+        type: 'auth_error', 
+        error: { message: 'No token found. Please login.' } 
+      }));
+      ws.close();
+      return;
+    }
+    
+    const userPayload = validateToken(token);
+    if (!userPayload) {
+      console.error('Invalid or expired token');
+      ws.send(JSON.stringify({ 
+        type: 'auth_error', 
+        error: { message: 'Invalid or expired token.' } 
+      }));
+      ws.close();
+      return;
+    }
+    
+    // Attach user to request
+    req.user = userPayload;
+    console.log('User authenticated:', userPayload.id);
+    
+    // Handle the voice WebSocket connection
+    handleVoiceWebSocket(ws, req);
+    
+  } catch (error) {
+    console.error('WebSocket authentication error:', error);
+    ws.send(JSON.stringify({ 
+      type: 'auth_error', 
+      error: { message: 'Authentication failed.' } 
+    }));
+    ws.close();
+  }
+});
+
 initDB(() => {
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`WebSocket server ready at ws://localhost:${PORT}/api/ai-voice-ws`);
   });
 });

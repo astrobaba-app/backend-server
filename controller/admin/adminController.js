@@ -9,6 +9,7 @@ const {
 } = require("../../emailService/adminApproval");
 const { createMiddlewareToken, createToken } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
+const clearTokenCookie = require("../../services/clearTokenCookie");
 
 
 const register = async (req, res) => {

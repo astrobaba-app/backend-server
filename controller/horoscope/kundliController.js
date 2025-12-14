@@ -25,6 +25,8 @@ const createKundli = async (req, res) => {
       timeOfbirth,
       placeOfBirth,
       gender,
+      latitude,
+      longitude,
     } = req.body;
 
     // Validate required fields
@@ -43,6 +45,8 @@ const createKundli = async (req, res) => {
       timeOfbirth,
       placeOfBirth,
       gender,
+      latitude: latitude ? parseFloat(latitude) : null,
+      longitude: longitude ? parseFloat(longitude) : null,
     });
 
     console.log("User request created, generating kundli data...");
