@@ -60,6 +60,21 @@ const Kundli = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true,
     },
+    ashtakvarga: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Ashtakavarga/Sarvashtakavarga points prepared for UI charts",
+    },
+    yogas: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Formatted list of important yogas for free report tab",
+    },
+    horoscope: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Complete horoscope report blob from astro-engine",
+    },
   },
   {
     tableName: "kundlis",

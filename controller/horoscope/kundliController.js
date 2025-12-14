@@ -12,7 +12,11 @@ const {
   getAscendantReport,
   getGemstoneRemedies,
   getRudrakshaSuggestion,
+  getAshtakavarga,
+  getCompleteHoroscope,
 } = require("../../services/astroEngineService");
+
+const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
 
 
@@ -66,6 +70,8 @@ const createKundli = async (req, res) => {
       personality,
       gemstoneRemedies,
       rudrakshaSuggestion,
+      ashtakavarga,
+      completeHoroscope,
     ] = await Promise.allSettled([
       getBasicDetails(userRequest),
       getAstroDetails(userRequest),
@@ -78,6 +84,8 @@ const createKundli = async (req, res) => {
       getAscendantReport(userRequest),
       getGemstoneRemedies(userRequest),
       getRudrakshaSuggestion(userRequest),
+      getAshtakavarga(userRequest),
+      getCompleteHoroscope(userRequest),
     ]);
 
     // Extract values or set to null if failed
@@ -90,31 +98,105 @@ const createKundli = async (req, res) => {
       }
     };
 
+    console.log("[KundliController] Vimshottari Dasha settled result:", dasha);
+    console.log("[KundliController] Yogini Dasha settled result:", yogini);
+
+    const basicDetailsVal = extractValue(basicDetails, "Basic Details");
+    const astroDetailsVal = extractValue(astroDetails, "Astro Details (House Cusps)");
+    const panchangVal = extractValue(panchang, "Panchang");
+    const planetaryVal = extractValue(planetary, "Planetary Positions");
+    const chartsVal = extractValue(charts, "Charts");
+    const dashaVal = extractValue(dasha, "Vimshottari Dasha");
+    const yoginiVal = extractValue(yogini, "Yogini Dasha");
+    const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik Analysis");
+    const personalityVal = extractValue(personality, "Personality/Ascendant Report");
+
     const remedies = {
       gemstones: extractValue(gemstoneRemedies, "Gemstone Remedies"),
       rudraksha: extractValue(rudrakshaSuggestion, "Rudraksha Suggestion"),
     };
 
+    const ashtakvargaData = extractValue(ashtakavarga, "Ashtakavarga");
+    const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
+
+    // Prepare compact Ashtakavarga structure expected by frontend
+    let ashtakvarga = null;
+    if (ashtakvargaData && ashtakvargaData.sarvashtakavarga) {
+      try {
+        const sarvashtakavarga = ashtakvargaData.sarvashtakavarga;
+        const individualCharts = sarvashtakavarga.individual_charts || {};
+
+        const getPointsArray = (signPoints = []) =>
+          signPoints.map((sp) => sp.points ?? 0);
+
+        ashtakvarga = {
+          sav: getPointsArray(sarvashtakavarga.sign_points || []),
+          sun: getPointsArray(individualCharts.Sun?.sign_points || []),
+          moon: getPointsArray(individualCharts.Moon?.sign_points || []),
+          mars: getPointsArray(individualCharts.Mars?.sign_points || []),
+          mercury: getPointsArray(individualCharts.Mercury?.sign_points || []),
+          jupiter: getPointsArray(individualCharts.Jupiter?.sign_points || []),
+          venus: getPointsArray(individualCharts.Venus?.sign_points || []),
+          saturn: getPointsArray(individualCharts.Saturn?.sign_points || []),
+        };
+      } catch (err) {
+        console.error("Failed to transform Ashtakavarga data for UI:", err);
+        ashtakvarga = null;
+      }
+    }
+
+    // Prepare yogas list from complete horoscope if available
+    let yogas = null;
+    if (horoscope && Array.isArray(horoscope.yoga_analysis)) {
+      yogas = horoscope.yoga_analysis.map((yoga) => ({
+        name: yoga.name,
+        type: yoga.type,
+        strength: yoga.strength,
+        description: yoga.description,
+        effects: yoga.effects,
+      }));
+    }
+
     // Step 3: Create kundli record
     const kundli = await Kundli.create({
       requestId: userRequest.id,
-      basicDetails: extractValue(basicDetails, "Basic Details"),
-      astroDetails: extractValue(astroDetails, "Astro Details (House Cusps)"),
-      manglikAnalysis: extractValue(manglikAnalysis, "Manglik Analysis"),
-      panchang: extractValue(panchang, "Panchang"),
-      charts: extractValue(charts, "Charts"),
-      dasha: extractValue(dasha, "Vimshottari Dasha"),
-      yogini: extractValue(yogini, "Yogini Dasha"),
-      personality: extractValue(personality, "Personality/Ascendant Report"),
-      planetary: extractValue(planetary, "Planetary Positions"),
+      basicDetails: basicDetailsVal,
+      astroDetails: astroDetailsVal,
+      manglikAnalysis: manglikAnalysisVal,
+      panchang: panchangVal,
+      charts: chartsVal,
+      dasha: dashaVal,
+      yogini: yoginiVal,
+      personality: personalityVal,
+      planetary: planetaryVal,
       remedies,
+      ashtakvarga,
+      yogas,
+      horoscope,
     });
+
+    // Generate AI-enhanced Free Report narratives (General, Remedies, Dosha)
+    let aiFreeReport = null;
+    try {
+      aiFreeReport = await generateFreeReportNarratives({
+        basicDetails: basicDetailsVal,
+        personality: personalityVal,
+        remedies,
+        horoscope,
+        manglikAnalysis: manglikAnalysisVal,
+      });
+    } catch (err) {
+      console.error("[KundliController] Failed to generate AI Free Report:", err?.message || err);
+    }
 
     res.status(201).json({
       success: true,
       message: "Kundli created successfully",
       userRequest,
-      kundli,
+      kundli: {
+        ...kundli.toJSON(),
+        aiFreeReport,
+      },
     });
   } catch (error) {
     console.error("Create Kundli error:", error);
@@ -156,9 +238,26 @@ const getKundli = async (req, res) => {
       });
     }
 
+    // Generate AI-enhanced Free Report narratives on demand for fetched kundli
+    let aiFreeReport = null;
+    try {
+      aiFreeReport = await generateFreeReportNarratives({
+        basicDetails: kundli.basicDetails,
+        personality: kundli.personality,
+        remedies: kundli.remedies,
+        horoscope: kundli.horoscope,
+        manglikAnalysis: kundli.manglikAnalysis,
+      });
+    } catch (err) {
+      console.error("[KundliController] Failed to generate AI Free Report (getKundli):", err?.message || err);
+    }
+
     res.status(200).json({
       success: true,
-      kundli,
+      kundli: {
+        ...kundli.toJSON(),
+        aiFreeReport,
+      },
     });
   } catch (error) {
     console.error("Get Kundli error:", error);

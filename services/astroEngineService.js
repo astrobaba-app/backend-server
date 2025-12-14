@@ -65,6 +65,7 @@ const getBasicDetails = async (userRequest) => {
       ascendant: chartData.chart.ascendant,
       sun_sign: chartData.chart.planets.Sun.sign,
       moon_sign: chartData.chart.planets.Moon.sign,
+      ayanamsha: chartData.chart.birth_details?.ayanamsa,
     };
   } catch (error) {
     console.error("Error in getBasicDetails:", error.response?.data || error.message);
@@ -150,13 +151,43 @@ const getAllCharts = async (userRequest) => {
 const getVimshottariDasha = async (userRequest) => {
   try {
     const birth_data = getBirthDataPayload(userRequest);
+    console.log("[AstroEngine] Requesting Vimshottari Dasha with:", birth_data);
+
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/dasha/vimshottari`, {
       birth_data,
       years: 120
     });
-    return response.data.dashas;
+    console.log("[AstroEngine] Vimshottari Dasha raw response:", response.data);
+    const rawDashas = response.data?.dashas;
+
+    // Support both shapes:
+    // 1) rawDashas is already an object with `dashas` array (current astro-engine)
+    // 2) rawDashas is directly an array of periods (older shape)
+    let payload;
+    if (rawDashas && Array.isArray(rawDashas.dashas)) {
+      // Full structure from astro-engine: { system, birth_nakshatra, birth_nakshatra_lord, balance_at_birth, dashas: [...] }
+      payload = rawDashas;
+    } else if (Array.isArray(rawDashas)) {
+      payload = {
+        system: "Vimshottari",
+        dashas: rawDashas,
+      };
+    } else {
+      payload = {
+        system: "Vimshottari",
+        dashas: [],
+      };
+    }
+
+    return {
+      name: response.data.name || birth_data.name,
+      ...payload,
+    };
   } catch (error) {
     console.error("Error in getVimshottariDasha:", error.response?.data || error.message);
+    if (error.response?.data) {
+      console.error("[AstroEngine] Vimshottari Dasha error response body:", error.response.data);
+    }
     return null;
   }
 };
@@ -184,23 +215,34 @@ const getManglikAnalysis = async (userRequest) => {
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/yogas`, {
       birth_data
     });
-    
-    // Extract Manglik/Dosha information
-    const yogasData = response.data.yogas_doshas || response.data;
-    const doshas = yogasData.doshas || [];
-    
-    // Find Mangal Dosha specifically
-    const mangalDosha = doshas.find(d => 
-      d.name?.toLowerCase().includes('mangal') || 
-      d.name?.toLowerCase().includes('manglik') ||
-      d.name?.toLowerCase().includes('kuja')
-    );
-    
+
+    // New astro-engine response shape:
+    // {
+    //   success: true,
+    //   name: string,
+    //   analysis: {
+    //     yogas: { ... },
+    //     doshas: {
+    //       kaal_sarp_dosha: {...},
+    //       mangal_dosha: {...},
+    //       pitra_dosha: {...}
+    //     }
+    //   }
+    // }
+
+    const analysis = response.data?.analysis || {};
+    const doshas = analysis.doshas || {};
+    const mangalDosha = doshas.mangal_dosha || null;
+    const sadesati = analysis.sadesati || null;
+
     return {
-      is_manglik: !!mangalDosha,
-      mangal_dosha: mangalDosha || null,
+      is_manglik: !!(mangalDosha && mangalDosha.present),
+      mangal_dosha: mangalDosha,
       all_doshas: doshas,
-      description: mangalDosha ? mangalDosha.description : "No Mangal Dosha detected"
+      sadesati,
+      description:
+        (mangalDosha && mangalDosha.description) ||
+        "Mangal Dosha not present",
     };
   } catch (error) {
     console.error("Error in getManglikAnalysis:", error.response?.data || error.message);
@@ -281,6 +323,23 @@ const getRudrakshaSuggestion = async (userRequest) => {
 };
 
 /**
+ * Fetch Ashtakavarga data
+ */
+const getAshtakavarga = async (userRequest) => {
+  try {
+    const birth_data = getBirthDataPayload(userRequest);
+    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/horoscope/ashtakavarga`, {
+      birth_data,
+    });
+
+    return response.data.ashtakavarga;
+  } catch (error) {
+    console.error("Error in getAshtakavarga:", error.response?.data || error.message);
+    return null;
+  }
+};
+
+/**
  * Get complete horoscope (all data in one call)
  */
 const getCompleteHoroscope = async (userRequest) => {
@@ -310,5 +369,6 @@ module.exports = {
   getAscendantReport,
   getGemstoneRemedies,
   getRudrakshaSuggestion,
+  getAshtakavarga,
   getCompleteHoroscope,
 };
