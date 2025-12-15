@@ -103,6 +103,16 @@ const createMatching = async (req, res) => {
     const maleMangal = matchingData.male_mangal_dosha;
     const femaleMangal = matchingData.female_mangal_dosha;
 
+    // Optional: compact planet tables from Astro Engine for Planet Details tab
+    const malePlanetDetails = matchingData.male_planet_details || [];
+    const femalePlanetDetails = matchingData.female_planet_details || [];
+
+    // Optional: Lagna (D1) charts and ascendant info for Lagna Chart tab
+    const boyLagnaChart = matchingData.male_lagna_chart || null;
+    const girlLagnaChart = matchingData.female_lagna_chart || null;
+    const boyAscendant = matchingData.male_ascendant || null;
+    const girlAscendant = matchingData.female_ascendant || null;
+
     // Calculate compatibility score
     let compatibilityScore = null;
     if (ashtakootData?.total_points) {
@@ -153,10 +163,19 @@ const createMatching = async (req, res) => {
       conclusion,
     });
 
+    // Attach non-persisted planet tables so frontend can render them
+    const matchingJson = matchingProfile.toJSON();
+    matchingJson.boyPlanetDetails = malePlanetDetails;
+    matchingJson.girlPlanetDetails = femalePlanetDetails;
+    matchingJson.boyLagnaChart = boyLagnaChart;
+    matchingJson.girlLagnaChart = girlLagnaChart;
+    matchingJson.boyAscendant = boyAscendant;
+    matchingJson.girlAscendant = girlAscendant;
+
     res.status(201).json({
       success: true,
       message: "Kundli matching completed successfully",
-      matching: matchingProfile,
+      matching: matchingJson,
     });
   } catch (error) {
     console.error("Kundli matching error:", error);
