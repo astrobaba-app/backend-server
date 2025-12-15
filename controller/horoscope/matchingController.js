@@ -1,5 +1,6 @@
 const MatchingProfile = require("../../model/horoscope/matchingProfile");
 const axios = require('axios');
+const { enhanceAshtakootWithAI } = require("../../services/matchingAiService");
 
 // Astro Engine configuration
 const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || 'http://localhost:8000/api/v1';
@@ -112,6 +113,37 @@ const createMatching = async (req, res) => {
     const girlLagnaChart = matchingData.female_lagna_chart || null;
     const boyAscendant = matchingData.male_ascendant || null;
     const girlAscendant = matchingData.female_ascendant || null;
+
+    // Optionally enhance basic Ashtakoot descriptions with OpenAI so
+    // the Basic Details section can show richer 5-6 line narratives.
+    try {
+      const enhancedKutas = await enhanceAshtakootWithAI({
+        ashtakootData,
+        boyName,
+        girlName,
+      });
+
+      if (enhancedKutas && ashtakootData && ashtakootData.kutas) {
+        const kutaKeys = [
+          "varna",
+          "bhakoot",
+          "graha_maitri",
+          "gana",
+          "nadi",
+          "vashya",
+          "tara",
+          "yoni",
+        ];
+
+        kutaKeys.forEach((key) => {
+          if (ashtakootData.kutas[key] && enhancedKutas[key]?.enhanced_description) {
+            ashtakootData.kutas[key].enhanced_description = enhancedKutas[key].enhanced_description;
+          }
+        });
+      }
+    } catch (aiError) {
+      console.warn("[MatchingAI] Failed to enhance Ashtakoot descriptions:", aiError?.message || aiError);
+    }
 
     // Calculate compatibility score
     let compatibilityScore = null;
