@@ -30,6 +30,7 @@ const ProductReview = require("../store/productReview");
 const AstrologerEarning = require("../astrologer/astrologerEarning");
 const AIChatSession = require("../aiChat/aiChatSession");
 const AIChatMessage = require("../aiChat/aiChatMessage");
+const CachedHoroscope = require("../horoscope/cachedHoroscope");
 
 
   // User has many UserRequests

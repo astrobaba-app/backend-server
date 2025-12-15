@@ -6,6 +6,7 @@ const MatchingProfile = require("../model/horoscope/matchingProfile");
 const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
 const horoscope = require("../model/horoscope/horoscope");
+const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
 
 
 

@@ -150,5 +150,10 @@ initDB(() => {
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`WebSocket server ready at ws://localhost:${PORT}/api/ai-voice-ws`);
+    
+    // Initialize horoscope scheduler with cron jobs
+    const { initializeScheduler } = require('./services/horoscopeScheduler');
+    initializeScheduler();
+    console.log('Horoscope scheduler initialized');
   });
 });
