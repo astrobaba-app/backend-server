@@ -401,7 +401,7 @@ const getUserChatSessions = async (req, res) => {
         {
           model: Astrologer,
           as: "astrologer",
-          attributes: ["id", "fullName", "photo", "rating"],
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
         },
       ],
     });
@@ -418,6 +418,27 @@ const getUserChatSessions = async (req, res) => {
     });
 
     const uniqueSessions = Array.from(dedupedMap.values());
+
+    // Update sessions with 0 pricePerMinute to use current astrologer rate
+    for (const session of uniqueSessions) {
+      if (session.pricePerMinute <= 0 && session.astrologer?.pricePerMinute > 0) {
+        console.log(`Updating session ${session.id} pricePerMinute from ${session.pricePerMinute} to ${session.astrologer.pricePerMinute}`);
+        await session.update({ pricePerMinute: session.astrologer.pricePerMinute });
+        session.pricePerMinute = session.astrologer.pricePerMinute; // Update in-memory for response
+      }
+    }
+
+    // Debug logging for price information
+    console.log('=== USER CHAT SESSION DEBUG ===');
+    uniqueSessions.forEach((session, index) => {
+      console.log(`Session ${index + 1}:`);
+      console.log('  Session ID:', session.id);
+      console.log('  Session pricePerMinute:', session.pricePerMinute);
+      console.log('  Astrologer ID:', session.astrologerId);
+      console.log('  Astrologer name:', session.astrologer?.fullName);
+      console.log('  Astrologer pricePerMinute:', session.astrologer?.pricePerMinute);
+      console.log('---');
+    });
 
     res.status(200).json({
       success: true,
