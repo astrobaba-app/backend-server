@@ -9,8 +9,11 @@ const {
   getAstrologerChatSessions,
   getActiveSession,
   getTotalMinutesWithAstrologer,
+  approveChatRequest,
+  rejectChatRequest,
 } = require("../../controller/chat/chatController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
+const { authorizeRoles } = require("../../middleware/roleMiddleware");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 
 
@@ -22,9 +25,38 @@ router.get("/active/:astrologerId", checkForAuthenticationCookie(), getActiveSes
 router.get("/total-minutes/:astrologerId", checkForAuthenticationCookie(), getTotalMinutesWithAstrologer);
 
 // Astrologer routes
-router.get("/astrologer/sessions",getAstrologerChatSessions);
+router.get(
+  "/astrologer/sessions",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  getAstrologerChatSessions
+);
+
+router.post(
+  "/astrologer/requests/:sessionId/approve",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  approveChatRequest
+);
+
+router.post(
+  "/astrologer/requests/:sessionId/reject",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  rejectChatRequest
+);
+
 // Shared routes (both user and astrologer)
-router.post("/:sessionId/message", upload.single("file"), sendMessage);
-router.get("/:sessionId/messages", getSessionMessages);
+router.post(
+  "/:sessionId/message",
+  checkForAuthenticationCookie(),
+  upload.single("file"),
+  sendMessage
+);
+router.get(
+  "/:sessionId/messages",
+  checkForAuthenticationCookie(),
+  getSessionMessages
+);
 
 module.exports = router;

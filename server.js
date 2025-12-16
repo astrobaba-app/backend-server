@@ -5,12 +5,38 @@ const cookieParser = require("cookie-parser");
 const initDB = require("./dbConnection/dbSync");
 const http = require("http");
 const { WebSocketServer } = require("ws");
+const { Server } = require("socket.io");
+const { initializeChatSocket } = require("./services/chatSocket");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
 const server = http.createServer(app);
 
-const allowedOrigins = [process.env.FRONTEND_URL,process.env.FRONTEND_URL1];
+// Determine allowed origins for CORS (Socket.IO + Express)
+let allowedOrigins = [process.env.FRONTEND_URL, process.env.FRONTEND_URL1].filter(Boolean);
+
+// In development, if no explicit frontend URLs are configured, default to localhost:3000
+if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
+  allowedOrigins = ["http://localhost:3000"];
+}
+
+// Socket.IO server for real-time features (chat, notifications, etc.)
+const io = new Server(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS: " + origin));
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+// Make Socket.IO instance available in controllers via req.app.get('io')
+app.set("io", io);
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -83,7 +109,7 @@ app.use("/api/store", storeRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/maps", mapsRoute);
 
-// WebSocket server for AI voice calls
+// WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });
 const { handleVoiceWebSocket } = require("./controller/aiChat/aiVoiceProxyController");
 const { validateToken } = require("./services/authService");
@@ -146,14 +172,19 @@ wss.on('connection', async (ws, req) => {
   }
 });
 
+// Initialize database and start HTTP + WebSocket/Socket.IO servers
 initDB(() => {
+  // Attach chat-specific Socket.IO handlers
+  initializeChatSocket(io);
+
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
     console.log(`WebSocket server ready at ws://localhost:${PORT}/api/ai-voice-ws`);
-    
+    console.log(`Socket.IO server ready at http://localhost:${PORT}`);
+
     // Initialize horoscope scheduler with cron jobs
-    const { initializeScheduler } = require('./services/horoscopeScheduler');
+    const { initializeScheduler } = require("./services/horoscopeScheduler");
     initializeScheduler();
-    console.log('Horoscope scheduler initialized');
+    console.log("Horoscope scheduler initialized");
   });
 });

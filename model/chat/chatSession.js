@@ -57,6 +57,43 @@ const ChatSession = sequelize.define(
       allowNull: false,
       comment: "Price per minute at the time of session",
     },
+    // Chat request / approval status for user-astrologer chat
+    requestStatus: {
+      type: DataTypes.ENUM("pending", "approved", "rejected"),
+      allowNull: false,
+      defaultValue: "pending",
+      field: "request_status",
+      comment:
+        "Chat request status: pending (awaiting astrologer approval), approved (active chat), rejected (request declined)",
+    },
+    // Cached metadata for fast chat list rendering
+    lastMessagePreview: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "last_message_preview",
+      comment: "Short preview of the last message in this chat session",
+    },
+    lastMessageAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "last_message_at",
+      comment: "Timestamp of the last message in this chat session",
+    },
+    // Unread counters per side (derived but cached for performance)
+    userUnreadCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "user_unread_count",
+      comment: "Unread messages for the user in this session",
+    },
+    astrologerUnreadCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "astrologer_unread_count",
+      comment: "Unread messages for the astrologer in this session",
+    },
   },
   {
     tableName: "chat_sessions",

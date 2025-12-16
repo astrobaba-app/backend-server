@@ -280,9 +280,10 @@ const login = async (req, res) => {
       });
     }
 
-    // Generate JWT token
-    const token = createToken(astrologer);
-    const middlewareToken = createMiddlewareToken(astrologer);
+    // Generate JWT token with explicit astrologer role
+    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const token = createToken(authPayload);
+    const middlewareToken = createMiddlewareToken(authPayload);
   
     setTokenCookie(res, token, middlewareToken);
 

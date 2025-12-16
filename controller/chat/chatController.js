@@ -38,41 +38,31 @@ const startChatSession = async (req, res) => {
       });
     }
 
-    // Check if user has an active session with this astrologer
-    const activeSession = await ChatSession.findOne({
+    // Reuse existing session for this user-astrologer pair if it exists
+    let session = await ChatSession.findOne({
       where: {
         userId,
         astrologerId,
-        status: "active",
       },
     });
 
-    if (activeSession) {
-      return res.status(400).json({
-        success: false,
-        message: "You already have an active chat session with this astrologer",
-        session: activeSession,
+    // Create chat session if none exists yet
+    if (!session) {
+      session = await ChatSession.create({
+        userId,
+        astrologerId,
+        pricePerMinute: astrologer.pricePerMinute,
+        startTime: new Date(),
+        // Initially mark as pending until astrologer approves the chat request
+        requestStatus: "pending",
+      });
+    } else {
+      // Reactivate existing session for a new conversation window
+      await session.update({
+        status: "active",
+        startTime: new Date(),
       });
     }
-
-    // Check user wallet balance
-    const wallet = await Wallet.findOne({ where: { userId } });
-    if (!wallet || wallet.balance < astrologer.pricePerMinute) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient wallet balance. Please recharge your wallet.",
-        requiredAmount: parseFloat(astrologer.pricePerMinute),
-        currentBalance: wallet ? parseFloat(wallet.balance) : 0,
-      });
-    }
-
-    // Create chat session
-    const session = await ChatSession.create({
-      userId,
-      astrologerId,
-      pricePerMinute: astrologer.pricePerMinute,
-      startTime: new Date(),
-    });
 
     // Get astrologer details
     const astrologerDetails = await Astrologer.findByPk(astrologerId, {
@@ -97,7 +87,7 @@ const startChatSession = async (req, res) => {
   }
 };
 
-// End a chat session
+// End a chat session (billing oriented, session record is reused for future conversations)
 const endChatSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -117,9 +107,14 @@ const endChatSession = async (req, res) => {
     const endTime = new Date();
     const startTime = new Date(session.startTime);
     const durationMs = endTime - startTime;
-    const totalMinutes = Math.ceil(durationMs / (1000 * 60)); // Round up to nearest minute
+    const currentMinutes = Math.ceil(durationMs / (1000 * 60)); // Round up to nearest minute
 
-    const totalCost = totalMinutes * parseFloat(session.pricePerMinute);
+    const currentCost = currentMinutes * parseFloat(session.pricePerMinute);
+
+    const accumulatedMinutes = session.totalMinutes || 0;
+    const accumulatedCost = parseFloat(session.totalCost || 0);
+    const totalMinutes = accumulatedMinutes + currentMinutes;
+    const totalCost = accumulatedCost + currentCost;
 
     // Update session
     await session.update({
@@ -132,27 +127,27 @@ const endChatSession = async (req, res) => {
     // Deduct from wallet
     const wallet = await Wallet.findOne({ where: { userId } });
     
-    if (wallet.balance < totalCost) {
+    if (wallet.balance < currentCost) {
       return res.status(400).json({
         success: false,
         message: "Insufficient balance to complete session",
-        totalCost,
+        totalCost: currentCost,
         currentBalance: parseFloat(wallet.balance),
       });
     }
 
     await wallet.update({
-      balance: parseFloat(wallet.balance) - totalCost,
+      balance: parseFloat(wallet.balance) - currentCost,
     });
 
     // Create wallet transaction
     await WalletTransaction.create({
       userId,
       walletId: wallet.id,
-      amount: totalCost,
+      amount: currentCost,
       type: "debit",
       status: "completed",
-      description: `Chat consultation with astrologer - ${totalMinutes} minutes`,
+      description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
     });
 
     res.status(200).json({
@@ -177,21 +172,22 @@ const endChatSession = async (req, res) => {
   }
 };
 
-// Send message (user or astrologer)
+// Send message (user or astrologer) via HTTP API
 const sendMessage = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { message, messageType = "text" } = req.body;
+    const { message, messageType = "text", replyToMessageId } = req.body;
     
     // Determine sender type and ID
-    let senderId, senderType;
-    if (req.user) {
-      senderId = req.user.id;
-      senderType = "user";
-    } else if (req.astrologer) {
-      senderId = req.astrologer.id;
-      senderType = "astrologer";
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
     }
+
+    const senderId = req.user.id;
+    const senderType = req.user.role === "astrologer" ? "astrologer" : "user";
 
     if (!message) {
       return res.status(400).json({
@@ -202,7 +198,7 @@ const sendMessage = async (req, res) => {
 
     // Check if session exists and is active
     const session = await ChatSession.findOne({
-      where: { id: sessionId, status: "active" },
+      where: { id: sessionId },
     });
 
     if (!session) {
@@ -227,6 +223,14 @@ const sendMessage = async (req, res) => {
       });
     }
 
+    // If astrologer is sending a message, ensure the chat request is approved
+    if (senderType === "astrologer" && session.requestStatus !== "approved") {
+      return res.status(400).json({
+        success: false,
+        message: "Chat request has not been approved yet",
+      });
+    }
+
     // Get file URL if uploaded
     const fileUrl = req.fileUrl || null;
 
@@ -238,7 +242,58 @@ const sendMessage = async (req, res) => {
       message,
       messageType,
       fileUrl,
+      replyToMessageId: replyToMessageId || null,
     });
+
+    // Update session metadata and unread counters
+    const lastMessagePreview =
+      messageType === "image" || messageType === "file"
+        ? "[Attachment]"
+        : (message || "").slice(0, 200);
+
+    const updates = {
+      lastMessagePreview,
+      lastMessageAt: new Date(),
+    };
+
+    if (senderType === "user") {
+      updates.astrologerUnreadCount = (session.astrologerUnreadCount || 0) + 1;
+    } else {
+      updates.userUnreadCount = (session.userUnreadCount || 0) + 1;
+    }
+
+    await session.update(updates);
+
+    // Broadcast via Socket.IO if available
+    const io = req.app.get("io");
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapMessage,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      const messagePayload = mapMessage(chatMessage);
+      const sessionForUser = mapSession(session, "user");
+      const sessionForAstrologer = mapSession(session, "astrologer");
+
+      io.to(getSessionRoom(sessionId)).emit("message:new", {
+        sessionId,
+        message: messagePayload,
+      });
+
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForUser,
+      });
+
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForAstrologer,
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -262,12 +317,17 @@ const getSessionMessages = async (req, res) => {
     const { page = 1, limit = 50 } = req.query;
     const offset = (page - 1) * limit;
 
-    // Determine if user or astrologer
+    // Determine if the caller is a user or an astrologer
     let userId, astrologerId;
     if (req.user) {
-      userId = req.user.id;
-    } else if (req.astrologer) {
-      astrologerId = req.astrologer.id;
+      const role = req.user.role;
+
+      if (role === "astrologer") {
+        astrologerId = req.user.id;
+      } else {
+        // Default to treating as normal user
+        userId = req.user.id;
+      }
     }
 
     // Verify access to session
@@ -346,14 +406,27 @@ const getUserChatSessions = async (req, res) => {
       ],
     });
 
+    // Ensure only one session per user-astrologer pair is returned
+    // by keeping the most recently created session for each astrologer.
+    const dedupedMap = new Map();
+    sessions.forEach((session) => {
+      const key = session.astrologerId;
+      const existing = dedupedMap.get(key);
+      if (!existing || new Date(session.createdAt) > new Date(existing.createdAt)) {
+        dedupedMap.set(key, session);
+      }
+    });
+
+    const uniqueSessions = Array.from(dedupedMap.values());
+
     res.status(200).json({
       success: true,
-      sessions,
+      sessions: uniqueSessions,
       pagination: {
-        total: count,
+        total: uniqueSessions.length,
         page: parseInt(page),
         limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        totalPages: Math.ceil(uniqueSessions.length / limit),
       },
     });
   } catch (error) {
@@ -366,16 +439,19 @@ const getUserChatSessions = async (req, res) => {
   }
 };
 
-// Get astrologer's chat sessions
+// Get astrologer's chat sessions (with optional requestStatus filter)
 const getAstrologerChatSessions = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
-    const { page = 1, limit = 20, status } = req.query;
+    const astrologerId = req.user.id;
+    const { page = 1, limit = 20, status, requestStatus } = req.query;
     const offset = (page - 1) * limit;
 
     const where = { astrologerId };
     if (status) {
       where.status = status;
+    }
+    if (requestStatus) {
+      where.requestStatus = requestStatus;
     }
 
     const { rows: sessions, count } = await ChatSession.findAndCountAll({
@@ -392,14 +468,27 @@ const getAstrologerChatSessions = async (req, res) => {
       ],
     });
 
+    // Ensure only one session per user-astrologer pair is returned
+    // by keeping the most recently created session for each user.
+    const dedupedMap = new Map();
+    sessions.forEach((session) => {
+      const key = session.userId;
+      const existing = dedupedMap.get(key);
+      if (!existing || new Date(session.createdAt) > new Date(existing.createdAt)) {
+        dedupedMap.set(key, session);
+      }
+    });
+
+    const uniqueSessions = Array.from(dedupedMap.values());
+
     res.status(200).json({
       success: true,
-      sessions,
+      sessions: uniqueSessions,
       pagination: {
-        total: count,
+        total: uniqueSessions.length,
         page: parseInt(page),
         limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        totalPages: Math.ceil(uniqueSessions.length / limit),
       },
     });
   } catch (error) {
@@ -412,7 +501,7 @@ const getAstrologerChatSessions = async (req, res) => {
   }
 };
 
-// Get active session
+// Get active session between a user and an astrologer
 const getActiveSession = async (req, res) => {
   try {
     const { astrologerId } = req.params;
@@ -465,7 +554,7 @@ const getActiveSession = async (req, res) => {
   }
 };
 
-// Get total minutes chatted with an astrologer
+// Get total minutes chatted with an astrologer (aggregated over the reused session)
 const getTotalMinutesWithAstrologer = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -501,6 +590,128 @@ const getTotalMinutesWithAstrologer = async (req, res) => {
   }
 };
 
+// Approve a chat request (astrologer only)
+const approveChatRequest = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findOne({
+      where: { id: sessionId, astrologerId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    await session.update({
+      requestStatus: "approved",
+      startTime: new Date(),
+    });
+
+    // Notify both sides via Socket.IO if available
+    const io = req.app.get("io");
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      const sessionForUser = mapSession(session, "user");
+      const sessionForAstrologer = mapSession(session, "astrologer");
+
+      io.to(getSessionRoom(sessionId)).emit("chat:approved", { sessionId });
+
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForUser,
+      });
+
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForAstrologer,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Chat request approved",
+      session,
+    });
+  } catch (error) {
+    console.error("Approve chat request error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to approve chat request",
+      error: error.message,
+    });
+  }
+};
+
+// Reject a chat request (astrologer only)
+const rejectChatRequest = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findOne({
+      where: { id: sessionId, astrologerId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    await session.update({ requestStatus: "rejected" });
+
+    const io = req.app.get("io");
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      const sessionForUser = mapSession(session, "user");
+      const sessionForAstrologer = mapSession(session, "astrologer");
+
+      io.to(getSessionRoom(sessionId)).emit("chat:rejected", { sessionId });
+
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForUser,
+      });
+
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId,
+        session: sessionForAstrologer,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Chat request rejected",
+      session,
+    });
+  } catch (error) {
+    console.error("Reject chat request error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to reject chat request",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   startChatSession,
   endChatSession,
@@ -510,4 +721,6 @@ module.exports = {
   getAstrologerChatSessions,
   getActiveSession,
   getTotalMinutesWithAstrologer,
+  approveChatRequest,
+  rejectChatRequest,
 };
