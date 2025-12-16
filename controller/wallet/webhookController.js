@@ -11,13 +11,20 @@ const handleWebhook = async (req, res) => {
     const webhookSignature = req.headers["x-razorpay-signature"];
     const webhookBody = JSON.stringify(req.body);
 
+    console.log('=== WEBHOOK RECEIVED ===');
+    console.log('Event:', req.body.event);
+    console.log('Timestamp:', new Date().toISOString());
+
     // Verify webhook signature
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_WEBHOOK_SECRET)
       .update(webhookBody)
       .digest("hex");
 
+    console.log('Webhook signature valid:', webhookSignature === expectedSignature);
+
     if (webhookSignature !== expectedSignature) {
+      console.error("=== WEBHOOK SIGNATURE INVALID ===");
       console.error("Invalid webhook signature");
       return res.status(400).json({
         success: false,
@@ -28,7 +35,7 @@ const handleWebhook = async (req, res) => {
     const event = req.body.event;
     const payload = req.body.payload;
 
-    console.log(`Webhook received: ${event}`);
+    console.log(`Processing webhook event: ${event}`);
 
     switch (event) {
       case "payment.captured":
@@ -62,6 +69,9 @@ const handleWebhook = async (req, res) => {
  * Handle successful payment capture
  */
 const handlePaymentCaptured = async (payment) => {
+  const sequelize = require("../../dbConnection/dbConfig").sequelize;
+  let dbTransaction;
+  
   try {
     const transaction = await WalletTransaction.findOne({
       where: { razorpayOrderId: payment.order_id },
@@ -72,9 +82,9 @@ const handlePaymentCaptured = async (payment) => {
       return;
     }
 
-    // Skip if already processed
+    // Idempotency check - skip if already processed
     if (transaction.status === "completed") {
-      console.log(`Transaction ${transaction.id} already completed`);
+      console.log(`Transaction ${transaction.id} already completed (idempotency check)`);
       return;
     }
 
@@ -85,6 +95,9 @@ const handlePaymentCaptured = async (payment) => {
       return;
     }
 
+    // Start database transaction for atomicity
+    dbTransaction = await sequelize.transaction();
+
     // Update wallet balance
     const newBalance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
     const newTotalRecharge = parseFloat(wallet.totalRecharge) + parseFloat(transaction.amount);
@@ -92,7 +105,7 @@ const handlePaymentCaptured = async (payment) => {
     await wallet.update({
       balance: newBalance,
       totalRecharge: newTotalRecharge,
-    });
+    }, { transaction: dbTransaction });
 
     // Update transaction
     await transaction.update({
@@ -106,10 +119,14 @@ const handlePaymentCaptured = async (payment) => {
         email: payment.email,
         contact: payment.contact,
       },
-    });
+    }, { transaction: dbTransaction });
 
-    console.log(`Payment captured successfully: ${payment.id}`);
+    await dbTransaction.commit();
+    console.log(`Payment captured successfully: ${payment.id}, New balance: ${newBalance}`);
   } catch (error) {
+    if (dbTransaction) {
+      await dbTransaction.rollback();
+    }
     console.error("Error handling payment captured:", error);
   }
 };

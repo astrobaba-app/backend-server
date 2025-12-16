@@ -13,8 +13,6 @@ const generateSlug = (productName) => {
 };
 
 // ==================== ADMIN: Product Management ====================
-
-// Create product
 exports.createProduct = async (req, res) => {
   try {
     const {

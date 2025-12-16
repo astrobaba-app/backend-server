@@ -49,7 +49,13 @@ const createRechargeOrder = async (req, res) => {
     const userId = req.user.id;
     const { amount, couponCode } = req.body;
 
+    console.log('=== CREATE RECHARGE ORDER START ===');
+    console.log('User ID:', userId);
+    console.log('Amount:', amount);
+    console.log('Coupon Code:', couponCode);
+
     if (!amount || amount < 1) {
+      console.log('ERROR: Invalid amount', amount);
       return res.status(400).json({
         success: false,
         message: "Amount must be at least ₹1",
@@ -157,7 +163,9 @@ const createRechargeOrder = async (req, res) => {
       },
     };
 
+    console.log('Creating Razorpay order with options:', JSON.stringify(options, null, 2));
     const razorpayOrder = await razorpay.orders.create(options);
+    console.log('Razorpay order created successfully:', razorpayOrder.id);
 
     // Create pending transaction
     const transaction = await WalletTransaction.create({
@@ -187,6 +195,9 @@ const createRechargeOrder = async (req, res) => {
       });
     }
 
+    console.log('Transaction created in DB:', transaction.id);
+    console.log('=== CREATE RECHARGE ORDER SUCCESS ===');
+
     res.status(201).json({
       success: true,
       message: "Recharge order created successfully",
@@ -206,6 +217,7 @@ const createRechargeOrder = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error("=== CREATE RECHARGE ORDER ERROR ===");
     console.error("Create recharge order error:", error);
     res.status(500).json({
       success: false,
@@ -221,7 +233,14 @@ const verifyRecharge = async (req, res) => {
     const userId = req.user.id;
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
+    console.log('=== VERIFY RECHARGE START ===');
+    console.log('User ID:', userId);
+    console.log('Order ID:', razorpay_order_id);
+    console.log('Payment ID:', razorpay_payment_id);
+    console.log('Signature received:', razorpay_signature ? 'Yes' : 'No');
+
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      console.log('ERROR: Missing verification parameters');
       return res.status(400).json({
         success: false,
         message: "Missing payment verification parameters",
@@ -229,17 +248,31 @@ const verifyRecharge = async (req, res) => {
     }
 
     // Verify signature
+    console.log('Verifying signature...');
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
+    console.log('Generated signature:', generatedSignature.substring(0, 10) + '...');
+    console.log('Received signature:', razorpay_signature.substring(0, 10) + '...');
+    console.log('Signatures match:', generatedSignature === razorpay_signature);
+
     if (generatedSignature !== razorpay_signature) {
+      // Log invalid signature attempt
+      console.error("=== SIGNATURE VERIFICATION FAILED ===");
+      console.error("Invalid payment signature attempt", {
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        userId,
+      });
       return res.status(400).json({
         success: false,
         message: "Invalid payment signature",
       });
     }
+
+    console.log('✓ Signature verified successfully');
 
     // Find transaction
     const transaction = await WalletTransaction.findOne({
@@ -247,73 +280,124 @@ const verifyRecharge = async (req, res) => {
     });
 
     if (!transaction) {
+      console.error("Transaction not found", {
+        orderId: razorpay_order_id,
+        userId,
+      });
       return res.status(404).json({
         success: false,
         message: "Transaction not found",
       });
     }
 
+    // Idempotency check - if already completed, return success with existing data
     if (transaction.status === "completed") {
-      return res.status(400).json({
-        success: false,
+      const wallet = await Wallet.findOne({ where: { id: transaction.walletId } });
+      return res.status(200).json({
+        success: true,
         message: "Transaction already completed",
+        wallet: {
+          balance: parseFloat(wallet.balance),
+          totalRecharge: parseFloat(wallet.totalRecharge),
+        },
+        transaction: {
+          id: transaction.id,
+          amount: parseFloat(transaction.amount),
+          status: transaction.status,
+        },
       });
     }
 
     // Get wallet
     const wallet = await Wallet.findOne({ where: { id: transaction.walletId } });
 
-    // Update wallet balance
-    const newBalance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
-    const newTotalRecharge = parseFloat(wallet.totalRecharge) + parseFloat(transaction.amount);
-
-    await wallet.update({
-      balance: newBalance,
-      totalRecharge: newTotalRecharge,
-    });
-
-    // Update transaction
-    await transaction.update({
-      status: "completed",
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-      balanceAfter: newBalance,
-    });
-
-    // Update coupon usage if exists
-    const couponUsage = await CouponUsage.findOne({
-      where: {
-        orderId: razorpay_order_id,
+    if (!wallet) {
+      console.error("Wallet not found", {
+        walletId: transaction.walletId,
         userId,
-        status: "pending",
-      },
-    });
-
-    if (couponUsage) {
-      await couponUsage.update({ status: "success" });
-
-      // Increment coupon usage count
-      const coupon = await Coupon.findByPk(couponUsage.couponId);
-      if (coupon) {
-        await coupon.update({
-          usageCount: coupon.usageCount + 1,
-        });
-      }
+      });
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found",
+      });
     }
 
-    res.status(200).json({
-      success: true,
-      message: "Wallet recharged successfully",
-      wallet: {
-        balance: newBalance,
-        totalRecharge: newTotalRecharge,
-      },
-      transaction: {
-        id: transaction.id,
-        amount: parseFloat(transaction.amount),
-        status: transaction.status,
-      },
-    });
+    // Use transaction to ensure atomicity
+    const sequelize = require("../../dbConnection/dbConfig").sequelize;
+    const dbTransaction = await sequelize.transaction();
+
+    try {
+      // Update wallet balance
+      const newBalance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
+      const newTotalRecharge = parseFloat(wallet.totalRecharge) + parseFloat(transaction.amount);
+
+      await wallet.update(
+        {
+          balance: newBalance,
+          totalRecharge: newTotalRecharge,
+        },
+        { transaction: dbTransaction }
+      );
+
+      // Update transaction
+      await transaction.update(
+        {
+          status: "completed",
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          balanceAfter: newBalance,
+        },
+        { transaction: dbTransaction }
+      );
+
+      await dbTransaction.commit();
+
+      // Update coupon usage if exists
+      const couponUsage = await CouponUsage.findOne({
+        where: {
+          orderId: razorpay_order_id,
+          userId,
+          status: "pending",
+        },
+      });
+
+      if (couponUsage) {
+        await couponUsage.update({ status: "success" });
+
+        // Increment coupon usage count
+        const coupon = await Coupon.findByPk(couponUsage.couponId);
+        if (coupon) {
+          await coupon.update({
+            usageCount: coupon.usageCount + 1,
+          });
+        }
+      }
+
+      console.log("Wallet recharge verified successfully", {
+        userId,
+        transactionId: transaction.id,
+        amount: transaction.amount,
+        newBalance,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Wallet recharged successfully",
+        wallet: {
+          balance: newBalance,
+          totalRecharge: newTotalRecharge,
+        },
+        transaction: {
+          id: transaction.id,
+          amount: parseFloat(transaction.amount),
+          status: transaction.status,
+        },
+      });
+    } catch (dbError) {
+      await dbTransaction.rollback();
+      console.error("Database transaction error during wallet recharge", dbError);
+      throw dbError;
+    }
   } catch (error) {
     console.error("Verify recharge error:", error);
     res.status(500).json({
