@@ -497,10 +497,130 @@ const deductFromWallet = async (userId, amount, description = "Payment") => {
   };
 };
 
+/**
+ * Deduct from wallet for AI chat/voice usage
+ */
+const deductForAIUsage = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { amount, type, minutes } = req.body;
+
+    console.log('=== AI WALLET DEDUCTION START ===');
+    console.log('User ID:', userId);
+    console.log('Amount:', amount);
+    console.log('Type:', type);
+    console.log('Minutes:', minutes);
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid amount",
+      });
+    }
+
+    if (!type || !['chat', 'voice'].includes(type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Type must be 'chat' or 'voice'",
+      });
+    }
+
+    // Get wallet
+    const wallet = await Wallet.findOne({ where: { userId } });
+
+    if (!wallet) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet not found",
+      });
+    }
+
+    // Check sufficient balance
+    if (parseFloat(wallet.balance) < amount) {
+      console.log('Insufficient balance for AI usage');
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient wallet balance",
+        currentBalance: parseFloat(wallet.balance),
+      });
+    }
+
+    // Use transaction for atomicity
+    const sequelize = require("../../dbConnection/dbConfig").sequelize;
+    const dbTransaction = await sequelize.transaction();
+
+    try {
+      const balanceBefore = parseFloat(wallet.balance);
+      const newBalance = balanceBefore - amount;
+      const newTotalSpent = parseFloat(wallet.totalSpent) + amount;
+
+      // Update wallet
+      await wallet.update(
+        {
+          balance: newBalance,
+          totalSpent: newTotalSpent,
+        },
+        { transaction: dbTransaction }
+      );
+
+      // Create transaction record
+      const transaction = await WalletTransaction.create(
+        {
+          userId,
+          walletId: wallet.id,
+          amount,
+          type: "debit",
+          status: "completed",
+          paymentMethod: "manual",
+          description: `AI ${type} usage - ${minutes.toFixed(2)} minutes`,
+          balanceBefore,
+          balanceAfter: newBalance,
+        },
+        { transaction: dbTransaction }
+      );
+
+      await dbTransaction.commit();
+
+      console.log('AI wallet deduction successful', {
+        userId,
+        amount,
+        type,
+        minutes,
+        newBalance,
+      });
+
+      res.status(200).json({
+        success: true,
+        message: "Amount deducted successfully",
+        newBalance,
+        transaction: {
+          id: transaction.id,
+          amount,
+          balanceBefore,
+          balanceAfter: newBalance,
+        },
+      });
+    } catch (dbError) {
+      await dbTransaction.rollback();
+      console.error("Database error during AI wallet deduction", dbError);
+      throw dbError;
+    }
+  } catch (error) {
+    console.error("=== AI WALLET DEDUCTION ERROR ===");
+    console.error("Deduct for AI usage error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to deduct from wallet",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getWalletBalance,
   createRechargeOrder,
   verifyRecharge,
   getTransactionHistory,
   deductFromWallet,
+  deductForAIUsage,
 };
