@@ -10,10 +10,16 @@ const { Op } = require("sequelize");
 // Initiate call (User to Astrologer)
 const initiateCall = async (req, res) => {
   try {
+    console.log("=== INITIATE CALL REQUEST ===");
+    console.log("User ID:", req.user?.id);
+    console.log("Request body:", req.body);
+    console.log("Agora App ID:", process.env.AGORA_APP_ID ? "Present" : "Missing");
+    
     const userId = req.user.id;
     const { astrologerId, callType = "video" } = req.body;
 
     if (!astrologerId) {
+      console.log("ERROR: Astrologer ID is missing");
       return res.status(400).json({
         success: false,
         message: "Astrologer ID is required",
@@ -48,25 +54,40 @@ const initiateCall = async (req, res) => {
     });
 
     if (activeCall) {
-      return res.status(400).json({
-        success: false,
-        message: "You already have an active call",
-      });
+      console.log("Active call found:", activeCall.toJSON());
+      // Check if the call is stale (older than 2 minutes with no answer)
+      const callAge = Date.now() - new Date(activeCall.createdAt).getTime();
+      const twoMinutes = 2 * 60 * 1000;
+      console.log(`Call age: ${callAge}ms (${Math.floor(callAge / 1000)}s), Threshold: ${twoMinutes}ms, Status: ${activeCall.status}`);
+      
+      if (callAge > twoMinutes && (activeCall.status === "initiated" || activeCall.status === "ringing")) {
+        console.log("Stale call detected, cancelling it");
+        await activeCall.update({ status: "cancelled" });
+      } else {
+        console.log("Returning 400 - You already have an active call");
+        return res.status(400).json({
+          success: false,
+          message: "You already have an active call",
+        });
+      }
     }
 
-    // Check wallet balance
-    const wallet = await Wallet.findOne({ where: { userId } });
-    if (!wallet || parseFloat(wallet.balance) < parseFloat(astrologer.pricePerMinute)) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient wallet balance",
-        requiredAmount: parseFloat(astrologer.pricePerMinute),
-        currentBalance: wallet ? parseFloat(wallet.balance) : 0,
-      });
-    }
+    // Check wallet balance (DISABLED FOR NOW)
+    // const wallet = await Wallet.findOne({ where: { userId } });
+    // if (!wallet || parseFloat(wallet.balance) < parseFloat(astrologer.pricePerMinute)) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Insufficient wallet balance",
+    //     requiredAmount: parseFloat(astrologer.pricePerMinute),
+    //     currentBalance: wallet ? parseFloat(wallet.balance) : 0,
+    //   });
+    // }
 
-    // Generate Agora channel name
-    const channelName = agoraService.generateChannelName(`call_${userId}_${astrologerId}`);
+    // Generate Agora channel name (must be under 64 bytes)
+    // Use short hashes of IDs instead of full UUIDs
+    const userHash = userId.substring(0, 8);
+    const astrologerHash = astrologerId.substring(0, 8);
+    const channelName = agoraService.generateChannelName(`call_${userHash}_${astrologerHash}`);
 
     // Create call session
     const callSession = await CallSession.create({
@@ -84,8 +105,33 @@ const initiateCall = async (req, res) => {
       attributes: ["id", "fullName", "email"],
     });
 
-    // Notify astrologer
-    await notificationService.notifyIncomingCall(astrologerId, callSession, user);
+    // Notify astrologer (database notification) - non-blocking
+    try {
+      await notificationService.notifyIncomingCall(astrologerId, callSession, user);
+    } catch (notifError) {
+      // Log but don't fail the call if notification fails
+      console.error("Failed to create database notification (non-critical):", notifError.message);
+    }
+
+    // Emit Socket.IO event for real-time notification (this is the important one)
+    const io = req.app.get("io");
+    if (io) {
+      console.log("Emitting call:incoming to astrologer:", astrologerId);
+      console.log("Room name:", `astrologer:${astrologerId}`);
+      io.to(`astrologer:${astrologerId}`).emit("call:incoming", {
+        callSession: {
+          ...callSession.toJSON(),
+          user: {
+            id: user.id,
+            fullName: user.fullName,
+            email: user.email,
+          },
+        },
+      });
+      console.log("Socket.IO event emitted successfully");
+    } else {
+      console.log("ERROR: Socket.IO instance not found!");
+    }
 
     res.status(201).json({
       success: true,
@@ -113,7 +159,7 @@ const initiateCall = async (req, res) => {
 // Accept call (Astrologer)
 const acceptCall = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { callId } = req.params;
 
     const callSession = await CallSession.findOne({
@@ -137,6 +183,14 @@ const acceptCall = async (req, res) => {
       startTime: new Date(),
     });
 
+    // Emit Socket.IO event to notify user
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${callSession.userId}`).emit("call:accepted", {
+        callSession: callSession.toJSON(),
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: "Call accepted successfully",
@@ -155,7 +209,7 @@ const acceptCall = async (req, res) => {
 // Reject call (Astrologer)
 const rejectCall = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { callId } = req.params;
     const { reason } = req.body;
 
@@ -179,6 +233,15 @@ const rejectCall = async (req, res) => {
       rejectionReason: reason || "Astrologer is busy",
     });
 
+    // Emit Socket.IO event to notify user
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`user:${callSession.userId}`).emit("call:rejected", {
+        callSession: callSession.toJSON(),
+        reason: reason || "Astrologer is busy",
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: "Call rejected",
@@ -198,21 +261,12 @@ const rejectCall = async (req, res) => {
 const getCallToken = async (req, res) => {
   try {
     const { callId } = req.params;
-    let userId, astrologerId, userType;
-
-    // Determine if user or astrologer
-    if (req.user) {
-      userId = req.user.id;
-      userType = "user";
-    } else if (req.astrologer) {
-      astrologerId = req.astrologer.id;
-      userType = "astrologer";
-    }
+    const authUserId = req.user.id;
 
     const callSession = await CallSession.findOne({
       where: {
         id: callId,
-        status: { [Op.in]: ["accepted", "ongoing"] },
+        status: { [Op.in]: ["accepted", "ongoing", "ringing"] },
       },
     });
 
@@ -223,15 +277,13 @@ const getCallToken = async (req, res) => {
       });
     }
 
-    // Verify participant
-    if (userType === "user" && callSession.userId !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied",
-      });
-    }
+    // Determine if the authenticated user is the user or astrologer in this call
+    const isUser = callSession.userId === authUserId;
+    const isAstrologer = callSession.astrologerId === authUserId;
+    const userType = isUser ? "user" : "astrologer";
 
-    if (userType === "astrologer" && callSession.astrologerId !== astrologerId) {
+    // Verify participant
+    if (!isUser && !isAstrologer) {
       return res.status(403).json({
         success: false,
         message: "Access denied",
@@ -243,7 +295,7 @@ const getCallToken = async (req, res) => {
     const tokenData = agoraService.generateCallToken(callSession.agoraChannelName, uid);
 
     // Update UID in database
-    if (userType === "user") {
+    if (isUser) {
       await callSession.update({ agoraUidUser: uid });
     } else {
       await callSession.update({ agoraUidAstrologer: uid });
@@ -273,38 +325,57 @@ const getCallToken = async (req, res) => {
 // End call
 const endCall = async (req, res) => {
   try {
+    console.log("=== END CALL REQUEST ===");
     const { callId } = req.params;
-    let userId, astrologerId;
-
-    if (req.user) {
-      userId = req.user.id;
-    } else if (req.astrologer) {
-      astrologerId = req.astrologer.id;
-    }
+    console.log("Call ID:", callId);
+    console.log("Auth User ID:", req.user?.id);
+    
+    const authUserId = req.user.id;
 
     const callSession = await CallSession.findOne({
       where: {
         id: callId,
-        status: { [Op.in]: ["accepted", "ongoing"] },
+        status: { [Op.in]: ["accepted", "ongoing", "completed"] },
       },
     });
 
+    console.log("Call Session Found:", callSession ? "Yes" : "No");
+    
     if (!callSession) {
+      console.log("Call not found");
       return res.status(404).json({
         success: false,
-        message: "Active call not found",
+        message: "Call not found",
       });
     }
+
+    // If already completed, just return success (idempotent)
+    if (callSession.status === "completed") {
+      console.log("Call already completed, returning success");
+      return res.status(200).json({
+        success: true,
+        message: "Call already ended",
+        callSession: {
+          id: callSession.id,
+          totalMinutes: callSession.totalMinutes,
+          totalCost: callSession.totalCost,
+          callType: callSession.callType,
+          startTime: callSession.startTime,
+          endTime: callSession.endTime,
+        },
+      });
+    }
+
+    // Determine if the authenticated user is the user or astrologer in this call
+    const isUser = callSession.userId === authUserId;
+    const isAstrologer = callSession.astrologerId === authUserId;
+    
+    console.log("Is User:", isUser);
+    console.log("Is Astrologer:", isAstrologer);
 
     // Verify participant
-    if (userId && callSession.userId !== userId) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied",
-      });
-    }
-
-    if (astrologerId && callSession.astrologerId !== astrologerId) {
+    if (!isUser && !isAstrologer) {
+      console.log("Access denied - not a participant");
       return res.status(403).json({
         success: false,
         message: "Access denied",
@@ -326,31 +397,23 @@ const endCall = async (req, res) => {
       status: "completed",
     });
 
-    // Deduct from wallet (only if user)
-    if (userId) {
-      const wallet = await Wallet.findOne({ where: { userId: callSession.userId } });
+    // Billing is disabled for now per initial requirement
+    // to allow calls without enforcing wallet balance.
 
-      if (!wallet || parseFloat(wallet.balance) < totalCost) {
-        return res.status(400).json({
-          success: false,
-          message: "Insufficient balance to complete call",
-          totalCost,
-          currentBalance: wallet ? parseFloat(wallet.balance) : 0,
-        });
-      }
-
-      await wallet.update({
-        balance: parseFloat(wallet.balance) - totalCost,
+    // Emit Socket.IO event to notify the other participant
+    const io = req.app.get("io");
+    if (io) {
+      // Notify the other participant (user or astrologer)
+      const otherParticipantRoom = isUser 
+        ? `astrologer:${callSession.astrologerId}` 
+        : `user:${callSession.userId}`;
+      
+      io.to(otherParticipantRoom).emit("call:ended", {
+        callSession: callSession.toJSON(),
+        endedBy: isUser ? "user" : "astrologer",
       });
-
-      await WalletTransaction.create({
-        userId: callSession.userId,
-        walletId: wallet.id,
-        amount: totalCost,
-        type: "debit",
-        status: "completed",
-        description: `${callSession.callType} call with astrologer - ${totalMinutes} minutes`,
-      });
+      
+      console.log(`[Call End] Emitted call:ended to ${otherParticipantRoom}`);
     }
 
     res.status(200).json({

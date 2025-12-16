@@ -16,11 +16,11 @@ router.post("/initiate", checkForAuthenticationCookie(), initiateCall);
 router.get("/history", checkForAuthenticationCookie(), getUserCallHistory);
 
 // Astrologer routes
-router.post("/:callId/accept", acceptCall);
-router.post("/:callId/reject", rejectCall);
-router.get("/astrologer/history", getAstrologerCallHistory);
+router.post("/:callId/accept", checkForAuthenticationCookie(), acceptCall);
+router.post("/:callId/reject", checkForAuthenticationCookie(), rejectCall);
+router.get("/astrologer/history", checkForAuthenticationCookie(), getAstrologerCallHistory);
 
 // Shared routes (both user and astrologer)
-router.get("/:callId/token", getCallToken);
-router.post("/:callId/end", endCall);
+router.get("/:callId/token", checkForAuthenticationCookie(), getCallToken);
+router.post("/:callId/end", checkForAuthenticationCookie(), endCall);
 module.exports = router;

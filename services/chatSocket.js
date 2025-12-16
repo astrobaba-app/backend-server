@@ -216,10 +216,16 @@ function initializeChatSocket(io) {
     const { id: authId, role } = socket.user;
     const isAstrologer = role === "astrologer";
 
+    console.log(`[Socket.IO] User connected: ${authId}, Role: ${role}`);
+
     if (isAstrologer) {
-      socket.join(getAstrologerRoom(authId));
+      const roomName = getAstrologerRoom(authId);
+      socket.join(roomName);
+      console.log(`[Socket.IO] Astrologer joined room: ${roomName}`);
     } else {
-      socket.join(getUserRoom(authId));
+      const roomName = getUserRoom(authId);
+      socket.join(roomName);
+      console.log(`[Socket.IO] User joined room: ${roomName}`);
     }
 
     socket.on("join_chat", async ({ sessionId }) => {

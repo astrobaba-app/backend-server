@@ -7,6 +7,17 @@ class NotificationService {
    */
   async sendToUser(userId, { type, title, message, data = {}, actionUrl = null, priority = "medium" }) {
     try {
+      // Ensure the target user actually exists in the users table to
+      // avoid foreign key violations (e.g. when passing an astrologerId).
+      const user = await User.findByPk(userId, { attributes: ["id"] });
+
+      if (!user) {
+        console.warn(
+          `NotificationService.sendToUser: user not found for id=${userId}, skipping notification of type=${type}`
+        );
+        return null;
+      }
+
       const notification = await Notification.create({
         userId,
         type,
