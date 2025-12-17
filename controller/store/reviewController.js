@@ -134,7 +134,7 @@ exports.getProductReviews = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "profilePicture"],
+          attributes: ["id", "fullName"],
         },
       ],
       limit: parseInt(limit),

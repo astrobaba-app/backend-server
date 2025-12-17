@@ -20,14 +20,14 @@ router.post(
   "/admin/products/create",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  ...upload.array("images", 10),
+  upload.array("images", 10),
   createProduct
 );
 router.put(
   "/admin/products/:productId",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  ...upload.array("images", 10),
+  upload.array("images", 10),
   updateProduct
 );
 router.delete(

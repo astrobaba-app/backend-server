@@ -11,8 +11,15 @@ const generateSlug = (productName) => {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 };
-
+// Helper to safely handle numeric fields that may arrive as empty strings
+const normalizeDecimal = (value) => {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  return Number.isNaN(num) ? null : num;
+};
 // ==================== ADMIN: Product Management ====================
+
+// Create product
 exports.createProduct = async (req, res) => {
   try {
     const {
@@ -87,21 +94,26 @@ exports.createProduct = async (req, res) => {
       });
     }
 
+    // Normalise numeric fields that might be sent as strings / empty strings
+    const normalizedPrice = normalizeDecimal(price);
+    const normalizedDiscountPrice = normalizeDecimal(discountPrice);
+    const normalizedWeight = normalizeDecimal(weight);
+
     // Create product
     const product = await Product.create({
       productName,
       slug,
       description,
       shortDescription,
-      price,
-      discountPrice,
+      price: normalizedPrice,
+      discountPrice: normalizedDiscountPrice,
       images,
       category,
       productType,
       digitalFileUrl,
       downloadLinkExpiry: downloadLinkExpiry || 30,
       stock: productType === "digital" ? 999999 : stock || 0, // Digital products have unlimited stock
-      weight,
+      weight: normalizedWeight,
       dimensions: parsedDimensions,
       tags: parsedTags,
       isFeatured: isFeatured || false,
@@ -121,7 +133,6 @@ exports.createProduct = async (req, res) => {
     });
   }
 };
-
 // Update product
 exports.updateProduct = async (req, res) => {
   try {
