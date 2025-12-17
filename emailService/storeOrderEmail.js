@@ -1,7 +1,13 @@
-const transporter = require("../config/nodemailerConfig/nodemailerConfig");
+const { transporter } = require("../config/nodemailerConfig/nodemailerConfig");
 
 // Send order confirmation email
 exports.sendOrderConfirmationEmail = async (user, order) => {
+  // Only send email if user has an email address
+  if (!user.email) {
+    console.log('User does not have an email address, skipping order confirmation email');
+    return { success: true, message: 'No email to send' };
+  }
+  
   try {
     const orderItemsHtml = order.items
       .map(
@@ -194,6 +200,12 @@ exports.sendOrderConfirmationEmail = async (user, order) => {
 
 // Send digital product email with download links
 exports.sendDigitalProductEmail = async (user, order, downloadLinks) => {
+  // Only send email if user has an email address
+  if (!user.email) {
+    console.log('User does not have an email address, skipping digital product email');
+    return { success: true, message: 'No email to send' };
+  }
+  
   try {
     const downloadLinksHtml = downloadLinks
       .map(
@@ -289,6 +301,12 @@ exports.sendDigitalProductEmail = async (user, order, downloadLinks) => {
 
 // Send order status update email
 exports.sendOrderStatusUpdateEmail = async (user, order, oldStatus, newStatus) => {
+  // Only send email if user has an email address
+  if (!user.email) {
+    console.log('User does not have an email address, skipping order status update email');
+    return { success: true, message: 'No email to send' };
+  }
+  
   try {
     const statusColors = {
       pending: "#ff9800",

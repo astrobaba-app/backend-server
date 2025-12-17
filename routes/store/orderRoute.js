@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const {
   checkout,
+  createRazorpayOrder,
+  verifyAndCreateOrder,
   getMyOrders,
   getOrderDetails,
   trackOrder,
@@ -13,12 +15,18 @@ const {
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
+
+//user
 router.post("/orders/checkout", checkForAuthenticationCookie(), checkout);
+router.post("/orders/create-razorpay-order", checkForAuthenticationCookie(), createRazorpayOrder);
+router.post("/orders/verify-and-create", checkForAuthenticationCookie(), verifyAndCreateOrder);
 router.get("/orders", checkForAuthenticationCookie(), getMyOrders);
 router.get("/orders/:orderNumber", checkForAuthenticationCookie(), getOrderDetails);
 router.get("/orders/:orderNumber/track", checkForAuthenticationCookie(), trackOrder);
 router.post("/orders/:orderNumber/cancel", checkForAuthenticationCookie(), cancelOrder);
 
+
+//admin
 router.get("/admin/orders",checkForAuthenticationCookie(),  authorizeRoles(["admin", "superadmin", "masteradmin"]),getAllOrders);
 router.get("/admin/orders/statistics",checkForAuthenticationCookie(), authorizeRoles(["admin", "superadmin", "masteradmin"]), getOrderStatistics);
 router.patch("/admin/orders/:orderNumber",checkForAuthenticationCookie(), authorizeRoles(["admin", "superadmin", "masteradmin"]), updateOrderStatus);

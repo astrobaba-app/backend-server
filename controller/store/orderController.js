@@ -234,10 +234,12 @@ exports.checkout = async (req, res) => {
       // Create wallet transaction
       const walletTx = await WalletTransaction.create(
         {
+          userId: userId,
           walletId: wallet.id,
           type: "debit",
           amount: totalAmount,
           description: "Store order payment",
+          balanceBefore: wallet.balance,
           balanceAfter: wallet.balance - totalAmount,
           status: "completed",
           metadata: { orderType: "store_purchase" },
@@ -846,6 +848,404 @@ exports.getOrderStatistics = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch statistics",
+      error: error.message,
+    });
+  }
+};
+
+// ==================== RAZORPAY PAYMENT FLOW ====================
+
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
+
+// Initialize Razorpay
+const razorpay = new Razorpay({
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
+
+// Create Razorpay Order
+exports.createRazorpayOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { addressId } = req.body;
+
+    // Get user
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Get cart items
+    const cartItems = await Cart.findAll({
+      where: { userId },
+      include: [{ model: Product, as: "product" }],
+    });
+
+    if (cartItems.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Cart is empty",
+      });
+    }
+
+    // Calculate totals
+    let subtotal = 0;
+    const orderType = determineOrderType(
+      cartItems.map((item) => ({ productType: item.product.productType }))
+    );
+
+    for (const cartItem of cartItems) {
+      const product = cartItem.product;
+      if (!product || !product.isActive) {
+        return res.status(400).json({
+          success: false,
+          message: `Product ${product?.productName || "unknown"} is not available`,
+        });
+      }
+
+      // Check stock for physical products
+      if (product.productType === "physical" && product.stock < cartItem.quantity) {
+        return res.status(400).json({
+          success: false,
+          message: `Insufficient stock for ${product.productName}. Only ${product.stock} available`,
+        });
+      }
+
+      const currentPrice = product.discountPrice || product.price;
+      subtotal += parseFloat(currentPrice) * cartItem.quantity;
+    }
+
+    // Calculate shipping
+    let shippingCharges = 0;
+    if (orderType === "physical" || orderType === "mixed") {
+      shippingCharges = subtotal >= 500 ? 0 : 50;
+    }
+
+    // Calculate tax
+    const taxAmount = parseFloat(((subtotal + shippingCharges) * 0.18).toFixed(2));
+
+    // Calculate total
+    const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
+
+    // Validate address for physical products
+    if ((orderType === "physical" || orderType === "mixed") && !addressId) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a delivery address for physical products",
+      });
+    }
+
+    // Create Razorpay order
+    const timestamp = Date.now().toString().slice(-8);
+    const userIdShort =
+      userId.toString().length > 10
+        ? crypto.createHash("md5").update(userId.toString()).digest("hex").slice(0, 8)
+        : userId.toString();
+    const receipt = `order_${userIdShort}_${timestamp}`;
+
+    const razorpayOrderOptions = {
+      amount: Math.round(totalAmount * 100), // Amount in paise
+      currency: "INR",
+      receipt: receipt,
+      notes: {
+        userId,
+        purpose: "store_order",
+        orderType,
+        itemCount: cartItems.length,
+      },
+    };
+
+    const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+
+    return res.status(201).json({
+      success: true,
+      message: "Razorpay order created successfully",
+      data: {
+        razorpayOrderId: razorpayOrder.id,
+        amount: totalAmount,
+        amountInPaise: razorpayOrder.amount,
+        currency: razorpayOrder.currency,
+        key: process.env.RAZORPAY_KEY_ID,
+        orderSummary: {
+          subtotal,
+          shippingCharges,
+          taxAmount,
+          totalAmount,
+          itemCount: cartItems.length,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error creating Razorpay order:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create Razorpay order",
+      error: error.message,
+    });
+  }
+};
+
+// Verify Razorpay Payment and Create Order
+exports.verifyAndCreateOrder = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const userId = req.user.id;
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      addressId,
+      customerNotes,
+    } = req.body;
+
+    // Validate required fields
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing payment verification parameters",
+      });
+    }
+
+    // Verify signature
+    const generatedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+
+    if (generatedSignature !== razorpay_signature) {
+      console.error("Invalid payment signature", {
+        orderId: razorpay_order_id,
+        paymentId: razorpay_payment_id,
+        userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment signature",
+      });
+    }
+
+    // Get user
+    const user = await User.findByPk(userId);
+    if (!user) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Get cart items
+    const cartItems = await Cart.findAll({
+      where: { userId },
+      include: [{ model: Product, as: "product" }],
+      transaction,
+    });
+
+    if (cartItems.length === 0) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: "Cart is empty",
+      });
+    }
+
+    // Validate and process order items
+    const orderItems = [];
+    let subtotal = 0;
+    const digitalProducts = [];
+
+    for (const cartItem of cartItems) {
+      const product = cartItem.product;
+
+      if (!product || !product.isActive) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: `Product ${product?.productName || "unknown"} is not available`,
+        });
+      }
+
+      // Check stock for physical products
+      if (product.productType === "physical") {
+        if (product.stock < cartItem.quantity) {
+          await transaction.rollback();
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${product.productName}`,
+          });
+        }
+
+        // Reduce stock
+        await product.update(
+          {
+            stock: product.stock - cartItem.quantity,
+            soldCount: product.soldCount + cartItem.quantity,
+          },
+          { transaction }
+        );
+      } else {
+        // Increase soldCount for digital products
+        await product.update(
+          { soldCount: product.soldCount + cartItem.quantity },
+          { transaction }
+        );
+
+        digitalProducts.push({
+          productId: product.id,
+          productName: product.productName,
+          digitalFileUrl: product.digitalFileUrl,
+          downloadLinkExpiry: product.downloadLinkExpiry,
+        });
+      }
+
+      const currentPrice = product.discountPrice || product.price;
+      const itemTotal = parseFloat(currentPrice) * cartItem.quantity;
+      subtotal += itemTotal;
+
+      orderItems.push({
+        productId: product.id,
+        productName: product.productName,
+        quantity: cartItem.quantity,
+        price: parseFloat(currentPrice),
+        productType: product.productType,
+        digitalFileUrl: product.digitalFileUrl,
+        images: product.images,
+      });
+    }
+
+    // Determine order type
+    const orderType = determineOrderType(orderItems);
+
+    // Fetch address for physical products
+    let deliveryAddress = null;
+    if (orderType === "physical" || orderType === "mixed") {
+      if (!addressId) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Please select a delivery address",
+        });
+      }
+
+      const fetchedAddress = await Address.findOne({
+        where: { id: addressId, userId },
+        transaction,
+      });
+
+      if (!fetchedAddress) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Address not found",
+        });
+      }
+
+      deliveryAddress = {
+        fullName: fetchedAddress.fullName,
+        phone: fetchedAddress.phone,
+        addressLine1: fetchedAddress.addressLine1,
+        addressLine2: fetchedAddress.addressLine2,
+        city: fetchedAddress.city,
+        state: fetchedAddress.state,
+        pincode: fetchedAddress.pincode,
+        country: fetchedAddress.country,
+        landmark: fetchedAddress.landmark,
+        addressType: fetchedAddress.addressType,
+      };
+    }
+
+    // Calculate charges
+    let shippingCharges = 0;
+    if (orderType === "physical" || orderType === "mixed") {
+      shippingCharges = subtotal >= 500 ? 0 : 50;
+    }
+
+    const taxAmount = parseFloat(((subtotal + shippingCharges) * 0.18).toFixed(2));
+    const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
+
+    // Generate order number
+    const orderNumber = await generateOrderNumber();
+
+    // Prepare digital download links
+    let digitalDownloadLinks = null;
+    if (digitalProducts.length > 0) {
+      digitalDownloadLinks = digitalProducts.map((dp) => {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + (dp.downloadLinkExpiry || 30));
+        return {
+          productId: dp.productId,
+          productName: dp.productName,
+          downloadUrl: dp.digitalFileUrl,
+          expiresAt: expiresAt.toISOString(),
+        };
+      });
+    }
+
+    // Create order
+    const order = await Order.create(
+      {
+        orderNumber,
+        userId,
+        items: orderItems,
+        subtotal,
+        shippingCharges,
+        taxAmount,
+        totalAmount,
+        paymentMethod: "razorpay",
+        paymentStatus: "completed",
+        transactionId: razorpay_payment_id,
+        orderType,
+        orderStatus: "confirmed",
+        deliveryAddress,
+        digitalDownloadLinks,
+        downloadLinkSentAt: digitalProducts.length > 0 ? new Date() : null,
+        confirmedAt: new Date(),
+        customerNotes,
+      },
+      { transaction }
+    );
+
+    // Clear cart
+    await Cart.destroy({ where: { userId }, transaction });
+
+    // Commit transaction
+    await transaction.commit();
+
+    // Send emails (outside transaction)
+    try {
+      await sendOrderConfirmationEmail(user, order);
+
+      if (digitalProducts.length > 0) {
+        await sendDigitalProductEmail(user, order, digitalDownloadLinks);
+      }
+    } catch (emailError) {
+      console.error("Error sending emails:", emailError);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Order placed successfully",
+      order: {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount,
+        orderStatus: order.orderStatus,
+        paymentStatus: order.paymentStatus,
+        orderType: order.orderType,
+        digitalDownloadLinks: digitalDownloadLinks,
+      },
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error verifying payment and creating order:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create order",
       error: error.message,
     });
   }
