@@ -3,6 +3,7 @@ const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
+const Address = require("../user/address");
 const Wallet = require("../wallet/wallet");
 const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
@@ -77,6 +78,18 @@ const CachedHoroscope = require("../horoscope/cachedHoroscope");
   });
 
   MatchingProfile.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // Address associations
+  User.hasMany(Address, {
+    foreignKey: "userId",
+    as: "addresses",
+    onDelete: "CASCADE",
+  });
+
+  Address.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

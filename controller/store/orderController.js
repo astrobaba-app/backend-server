@@ -2,6 +2,7 @@ const Order = require("../../model/store/order");
 const Cart = require("../../model/store/cart");
 const Product = require("../../model/store/product");
 const User = require("../../model/user/userAuth");
+const Address = require("../../model/user/address");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const { sequelize } = require("../../dbConnection/dbConfig");
@@ -47,7 +48,7 @@ exports.checkout = async (req, res) => {
     const userId = req.user.id;
     const {
       paymentMethod, // wallet, razorpay, cod
-      deliveryAddress, // Required for physical products
+      addressId, // Address ID - required for physical products
       customerNotes,
       razorpayPaymentId, // If payment via Razorpay
     } = req.body;
@@ -154,16 +155,45 @@ exports.checkout = async (req, res) => {
     // Determine order type
     orderType = determineOrderType(orderItems);
 
-    // Validate delivery address for physical products
-    if (
-      (orderType === "physical" || orderType === "mixed") &&
-      !deliveryAddress
-    ) {
-      await transaction.rollback();
-      return res.status(400).json({
-        success: false,
-        message: "Delivery address is required for physical products",
+    // Validate and fetch address for physical products
+    let deliveryAddress = null;
+    if (orderType === "physical" || orderType === "mixed") {
+      // Address ID is required for physical/mixed orders
+      if (!addressId) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: "Please select a delivery address from your saved addresses for physical products.",
+        });
+      }
+
+      // Fetch the address from database
+      const fetchedAddress = await Address.findOne({
+        where: { id: addressId, userId },
+        transaction,
       });
+
+      if (!fetchedAddress) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Selected address not found. Please choose a valid address.",
+        });
+      }
+
+      // Prepare the delivery address object for the order
+      deliveryAddress = {
+        fullName: fetchedAddress.fullName,
+        phone: fetchedAddress.phone,
+        addressLine1: fetchedAddress.addressLine1,
+        addressLine2: fetchedAddress.addressLine2,
+        city: fetchedAddress.city,
+        state: fetchedAddress.state,
+        pincode: fetchedAddress.pincode,
+        country: fetchedAddress.country,
+        landmark: fetchedAddress.landmark,
+        addressType: fetchedAddress.addressType,
+      };
     }
 
     // Calculate shipping (free for digital, ₹50 for physical orders below ₹500)

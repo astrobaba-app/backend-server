@@ -82,6 +82,7 @@ const followRoute = require("./routes/follow/followRoute");
 const assistantRoute = require("./routes/assistant/assistantRoute");
 const supportRoute = require("./routes/support/supportRoute");
 const storeRoute = require("./routes/store/storeRoute");
+const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
@@ -106,6 +107,7 @@ app.use("/api/follow", followRoute);
 app.use("/api/assistant", assistantRoute);
 app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
+app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/maps", mapsRoute);
 
