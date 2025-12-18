@@ -588,18 +588,24 @@ exports.cancelOrder = async (req, res) => {
     if (order.paymentStatus === "completed" && order.paymentMethod === "wallet") {
       const wallet = await Wallet.findOne({ where: { userId }, transaction });
       if (wallet) {
+        const refundAmount = parseFloat(order.totalAmount);
+        const oldBalance = parseFloat(wallet.balance);
+        const newBalance = oldBalance + refundAmount;
+
         await wallet.update(
-          { balance: wallet.balance + parseFloat(order.totalAmount) },
+          { balance: newBalance },
           { transaction }
         );
 
         await WalletTransaction.create(
           {
             walletId: wallet.id,
+            userId: userId,
             type: "credit",
-            amount: order.totalAmount,
+            amount: refundAmount,
             description: `Refund for cancelled order ${orderNumber}`,
-            balanceAfter: wallet.balance + parseFloat(order.totalAmount),
+            balanceBefore: oldBalance,
+            balanceAfter: newBalance,
             status: "completed",
             metadata: { orderNumber, refundType: "order_cancellation" },
           },

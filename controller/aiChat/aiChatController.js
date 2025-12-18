@@ -20,6 +20,7 @@ CRITICAL RULES - MUST FOLLOW:
 - If you don't have required information, ASK for it - do not assume
 - DO NOT use "15/08/1995" or any example data as real user data
 
+
 LANGUAGE ADAPTATION:
 - ALWAYS respond in the SAME language the user is using in their current message
 - If user writes in English → Respond in English
@@ -214,11 +215,21 @@ const sendMessage = async (req, res) => {
       if (placeMatch) userContext += `\n- Birth Place: ${placeMatch[0]}`;
     }
 
+    // Add current date and time context
+    const now = new Date();
+    const currentDateTime = `\n\nCURRENT DATE & TIME (IST):
+- Date: ${now.toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+- Time: ${now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Day: ${now.toLocaleDateString('en-IN', { weekday: 'long' })}
+- Year: ${now.getFullYear()}
+
+IMPORTANT: When user asks about "today", "now", "this year", "current", etc., use the above date and time for your response.`;
+
     // Build messages array for OpenAI with optimized context
     const messages = [
       {
         role: "system",
-        content: SYSTEM_PROMPT + userContext, // Add extracted user info to system prompt
+        content: SYSTEM_PROMPT + userContext + currentDateTime, // Add extracted user info and current date/time to system prompt
       },
       ...previousMessages.map((msg) => ({
         role: msg.role,
