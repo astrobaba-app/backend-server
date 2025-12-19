@@ -54,18 +54,65 @@ const updateProfile = async (req, res) => {
       });
     }
 
+    // Helper function to validate date
+    const isValidDate = (dateString) => {
+      if (!dateString || dateString === 'Invalid date' || dateString.trim() === '') {
+        return false;
+      }
+      const date = new Date(dateString);
+      return date instanceof Date && !isNaN(date.getTime());
+    };
+
+    // Helper function to validate time (HH:MM format)
+    const isValidTime = (timeString) => {
+      if (!timeString || timeString === ':' || timeString.trim() === '') {
+        return false;
+      }
+      // Check if time matches HH:MM or HH:MM:SS format
+      const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/;
+      return timeRegex.test(timeString);
+    };
+
     // Update fields if provided
     if (fullName !== undefined) user.fullName = fullName;
     if (email !== undefined) user.email = email;
     if (gender !== undefined) user.gender = gender;
-    if (dateOfbirth !== undefined) user.dateOfbirth = dateOfbirth;
-    if (timeOfbirth !== undefined) user.timeOfbirth = timeOfbirth;
+    
+    // Validate and update dateOfbirth
+    if (dateOfbirth !== undefined) {
+      if (dateOfbirth === null || dateOfbirth === '') {
+        user.dateOfbirth = null;
+      } else if (isValidDate(dateOfbirth)) {
+        user.dateOfbirth = dateOfbirth;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid date format for date of birth",
+        });
+      }
+    }
+    
+    // Validate and update timeOfbirth
+    if (timeOfbirth !== undefined) {
+      if (timeOfbirth === null || timeOfbirth === '') {
+        user.timeOfbirth = null;
+      } else if (isValidTime(timeOfbirth)) {
+        user.timeOfbirth = timeOfbirth;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid time format for time of birth. Expected format: HH:MM",
+        });
+      }
+    }
+    
     if (placeOfBirth !== undefined) user.placeOfBirth = placeOfBirth;
     if (currentAddress !== undefined) user.currentAddress = currentAddress;
     if (city !== undefined) user.city = city;
     if (state !== undefined) user.state = state;
     if (country !== undefined) user.country = country;
     if (pincode !== undefined) user.pincode = pincode;
+    
     await user.save();
 
     res.status(200).json({
