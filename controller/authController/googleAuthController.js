@@ -151,7 +151,7 @@ const googleCallback = async (req, res) => {
   
    if (isMobile) {
     // Redirect to app
-    res.redirect('graho://auth/callback');
+     res.redirect(`graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(middlewareToken)}`);
   } else {
     // Redirect to login-success page for web
     res.redirect(`${FRONTEND_URL}/login-success`);
