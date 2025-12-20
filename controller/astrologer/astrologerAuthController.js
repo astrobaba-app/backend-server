@@ -4,8 +4,8 @@ const jwt = require("jsonwebtoken");
 const redis = require("../../config/redis/redis");
 const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
 const { createToken, createMiddlewareToken } = require("../../services/authService");
-const clearTokenCookie = require("../../services/clearTokenCookie");
-const setTokenCookie = require("../../services/setTokenCookie");
+const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
+const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -283,9 +283,9 @@ const login = async (req, res) => {
     // Generate JWT token with explicit astrologer role
     const authPayload = { id: astrologer.id, role: "astrologer" };
     const token = createToken(authPayload);
-    const middlewareToken = createMiddlewareToken(authPayload);
+    const astrologerToken = createMiddlewareToken(authPayload);
   
-    setTokenCookie(res, token, middlewareToken);
+    setTokenCookieAstrologer(res, token, astrologerToken);
 
 
     res.status(200).json({
@@ -417,7 +417,7 @@ const updateProfile = async (req, res) => {
 // Logout
 const logout = async (req, res) => {
   try {
-    clearTokenCookie(res);
+    clearTokenCookieAstrologer(res);
 
     res.status(200).json({
       success: true,
