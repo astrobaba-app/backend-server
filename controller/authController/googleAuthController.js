@@ -144,7 +144,19 @@ const googleCallback = async (req, res) => {
     const middlewareToken = createMiddlewareToken(user);
 
     setTokenCookie(res, token, middlewareToken);
+
+
+   const userAgent = req.headers['user-agent'] || '';
+  const isMobile = userAgent.includes('Android') || userAgent.includes('iPhone');
+  
+   if (isMobile) {
+    // Redirect to app
+    res.redirect('graho://auth/callback');
+  } else {
+    // Redirect to login-success page for web
     res.redirect(`${FRONTEND_URL}/login-success`);
+  }
+
 // Goes to: https://staging.graho.in/login-success
   } catch (error) {
     console.error("Google OAuth Error:", {
