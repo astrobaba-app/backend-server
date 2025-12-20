@@ -144,7 +144,8 @@ const googleCallback = async (req, res) => {
     const middlewareToken = createMiddlewareToken(user);
 
     setTokenCookie(res, token, middlewareToken);
-    res.redirect(FRONTEND_URL);
+    res.redirect(`${FRONTEND_URL}/login-success`);
+// Goes to: https://staging.graho.in/login-success
   } catch (error) {
     console.error("Google OAuth Error:", {
       message: error.message,
