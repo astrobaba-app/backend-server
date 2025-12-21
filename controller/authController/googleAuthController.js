@@ -24,23 +24,41 @@ const redirectToGoogle = (req, res) => {
     return res.status(500).json({ message: "Google OAuth not configured properly" });
   }
 
+  // Capture the source (app or web) from query parameter, default to 'web'
+  const source = req.query.source || 'web';
+  
+  // Use state parameter to preserve source through OAuth flow
+  const state = Buffer.from(JSON.stringify({ source })).toString('base64');
+
   const googleAuthURL =
     `https://accounts.google.com/o/oauth2/v2/auth?` +
-    `client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}&response_type=code&scope=openid profile email`;
+    `client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}&response_type=code&scope=openid profile email&state=${encodeURIComponent(state)}`;
   
   console.log("Redirecting to Google with:", {
     clientId: GOOGLE_CLIENT_ID,
     redirectUri: GOOGLE_REDIRECT_URI,
+    source,
   });
   
   res.redirect(googleAuthURL);
 };
 
 const googleCallback = async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
 
   if (!code) {
     return res.status(400).json({ message: "Authorization code missing" });
+  }
+
+  // Decode state parameter to get source (app or web)
+  let source = 'web';
+  try {
+    if (state) {
+      const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
+      source = decoded.source || 'web';
+    }
+  } catch (error) {
+    console.error('Error decoding state parameter:', error);
   }
 
   // Validate environment variables
@@ -56,6 +74,7 @@ const googleCallback = async (req, res) => {
   console.log("Google callback received with code:", code.substring(0, 20) + "...");
   console.log("Using redirect_uri:", GOOGLE_REDIRECT_URI);
   console.log("Client ID:", GOOGLE_CLIENT_ID);
+  console.log("Source:", source);
 
   try {
     //Get the access token from Google
@@ -145,19 +164,18 @@ const googleCallback = async (req, res) => {
 
     setTokenCookie(res, token, middlewareToken);
 
-
-   const userAgent = req.headers['user-agent'] || '';
-  const isMobile = userAgent.includes('Android') || userAgent.includes('iPhone');
-  
-   if (isMobile) {
-    // Redirect to app
-     res.redirect(`graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(middlewareToken)}`);
-  } else {
-    // Redirect to login-success page for web
-    res.redirect(`${FRONTEND_URL}/login-success`);
-  }
-
-// Goes to: https://staging.graho.in/login-success
+    // Use source parameter to determine redirect destination
+    // Only redirect to app deep link if explicitly from app (source=app)
+    // All web users (mobile or desktop) go to login-success page
+    if (source === 'app') {
+      // Redirect to app deep link
+      console.log('Redirecting to app deep link');
+      res.redirect(`graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(middlewareToken)}`);
+    } else {
+      // Redirect to login-success page for all web users (mobile and desktop browsers)
+      console.log('Redirecting to web login-success page');
+      res.redirect(`${FRONTEND_URL}/login-success`);
+    }
   } catch (error) {
     console.error("Google OAuth Error:", {
       message: error.message,
