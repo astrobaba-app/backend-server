@@ -53,6 +53,10 @@ function getAstrologerRoom(astrologerId) {
   return `astrologer:${astrologerId}`;
 }
 
+function getLiveSessionRoom(sessionId) {
+  return `live:${sessionId}`;
+}
+
 /**
  * Format a chat message payload for clients
  */
@@ -450,4 +454,5 @@ module.exports = {
   getSessionRoom,
   getUserRoom,
   getAstrologerRoom,
+  getLiveSessionRoom,
 };

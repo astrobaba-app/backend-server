@@ -7,6 +7,7 @@ const http = require("http");
 const { WebSocketServer } = require("ws");
 const { Server } = require("socket.io");
 const { initializeChatSocket } = require("./services/chatSocket");
+const { initializeLiveStreamSocket } = require("./services/liveStreamSocket");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -178,6 +179,9 @@ wss.on('connection', async (ws, req) => {
 initDB(() => {
   // Attach chat-specific Socket.IO handlers
   initializeChatSocket(io);
+  
+  // Attach live streaming Socket.IO handlers
+  initializeLiveStreamSocket(io);
 
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);

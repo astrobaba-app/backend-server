@@ -3,6 +3,7 @@ const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
+const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const agoraService = require("../../services/agoraService");
 const notificationService = require("../../services/notificationService");
 const { Op } = require("sequelize");
@@ -397,8 +398,76 @@ const endCall = async (req, res) => {
       status: "completed",
     });
 
-    // Billing is disabled for now per initial requirement
-    // to allow calls without enforcing wallet balance.
+    // Process wallet transactions and astrologer earnings
+    if (totalCost > 0) {
+      // Deduct from user wallet
+      const userWallet = await Wallet.findOne({ where: { userId: callSession.userId } });
+      if (userWallet) {
+        const currentBalance = parseFloat(userWallet.balance);
+        const deductionAmount = Math.min(currentBalance, totalCost); // Deduct only available balance
+        
+        if (deductionAmount > 0) {
+          await userWallet.update({
+            balance: currentBalance - deductionAmount,
+            totalSpent: parseFloat(userWallet.totalSpent) + deductionAmount,
+          });
+
+          // Create wallet transaction record
+          await WalletTransaction.create({
+            userId: callSession.userId,
+            walletId: userWallet.id,
+            amount: deductionAmount,
+            type: "debit",
+            status: "completed",
+            description: `${callSession.callType === 'video' ? 'Video' : 'Voice'} call - ${totalMinutes} minutes`,
+            balanceBefore: currentBalance,
+            balanceAfter: currentBalance - deductionAmount,
+            metadata: {
+              callId: callSession.id,
+              astrologerId: callSession.astrologerId,
+              durationMinutes: totalMinutes,
+              pricePerMinute: parseFloat(callSession.pricePerMinute),
+            },
+          });
+
+          // Credit to astrologer earnings
+          const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
+          const commissionPercentage = 20; // 20% platform commission
+          const platformCommission = deductionAmount * (commissionPercentage / 100);
+          const netEarning = deductionAmount - platformCommission;
+
+          await AstrologerEarning.create({
+            astrologerId: callSession.astrologerId,
+            userId: callSession.userId,
+            sessionId: callSession.id,
+            sessionType: "call",
+            durationMinutes: totalMinutes,
+            pricePerMinute: parseFloat(callSession.pricePerMinute),
+            totalAmount: deductionAmount,
+            platformCommission,
+            commissionPercentage,
+            netEarning,
+            paymentStatus: "pending",
+            sessionStartTime: startTime,
+            sessionEndTime: endTime,
+          });
+
+          console.log(`[Call Billing] Deducted ₹${deductionAmount} from user, credited ₹${netEarning} to astrologer (₹${platformCommission} commission)`);
+
+          // Emit wallet update event to user
+          const io = req.app.get("io");
+          if (io) {
+            io.to(`user:${callSession.userId}`).emit("wallet:updated", {
+              balance: currentBalance - deductionAmount,
+              deduction: deductionAmount,
+              reason: "call",
+              callId: callSession.id,
+            });
+            console.log(`[Call Billing] Emitted wallet:updated to user:${callSession.userId}`);
+          }
+        }
+      }
+    }
 
     // Emit Socket.IO event to notify the other participant
     const io = req.app.get("io");

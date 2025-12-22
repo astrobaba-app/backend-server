@@ -307,6 +307,7 @@ const login = async (req, res) => {
         totalConsultations: astrologer.totalConsultations,
       },
       token,
+      astrologerToken, // Add this for localStorage
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -322,7 +323,6 @@ const login = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const astrologerId = req.user.id;
-    console.log("Astrologer ID from req.astrologer:", astrologerId);
 
     const astrologer = await Astrologer.findByPk(astrologerId, {
       attributes: { exclude: ["password"] },

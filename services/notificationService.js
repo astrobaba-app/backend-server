@@ -43,9 +43,8 @@ class NotificationService {
    */
   async broadcastToAll({ type, title, message, data = {}, actionUrl = null, priority = "medium" }) {
     try {
-      // Get all active users
+      // Get all users (User model doesn't have isActive column)
       const users = await User.findAll({
-        where: { isActive: true },
         attributes: ["id"],
       });
 

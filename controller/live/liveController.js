@@ -4,6 +4,7 @@ const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
+const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const agoraService = require("../../services/agoraService");
 const notificationService = require("../../services/notificationService");
 const { Op } = require("sequelize");
@@ -11,7 +12,7 @@ const { Op } = require("sequelize");
 // Create/Schedule live session (Astrologer only)
 const createLiveSession = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const {
       title,
       description,
@@ -98,7 +99,7 @@ const createLiveSession = async (req, res) => {
 // Start scheduled live session
 const startLiveSession = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findOne({
@@ -148,8 +149,10 @@ const startLiveSession = async (req, res) => {
 // Get Agora token for astrologer (host)
 const getHostToken = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { sessionId } = req.params;
+
+    console.log("Getting host token - Astrologer:", astrologerId, "Session:", sessionId);
 
     const liveSession = await LiveSession.findOne({
       where: {
@@ -160,15 +163,20 @@ const getHostToken = async (req, res) => {
     });
 
     if (!liveSession) {
+      console.log("Live session not found or not owned by astrologer");
       return res.status(404).json({
         success: false,
         message: "Live session not found",
       });
     }
 
-    // Generate Agora token for host
-    const uid = agoraService.generateUid();
+    console.log("Live session found:", liveSession.id, "Channel:", liveSession.agoraChannelName);
+
+    // Generate Agora token for host with uid 0 (auto-assign)
+    const uid = 0; // Use 0 to let Agora auto-assign unique UID
     const tokenData = agoraService.generateLiveStreamToken(liveSession.agoraChannelName, uid);
+
+    console.log("Token generated successfully with auto-assign uid");
 
     res.status(200).json({
       success: true,
@@ -230,8 +238,8 @@ const joinLiveSession = async (req, res) => {
     });
 
     if (participant && participant.isActive) {
-      // Already in the session
-      const uid = participant.agoraUid || agoraService.generateUid();
+      // Already in the session - use uid 0 for auto-assign
+      const uid = 0;
       const tokenData = agoraService.generateViewerToken(liveSession.agoraChannelName, uid);
 
       return res.status(200).json({
@@ -243,8 +251,8 @@ const joinLiveSession = async (req, res) => {
       });
     }
 
-    // Generate Agora token for viewer
-    const uid = agoraService.generateUid();
+    // Generate Agora token for viewer - use uid 0 for auto-assign
+    const uid = 0;
     const tokenData = agoraService.generateViewerToken(liveSession.agoraChannelName, uid);
 
     // Create or update participant record
@@ -387,7 +395,7 @@ const leaveLiveSession = async (req, res) => {
 // End live session (Astrologer)
 const endLiveSession = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findOne({
@@ -396,6 +404,13 @@ const endLiveSession = async (req, res) => {
         astrologerId,
         status: "live",
       },
+      include: [
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName"],
+        },
+      ],
     });
 
     if (!liveSession) {
@@ -405,10 +420,18 @@ const endLiveSession = async (req, res) => {
       });
     }
 
+    // Get Socket.IO instance
+    const io = req.app.get("io");
+    const liveNamespace = io.of("/live");
+    const { getLiveSessionRoom } = require("../../services/chatSocket");
+    const roomName = getLiveSessionRoom(sessionId);
+
     // Process all active participants
     const activeParticipants = await LiveParticipant.findAll({
       where: { liveSessionId: sessionId, isActive: true },
     });
+
+    let totalRevenue = 0;
 
     for (const participant of activeParticipants) {
       const leftAt = new Date();
@@ -426,27 +449,88 @@ const endLiveSession = async (req, res) => {
 
       // Deduct from wallet
       const wallet = await Wallet.findOne({ where: { userId: participant.userId } });
-      if (wallet && parseFloat(wallet.balance) >= cost) {
-        await wallet.update({
-          balance: parseFloat(wallet.balance) - cost,
-        });
+      if (wallet) {
+        const currentBalance = parseFloat(wallet.balance);
+        const deductionAmount = Math.min(currentBalance, cost);
 
-        await WalletTransaction.create({
-          userId: participant.userId,
-          walletId: wallet.id,
-          amount: cost,
-          type: "debit",
-          status: "completed",
-          description: `Live session: ${liveSession.title} - ${minutes} minutes`,
-        });
+        if (deductionAmount > 0) {
+          await wallet.update({
+            balance: currentBalance - deductionAmount,
+            totalSpent: parseFloat(wallet.totalSpent) + deductionAmount,
+          });
+
+          await WalletTransaction.create({
+            userId: participant.userId,
+            walletId: wallet.id,
+            amount: deductionAmount,
+            type: "debit",
+            status: "completed",
+            description: `Live session: ${liveSession.title} - ${minutes} minutes`,
+            balanceBefore: currentBalance,
+            balanceAfter: currentBalance - deductionAmount,
+            metadata: {
+              liveSessionId: liveSession.id,
+              astrologerId: liveSession.astrologerId,
+              durationMinutes: minutes,
+              pricePerMinute: parseFloat(liveSession.pricePerMinute),
+            },
+          });
+
+          totalRevenue += deductionAmount;
+
+          // Credit to astrologer earnings
+          const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
+          const commissionPercentage = 20; // 20% platform commission
+          const platformCommission = deductionAmount * (commissionPercentage / 100);
+          const netEarning = deductionAmount - platformCommission;
+
+          await AstrologerEarning.create({
+            astrologerId: liveSession.astrologerId,
+            userId: participant.userId,
+            sessionId: liveSession.id,
+            sessionType: "live",
+            durationMinutes: minutes,
+            pricePerMinute: parseFloat(liveSession.pricePerMinute),
+            totalAmount: deductionAmount,
+            platformCommission,
+            commissionPercentage,
+            netEarning,
+            paymentStatus: "pending",
+            sessionStartTime: joinedAt,
+            sessionEndTime: leftAt,
+          });
+
+          // Emit wallet update event to user
+          const io = req.app.get("io");
+          if (io) {
+            io.to(`user:${participant.userId}`).emit("wallet:updated", {
+              balance: currentBalance - deductionAmount,
+              deduction: deductionAmount,
+              reason: "live",
+              liveSessionId: liveSession.id,
+            });
+          }
+        }
       }
     }
+
+    // Update live session total revenue
+    await liveSession.update({
+      totalRevenue: parseFloat(liveSession.totalRevenue || 0) + totalRevenue,
+    });
 
     // End session
     await liveSession.update({
       status: "ended",
       endedAt: new Date(),
       currentViewers: 0,
+    });
+
+    // Emit socket event to all participants in the room
+    liveNamespace.to(roomName).emit("live_session_ended", {
+      sessionId: liveSession.id,
+      message: `${liveSession.astrologer.fullName} has ended the live session`,
+      astrologerName: liveSession.astrologer.fullName,
     });
 
     res.status(200).json({
@@ -513,7 +597,7 @@ const getActiveLiveSessions = async (req, res) => {
 // Get astrologer's live sessions
 const getAstrologerLiveSessions = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
 
@@ -549,6 +633,99 @@ const getAstrologerLiveSessions = async (req, res) => {
   }
 };
 
+// Get live session history (for astrologer dashboard)
+const getLiveHistory = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const { rows: sessions, count } = await LiveSession.findAndCountAll({
+      where: {
+        astrologerId,
+        status: "ended",
+      },
+      order: [["endedAt", "DESC"]],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      attributes: [
+        "id",
+        "title",
+        "startedAt",
+        "endedAt",
+        "totalViewers",
+        "maxViewers",
+        "totalRevenue",
+      ],
+    });
+
+    // Calculate duration for each session
+    const sessionsWithDuration = sessions.map((session) => {
+      const duration = session.endedAt && session.startedAt
+        ? Math.ceil((new Date(session.endedAt) - new Date(session.startedAt)) / (1000 * 60))
+        : 0;
+      return {
+        ...session.toJSON(),
+        durationMinutes: duration,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      sessions: sessionsWithDuration,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get live history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch live history",
+      error: error.message,
+    });
+  }
+};
+
+// Get live chat messages for a session
+const getLiveChatMessages = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+
+    const LiveChatMessage = require("../../model/live/liveChatMessage");
+
+    const { rows: messages, count } = await LiveChatMessage.findAndCountAll({
+      where: { liveSessionId: sessionId },
+      order: [["createdAt", "ASC"]],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+    });
+
+    res.status(200).json({
+      success: true,
+      messages,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get live chat messages error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch chat messages",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createLiveSession,
   startLiveSession,
@@ -558,4 +735,6 @@ module.exports = {
   endLiveSession,
   getActiveLiveSessions,
   getAstrologerLiveSessions,
+  getLiveHistory,
+  getLiveChatMessages,
 };
