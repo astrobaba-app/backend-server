@@ -24,6 +24,7 @@ function mapLiveChatMessage(message) {
     userPhoto: message.userPhoto,
     message: message.message,
     messageType: message.messageType || "text",
+    senderRole: message.senderRole || null,
     timestamp: message.timestamp || message.createdAt,
   };
 }
@@ -149,7 +150,7 @@ function initializeLiveStreamSocket(io) {
     });
 
     // Send live chat message
-    socket.on("live_chat_message", async ({ sessionId, message }, callback) => {
+    socket.on("live_chat_message", async ({ sessionId, message, messageType }, callback) => {
       try {
         if (!sessionId || !message) {
           if (callback) callback({ success: false, error: "Missing data" });
@@ -161,6 +162,10 @@ function initializeLiveStreamSocket(io) {
           if (callback) callback({ success: false, error: "Live session not active" });
           return;
         }
+
+        // Validate messageType
+        const validMessageTypes = ["text", "emoji"];
+        const finalMessageType = validMessageTypes.includes(messageType) ? messageType : "text";
 
         // Get user details
         let userName, userPhoto;
@@ -198,7 +203,7 @@ function initializeLiveStreamSocket(io) {
           userName,
           userPhoto,
           message,
-          messageType: "text",
+          messageType: finalMessageType,
         });
 
         const messagePayload = mapLiveChatMessage(chatMessage);
@@ -211,6 +216,77 @@ function initializeLiveStreamSocket(io) {
       } catch (error) {
         console.error("live_chat_message error:", error);
         if (callback) callback({ success: false, error: "Failed to send message" });
+      }
+    });
+
+    // Send emoji in live chat
+    socket.on("live_chat_emoji", async ({ sessionId, emoji }, callback) => {
+      try {
+        if (!sessionId || !emoji) {
+          if (callback) callback({ success: false, error: "Missing emoji data" });
+          return;
+        }
+
+        const liveSession = await LiveSession.findByPk(sessionId);
+        if (!liveSession || liveSession.status !== "live") {
+          if (callback) callback({ success: false, error: "Live session not active" });
+          return;
+        }
+
+        // Get user details
+        let userName, userPhoto, senderRole;
+        if (isAstrologer) {
+          if (liveSession.astrologerId !== authId) {
+            if (callback) callback({ success: false, error: "Not authorized" });
+            return;
+          }
+          const astrologer = await Astrologer.findByPk(authId, {
+            attributes: ["fullName", "photo"],
+          });
+          userName = astrologer?.fullName || "Astrologer";
+          userPhoto = astrologer?.photo || null;
+          senderRole = "astrologer";
+        } else {
+          // Verify user is a participant
+          const participant = await LiveParticipant.findOne({
+            where: { liveSessionId: sessionId, userId: authId, isActive: true },
+          });
+          if (!participant) {
+            if (callback) callback({ success: false, error: "Not a participant" });
+            return;
+          }
+
+          const user = await User.findByPk(authId, {
+            attributes: ["fullName"],
+          });
+          userName = user?.fullName || "User";
+          userPhoto = null;
+          senderRole = "user";
+        }
+
+        // Create emoji message
+        const emojiMessage = await LiveChatMessage.create({
+          liveSessionId: sessionId,
+          userId: authId,
+          userName,
+          userPhoto,
+          message: emoji,
+          messageType: "emoji",
+        });
+
+        const messagePayload = {
+          ...mapLiveChatMessage(emojiMessage),
+          senderRole,
+        };
+
+        // Broadcast emoji to all participants in the room
+        const roomName = getLiveSessionRoom(sessionId);
+        liveNamespace.to(roomName).emit("live:chat_emoji", messagePayload);
+
+        if (callback) callback({ success: true, message: messagePayload });
+      } catch (error) {
+        console.error("live_chat_emoji error:", error);
+        if (callback) callback({ success: false, error: "Failed to send emoji" });
       }
     });
 
