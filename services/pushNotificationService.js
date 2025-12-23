@@ -36,6 +36,14 @@ class PushNotificationService {
           userId: userId.toString(),
           timestamp: new Date().toISOString(),
         },
+        android: {
+          priority: 'high',
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+          },
+        },
         tokens: fcmTokens,
       };
 
@@ -157,6 +165,14 @@ class PushNotificationService {
         data: {
           ...data,
           timestamp: new Date().toISOString(),
+        },
+        android: {
+          priority: 'high',
+        },
+        apns: {
+          headers: {
+            'apns-priority': '10',
+          },
         },
         topic,
       };
