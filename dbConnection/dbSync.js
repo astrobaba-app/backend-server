@@ -8,6 +8,7 @@ const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
 const horoscope = require("../model/horoscope/horoscope");
 const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
+const LiveChatMessage = require("../model/live/liveChatMessage");
 
 
 
@@ -96,6 +97,37 @@ async function ensureChatSessionColumns() {
   }
 }
 
+async function ensureLiveChatMessageColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("live_chat_messages");
+    const operations = [];
+
+    // Check if sender_role column exists (PostgreSQL uses lowercase)
+    if (!table.sender_role && !table.senderRole) {
+      console.log("Adding sender_role column to live_chat_messages...");
+      operations.push(
+        queryInterface.addColumn("live_chat_messages", "sender_role", {
+          type: DataTypes.ENUM("user", "astrologer"),
+          allowNull: true,
+          comment: "Role of the message sender (user or astrologer)",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Added sender_role column to live_chat_messages");
+    } else {
+      console.log("✓ live_chat_messages table is up to date");
+    }
+  } catch (error) {
+    // Table doesn't exist yet, will be created by sync
+    console.log("live_chat_messages table will be created by sync");
+  }
+}
+
 async function ensureChatMessageColumns() {
   const queryInterface = sequelize.getQueryInterface();
 
@@ -150,6 +182,7 @@ const initDB = (callback) => {
     })
     .then(() => ensureChatSessionColumns())
     .then(() => ensureChatMessageColumns())
+    .then(() => ensureLiveChatMessageColumns())
     .then(() => {
       console.log("All models synced");
       callback();

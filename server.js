@@ -203,7 +203,11 @@ initDB(() => {
   initializeChatSocket(io);
   
   // Attach live streaming Socket.IO handlers
+  const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
   initializeLiveStreamSocket(io);
+  
+  // Sync live viewer counts every 30 seconds to ensure accuracy
+  setInterval(syncLiveViewerCounts, 30000);
 
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
@@ -214,5 +218,6 @@ initDB(() => {
     const { initializeScheduler } = require("./services/horoscopeScheduler");
     initializeScheduler();
     console.log("Horoscope scheduler initialized");
+    console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });

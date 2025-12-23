@@ -42,6 +42,12 @@ const LiveChatMessage = sequelize.define(
       type: DataTypes.ENUM("text", "emoji", "system"),
       defaultValue: "text",
     },
+    senderRole: {
+      type: DataTypes.ENUM("user", "astrologer"),
+      allowNull: true,
+      field: "sender_role",
+      comment: "Role of the message sender",
+    },
     timestamp: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
@@ -51,6 +57,7 @@ const LiveChatMessage = sequelize.define(
   {
     tableName: "live_chat_messages",
     timestamps: true,
+    underscored: false,
   }
 );
 

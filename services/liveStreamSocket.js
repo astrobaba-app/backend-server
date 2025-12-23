@@ -24,7 +24,7 @@ function mapLiveChatMessage(message) {
     userPhoto: message.userPhoto,
     message: message.message,
     messageType: message.messageType || "text",
-    senderRole: message.senderRole || null,
+    senderRole: message.senderRole,
     timestamp: message.timestamp || message.createdAt,
   };
 }
@@ -80,6 +80,9 @@ function initializeLiveStreamSocket(io) {
   liveNamespace.on("connection", (socket) => {
     const { id: authId, role } = socket.user;
     const isAstrologer = role === "astrologer";
+    
+    // Track which session this socket is in for cleanup on disconnect
+    socket.currentLiveSession = null;
 
     console.log(`[Live Socket] Connected: ${authId}, Role: ${role}`);
 
@@ -103,6 +106,9 @@ function initializeLiveStreamSocket(io) {
         // Join room
         const roomName = getLiveSessionRoom(sessionId);
         socket.join(roomName);
+        
+        // Track current session for disconnect cleanup
+        socket.currentLiveSession = sessionId;
 
         // Get participant count
         const participantCount = await LiveParticipant.count({
@@ -138,6 +144,11 @@ function initializeLiveStreamSocket(io) {
 
         const roomName = getLiveSessionRoom(sessionId);
         socket.leave(roomName);
+        
+        // Clear session tracking
+        if (socket.currentLiveSession === sessionId) {
+          socket.currentLiveSession = null;
+        }
 
         // Get updated participant count
         const participantCount = await LiveParticipant.count({
@@ -215,6 +226,7 @@ function initializeLiveStreamSocket(io) {
           userPhoto,
           message,
           messageType: finalMessageType,
+          senderRole: isAstrologer ? "astrologer" : "user",
         });
 
         const messagePayload = mapLiveChatMessage(chatMessage);
@@ -285,6 +297,7 @@ function initializeLiveStreamSocket(io) {
           userPhoto,
           message: emoji,
           messageType: "emoji",
+          senderRole: isAstrologer ? "astrologer" : "user",
         });
 
         const messagePayload = {
@@ -353,15 +366,83 @@ function initializeLiveStreamSocket(io) {
       }
     });
 
-    // Handle disconnect
-    socket.on("disconnect", () => {
+    // Handle disconnect - clean up participant status
+    socket.on("disconnect", async () => {
       console.log(`[Live Socket] Disconnected: ${authId}, Role: ${role}`);
+      
+      try {
+        // If user (not astrologer) was in a session, mark as inactive
+        if (!isAstrologer && socket.currentLiveSession) {
+          const sessionId = socket.currentLiveSession;
+          
+          // Find and update participant
+          const participant = await LiveParticipant.findOne({
+            where: {
+              liveSessionId: sessionId,
+              userId: authId,
+              isActive: true,
+            },
+          });
+          
+          if (participant) {
+            // Mark as inactive (don't charge - that happens on explicit leave)
+            await participant.update({ isActive: false });
+            
+            // Update current viewers count in session
+            const currentViewers = await LiveParticipant.count({
+              where: { liveSessionId: sessionId, isActive: true },
+            });
+            
+            await LiveSession.update(
+              { currentViewers },
+              { where: { id: sessionId } }
+            );
+            
+            // Notify room about updated count
+            const roomName = getLiveSessionRoom(sessionId);
+            liveNamespace.to(roomName).emit("live:participant_left", {
+              sessionId,
+              participantCount: currentViewers,
+            });
+            
+            console.log(`[Live Socket] Cleaned up participant ${authId} from session ${sessionId}. Current viewers: ${currentViewers}`);
+          }
+        }
+      } catch (error) {
+        console.error(`[Live Socket] Error cleaning up on disconnect:`, error);
+      }
     });
   });
 
   return liveNamespace;
 }
 
+/**
+ * Periodic cleanup function to sync viewer counts
+ * Call this periodically to ensure accurate counts even if disconnect events fail
+ */
+async function syncLiveViewerCounts() {
+  try {
+    const activeSessions = await LiveSession.findAll({
+      where: { status: "live" },
+    });
+
+    for (const session of activeSessions) {
+      const currentViewers = await LiveParticipant.count({
+        where: { liveSessionId: session.id, isActive: true },
+      });
+
+      if (session.currentViewers !== currentViewers) {
+        await session.update({ currentViewers });
+        console.log(`[Live Sync] Updated session ${session.id} viewer count: ${session.currentViewers} -> ${currentViewers}`);
+      }
+    }
+  } catch (error) {
+    console.error("[Live Sync] Error syncing viewer counts:", error);
+  }
+}
+
 module.exports = {
   initializeLiveStreamSocket,
+  syncLiveViewerCounts,
 };
