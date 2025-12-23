@@ -14,22 +14,44 @@ const app = express();
 const server = http.createServer(app);
 
 // Determine allowed origins for CORS (Socket.IO + Express)
-let allowedOrigins = [process.env.FRONTEND_URL, process.env.FRONTEND_URL1].filter(Boolean);
+let allowedOrigins = [
+  process.env.FRONTEND_URL, 
+  process.env.FRONTEND_URL1,
+  process.env.MOBILE_APP_ORIGIN // Add mobile app origin if configured
+].filter(Boolean);
 
 // In development, if no explicit frontend URLs are configured, default to localhost:3000
 if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
   allowedOrigins = ["http://localhost:3000"];
 }
 
+// Log allowed origins for debugging (especially useful in production)
+console.log('[CORS] Allowed origins:', allowedOrigins);
+console.log('[CORS] Environment:', process.env.NODE_ENV || 'development');
+
 // Socket.IO server for real-time features (chat, notifications, etc.)
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (mobile apps, same-origin requests)
+      if (!origin) {
         callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS: " + origin));
+        return;
       }
+      
+      // Allow configured origins
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      
+      // In production, log rejected origins for debugging
+      if (process.env.NODE_ENV === "production") {
+        console.warn(`[Socket.IO CORS] Rejected origin: ${origin}`);
+      }
+      
+      // Reject silently (don't throw error which breaks connection)
+      callback(null, false);
     },
     methods: ["GET", "POST"],
     credentials: true,

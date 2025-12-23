@@ -54,18 +54,25 @@ function initializeLiveStreamSocket(io) {
       }
 
       if (!token) {
+        console.error("[Live Socket Auth] No token found. Headers:", {
+          hasAuth: !!socket.handshake.auth,
+          hasCookie: !!socket.handshake.headers?.cookie,
+          hasAuthHeader: !!socket.handshake.headers?.authorization,
+        });
         return next(new Error("Authentication token missing"));
       }
 
       const payload = validateToken(token);
       if (!payload) {
+        console.error("[Live Socket Auth] Invalid token");
         return next(new Error("Invalid or expired token"));
       }
 
       socket.user = payload; // { id, role }
+      console.log(`[Live Socket Auth] Success: ${payload.id}, Role: ${payload.role}`);
       next();
     } catch (error) {
-      console.error("Live socket auth error:", error);
+      console.error("[Live Socket Auth] Exception:", error);
       next(new Error("Authentication failed"));
     }
   });
@@ -152,13 +159,17 @@ function initializeLiveStreamSocket(io) {
     // Send live chat message
     socket.on("live_chat_message", async ({ sessionId, message, messageType }, callback) => {
       try {
+        console.log(`[Live Chat] Message from ${role} ${authId} in session ${sessionId}`);
+        
         if (!sessionId || !message) {
+          console.error("[Live Chat] Missing data:", { sessionId: !!sessionId, message: !!message });
           if (callback) callback({ success: false, error: "Missing data" });
           return;
         }
 
         const liveSession = await LiveSession.findByPk(sessionId);
         if (!liveSession || liveSession.status !== "live") {
+          console.error("[Live Chat] Session not active:", { found: !!liveSession, status: liveSession?.status });
           if (callback) callback({ success: false, error: "Live session not active" });
           return;
         }
@@ -212,9 +223,11 @@ function initializeLiveStreamSocket(io) {
         const roomName = getLiveSessionRoom(sessionId);
         liveNamespace.to(roomName).emit("live:chat_message", messagePayload);
 
+        console.log(`[Live Chat] Message sent successfully to room ${roomName}`);
+
         if (callback) callback({ success: true, message: messagePayload });
       } catch (error) {
-        console.error("live_chat_message error:", error);
+        console.error("[Live Chat] Error sending message:", error);
         if (callback) callback({ success: false, error: "Failed to send message" });
       }
     });
