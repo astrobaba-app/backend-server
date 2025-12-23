@@ -58,6 +58,8 @@ function initializeLiveStreamSocket(io) {
           hasAuth: !!socket.handshake.auth,
           hasCookie: !!socket.handshake.headers?.cookie,
           hasAuthHeader: !!socket.handshake.headers?.authorization,
+          origin: socket.handshake.headers?.origin,
+          transport: socket.conn?.transport?.name,
         });
         return next(new Error("Authentication token missing"));
       }
@@ -72,9 +74,14 @@ function initializeLiveStreamSocket(io) {
       console.log(`[Live Socket Auth] Success: ${payload.id}, Role: ${payload.role}`);
       next();
     } catch (error) {
-      console.error("[Live Socket Auth] Exception:", error);
-      next(new Error("Authentication failed"));
+      console.error("[Live Socket Auth] Exception:", error.message);
+      next(new Error("Authentication failed: " + error.message));
     }
+  });
+
+  // Handle connection errors
+  liveNamespace.on("connect_error", (error) => {
+    console.error("[Live Socket] Connection error:", error.message);
   });
 
   liveNamespace.on("connection", (socket) => {

@@ -48,6 +48,7 @@ const io = new Server(server, {
       // In production, log rejected origins for debugging
       if (process.env.NODE_ENV === "production") {
         console.warn(`[Socket.IO CORS] Rejected origin: ${origin}`);
+        console.warn(`[Socket.IO CORS] Allowed origins are:`, allowedOrigins);
       }
       
       // Reject silently (don't throw error which breaks connection)
@@ -55,11 +56,38 @@ const io = new Server(server, {
     },
     methods: ["GET", "POST"],
     credentials: true,
+    allowedHeaders: ["*"],
   },
+  // Allow both websocket and polling transports
+  transports: ["websocket", "polling"],
+  // Increase ping timeout for unstable connections
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  // Enable connection state recovery
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 2 * 60 * 1000,
+    skipMiddlewares: true,
+  },
+  // Allow more time for connection
+  connectTimeout: 45000,
 });
 
 // Make Socket.IO instance available in controllers via req.app.get('io')
 app.set("io", io);
+
+// Log Socket.IO connection attempts and errors
+io.engine.on("connection_error", (err) => {
+  console.error("[Socket.IO] Connection error:", {
+    code: err.code,
+    message: err.message,
+    context: err.context,
+  });
+});
+
+io.on("connection", (socket) => {
+  console.log(`[Socket.IO] New connection: ${socket.id} from ${socket.handshake.address}`);
+});
+
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -80,9 +108,29 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
 
+// Serve static files from public directory (for test pages)
+app.use('/public', express.static('public'));
+
 // Trust proxy to get real client IP (for production with load balancers/proxies)
 app.set('trust proxy', true);
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+  const io = req.app.get("io");
+  const liveNamespace = io ? io.of("/live") : null;
+  
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    socketIO: {
+      available: !!io,
+      liveNamespace: !!liveNamespace,
+      connectedSockets: liveNamespace ? liveNamespace.sockets.size : 0,
+    },
+    environment: process.env.NODE_ENV || "development",
+    allowedOrigins: allowedOrigins,
+  });
+});
 
 // Routes
 const phoneAuthRoute = require("./routes/authRoute/phoneAuthRoute");
