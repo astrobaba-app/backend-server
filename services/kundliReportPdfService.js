@@ -1,9 +1,7 @@
 const puppeteer = require("puppeteer");
-const path = require("path");
-const fs = require("fs");
 
 /**
- * Generate PDF from Kundli report data
+ * Generate PDF from Kundli report data - 8 pages A4 format
  * @param {Object} reportData - Enhanced report content from OpenAI
  * @param {Object} kundliData - Complete kundli data with charts
  * @param {Object} userDetails - User basic details
@@ -15,11 +13,8 @@ async function generateKundliReportPDF(reportData, kundliData, userDetails) {
   try {
     const { fullName, dateOfbirth, timeOfbirth, placeOfBirth } = userDetails;
     
-    // Extract chart data for visualization
-    const chartData = kundliData.charts?.north_indian_chart || kundliData.charts?.south_indian_chart || [];
-    
     // Create HTML content for PDF
-    const htmlContent = generateHTMLTemplate(reportData, userDetails, chartData);
+    const htmlContent = generateHTMLTemplate(reportData, userDetails);
     
     // Launch browser
     browser = await puppeteer.launch({
@@ -34,15 +29,15 @@ async function generateKundliReportPDF(reportData, kundliData, userDetails) {
       waitUntil: 'networkidle0'
     });
     
-    // Generate PDF
+    // Generate PDF with exact A4 dimensions
     const pdfBuffer = await page.pdf({
       format: 'A4',
       printBackground: true,
       margin: {
-        top: '20mm',
-        right: '15mm',
-        bottom: '20mm',
-        left: '15mm'
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0
       }
     });
     
@@ -60,22 +55,17 @@ async function generateKundliReportPDF(reportData, kundliData, userDetails) {
 }
 
 /**
- * Generate HTML template for PDF
+ * Generate HTML template for PDF - 8 pages exactly matching the reference format
  */
-function generateHTMLTemplate(reportData, userDetails, chartData) {
+function generateHTMLTemplate(reportData, userDetails) {
   const { fullName, dateOfbirth, timeOfbirth, placeOfBirth } = userDetails;
-  const currentYear = new Date().getFullYear();
-  
-  // Process chart data for visualization
-  const chartHTML = generateChartHTML(chartData);
+  const rc = reportData.reportContent;
   
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Yearly Vedic Astrology Report - ${fullName}</title>
   <style>
     * {
       margin: 0;
@@ -84,360 +74,607 @@ function generateHTMLTemplate(reportData, userDetails, chartData) {
     }
     
     body {
-      font-family: 'Georgia', 'Times New Roman', serif;
-      background: #0a1628;
-      color: #e8eaed;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: #0f1824;
+      color: #e0e0e0;
       line-height: 1.6;
     }
     
     .page {
-      background: linear-gradient(135deg, #0a1628 0%, #1a2744 100%);
-      min-height: 100vh;
-      padding: 40px;
+      width: 210mm;
+      height: 297mm;
+      padding: 40px 50px;
+      background: #0f1824;
+      page-break-after: always;
+      position: relative;
     }
     
-    .header {
-      text-align: center;
-      margin-bottom: 40px;
-      border-bottom: 2px solid #d4af37;
-      padding-bottom: 30px;
+    .page:last-child {
+      page-break-after: auto;
     }
     
-    .main-title {
-      font-size: 42px;
+    /* Page 1 Styles */
+    .page-title {
+      font-size: 36px;
       font-weight: 700;
-      color: #d4af37;
+      color: #f4c430;
       margin-bottom: 15px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
     }
     
-    .subtitle {
-      font-size: 18px;
-      color: #b8b8b8;
-      margin-bottom: 10px;
-    }
-    
-    .birth-details {
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid #d4af37;
-      border-radius: 8px;
-      padding: 20px;
-      margin: 30px 0;
-    }
-    
-    .birth-details-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 15px;
-    }
-    
-    .detail-item {
+    .page-subtitle {
       font-size: 14px;
+      color: #b0b0b0;
+      margin-bottom: 30px;
     }
     
-    .detail-label {
-      color: #d4af37;
-      font-weight: 600;
-      margin-right: 8px;
+    .overview-text {
+      font-size: 13px;
+      line-height: 1.8;
+      color: #d0d0d0;
+      text-align: justify;
+      margin-bottom: 40px;
     }
     
-    .detail-value {
-      color: #e8eaed;
-    }
-    
-    .chart-container {
-      margin: 40px 0;
+    .chart-section {
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      padding: 30px;
       text-align: center;
     }
     
     .chart-title {
       font-size: 24px;
-      color: #d4af37;
-      margin-bottom: 20px;
       font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 30px;
     }
     
-    .chart-wrapper {
-      display: inline-block;
-      position: relative;
+    .chart-diamond {
       width: 400px;
       height: 400px;
-    }
-    
-    .chart {
-      width: 100%;
-      height: 100%;
+      margin: 0 auto 20px;
       position: relative;
       transform: rotate(45deg);
-      border: 3px solid #d4af37;
     }
     
-    .chart-house {
+    .diamond-border {
+      width: 100%;
+      height: 100%;
+      border: 2px solid #f4c430;
+      position: relative;
+    }
+    
+    .diamond-line-v {
       position: absolute;
-      width: 50%;
-      height: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border: 1.5px solid #d4af37;
+      top: 0;
+      left: 50%;
+      width: 1px;
+      height: 100%;
+      background: #f4c430;
+    }
+    
+    .diamond-line-h {
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 100%;
+      height: 1px;
+      background: #f4c430;
+    }
+    
+    .house-number {
+      position: absolute;
       font-size: 12px;
-      color: #d4af37;
-      font-weight: 600;
+      color: #f4c430;
+      font-weight: 500;
+      transform: rotate(-45deg);
     }
     
-    .house-1 { top: 0; left: 50%; transform: rotate(-45deg); }
-    .house-2 { top: 0; right: 0; transform: rotate(-45deg); }
-    .house-3 { top: 25%; right: 0; transform: rotate(-45deg); }
-    .house-4 { top: 50%; right: 0; transform: rotate(-45deg); }
-    .house-5 { bottom: 0; right: 0; transform: rotate(-45deg); }
-    .house-6 { bottom: 0; right: 50%; transform: rotate(-45deg); }
-    .house-7 { bottom: 0; left: 0; transform: rotate(-45deg); }
-    .house-8 { bottom: 25%; left: 0; transform: rotate(-45deg); }
-    .house-9 { top: 50%; left: 0; transform: rotate(-45deg); }
-    .house-10 { top: 25%; left: 0; transform: rotate(-45deg); }
-    .house-11 { top: 0; left: 0; transform: rotate(-45deg); }
-    .house-12 { top: 0; left: 25%; transform: rotate(-45deg); }
-    
-    .house-label {
-      position: absolute;
-      bottom: 5px;
-      right: 5px;
-      font-size: 10px;
-      opacity: 0.7;
-    }
+    .h-top { top: -5px; left: 50%; transform: translate(-50%, 0) rotate(-45deg); }
+    .h-right { top: 50%; right: -5px; transform: translate(0, -50%) rotate(-45deg); }
+    .h-bottom { bottom: -5px; left: 50%; transform: translate(-50%, 0) rotate(-45deg); }
+    .h-left { top: 50%; left: -5px; transform: translate(0, -50%) rotate(-45deg); }
+    .h-tr { top: 10%; right: 10%; transform: rotate(-45deg); }
+    .h-br { bottom: 10%; right: 10%; transform: rotate(-45deg); }
+    .h-bl { bottom: 10%; left: 10%; transform: rotate(-45deg); }
+    .h-tl { top: 10%; left: 10%; transform: rotate(-45deg); }
+    .h-center-t { top: 25%; left: 50%; transform: translate(-50%, 0) rotate(-45deg); }
+    .h-center-r { top: 50%; right: 25%; transform: translate(0, -50%) rotate(-45deg); }
+    .h-center-b { bottom: 25%; left: 50%; transform: translate(-50%, 0) rotate(-45deg); }
+    .h-center-l { top: 50%; left: 25%; transform: translate(0, -50%) rotate(-45deg); }
     
     .chart-note {
-      margin-top: 15px;
       font-size: 12px;
-      color: #b8b8b8;
-      font-style: italic;
+      color: #808080;
+      margin-top: 10px;
     }
     
-    .content-section {
-      margin: 40px 0;
-      page-break-inside: avoid;
-    }
-    
+    /* Content Page Styles */
     .section-title {
-      font-size: 28px;
-      color: #d4af37;
-      margin-bottom: 20px;
+      font-size: 32px;
       font-weight: 600;
-      border-left: 4px solid #d4af37;
-      padding-left: 15px;
+      color: #f4c430;
+      margin-bottom: 30px;
+      border-bottom: 1px solid #f4c430;
+      padding-bottom: 10px;
     }
     
-    .section-content {
-      background: rgba(26, 39, 68, 0.5);
-      border: 1px solid rgba(212, 175, 55, 0.3);
+    .description-text {
+      font-size: 13px;
+      line-height: 1.8;
+      color: #d0d0d0;
+      text-align: justify;
+      margin-bottom: 30px;
+    }
+    
+    .period-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 30px;
+    }
+    
+    .period-table thead {
+      background: #f4c430;
+    }
+    
+    .period-table th {
+      padding: 12px 15px;
+      text-align: left;
+      font-size: 14px;
+      font-weight: 600;
+      color: #0f1824;
+    }
+    
+    .period-table td {
+      padding: 12px 15px;
+      font-size: 13px;
+      color: #d0d0d0;
+      border-bottom: 1px solid #2a3544;
+    }
+    
+    .period-table tbody tr:hover {
+      background: rgba(244, 196, 48, 0.05);
+    }
+    
+    .key-dates-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #ffffff;
+      margin: 30px 0 15px 0;
+    }
+    
+    .date-card {
+      background: rgba(255, 255, 255, 0.03);
+      border-left: 3px solid #f4c430;
+      padding: 15px 20px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    
+    .date-card.positive {
+      border-left-color: #4caf50;
+    }
+    
+    .date-card.negative {
+      border-left-color: #f44336;
+    }
+    
+    .date-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 5px;
+    }
+    
+    .date-label.positive {
+      color: #4caf50;
+    }
+    
+    .date-label.negative {
+      color: #f44336;
+    }
+    
+    .date-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 3px;
+    }
+    
+    .date-desc {
+      font-size: 13px;
+      color: #b0b0b0;
+    }
+    
+    .remedies-section {
+      background: rgba(40, 50, 30, 0.4);
       border-radius: 8px;
       padding: 25px;
-      font-size: 15px;
-      line-height: 1.8;
-      text-align: justify;
+      margin-top: 30px;
     }
     
-    .section-content p {
+    .remedies-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #ffffff;
       margin-bottom: 15px;
     }
     
     .remedies-list {
       list-style: none;
-      padding: 0;
     }
     
     .remedies-list li {
-      background: rgba(212, 175, 55, 0.1);
-      border-left: 3px solid #d4af37;
-      padding: 12px 15px;
-      margin-bottom: 10px;
-      border-radius: 4px;
+      font-size: 13px;
+      color: #d0d0d0;
+      padding: 8px 0;
+      padding-left: 20px;
+      position: relative;
     }
     
     .remedies-list li:before {
-      content: "✦ ";
-      color: #d4af37;
-      font-weight: bold;
-      margin-right: 8px;
-    }
-    
-    .footer {
-      margin-top: 60px;
-      text-align: center;
-      padding-top: 30px;
-      border-top: 2px solid #d4af37;
-      font-size: 13px;
-      color: #b8b8b8;
-    }
-    
-    .footer-note {
-      margin-top: 10px;
-      font-style: italic;
-    }
-    
-    @media print {
-      .page-break {
-        page-break-before: always;
-      }
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: #f4c430;
+      font-size: 18px;
     }
   </style>
 </head>
 <body>
+
+  <!-- PAGE 1: Title + Overview + Chart -->
   <div class="page">
-    <!-- Header -->
-    <div class="header">
-      <h1 class="main-title">Yearly Vedic Astrology Report</h1>
-      <p class="subtitle">Prepared exclusively for ${fullName}</p>
+    <h1 class="page-title">Yearly Vedic Astrology Report</h1>
+    <p class="page-subtitle">Prepared exclusively for ${fullName}</p>
+    
+    <div class="overview-text">
+      ${rc.overview || ''}
     </div>
     
-    <!-- Birth Details -->
-    <div class="birth-details">
-      <div class="birth-details-grid">
-        <div class="detail-item">
-          <span class="detail-label">Name:</span>
-          <span class="detail-value">${fullName}</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">Date of Birth:</span>
-          <span class="detail-value">${dateOfbirth}</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">Time of Birth:</span>
-          <span class="detail-value">${timeOfbirth}</span>
-        </div>
-        <div class="detail-item">
-          <span class="detail-label">Place of Birth:</span>
-          <span class="detail-value">${placeOfBirth}</span>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Overview Section -->
-    <div class="content-section">
-      <h2 class="section-title">Overview - ${currentYear}</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.overview)}
-      </div>
-    </div>
-    
-    <!-- Birth Chart -->
-    <div class="chart-container">
+    <div class="chart-section">
       <h2 class="chart-title">Birth Chart (Kundli)</h2>
-      ${chartHTML}
+      <div class="chart-diamond">
+        <div class="diamond-border">
+          <div class="diamond-line-v"></div>
+          <div class="diamond-line-h"></div>
+          <div class="house-number h-top">Asc [1st House]</div>
+          <div class="house-number h-tr">2</div>
+          <div class="house-number h-right">3</div>
+          <div class="house-number h-br">4</div>
+          <div class="house-number h-bottom">5</div>
+          <div class="house-number h-bl">6</div>
+          <div class="house-number h-left">7</div>
+          <div class="house-number h-tl">8</div>
+          <div class="house-number h-center-t">12</div>
+          <div class="house-number h-center-r">9</div>
+          <div class="house-number h-center-b">10</div>
+          <div class="house-number h-center-l">11</div>
+        </div>
+      </div>
       <p class="chart-note">North Indian Style Vedic Chart</p>
     </div>
+  </div>
+
+  <!-- PAGE 2: Career Opportunities and Challenges -->
+  <div class="page">
+    <h1 class="section-title">Career Opportunities and Challenges</h1>
     
-    <!-- Page Break -->
-    <div class="page-break"></div>
-    
-    <!-- Career & Finance Section -->
-    <div class="content-section">
-      <h2 class="section-title">Career & Finance</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.careerFinance)}
-      </div>
+    <div class="description-text">
+      ${rc.careerFinance || ''}
     </div>
     
-    <!-- Relationships Section -->
-    <div class="content-section">
-      <h2 class="section-title">Relationships</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.relationships)}
-      </div>
-    </div>
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.careerPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
     
-    <!-- Health & Wellness Section -->
-    <div class="content-section">
-      <h2 class="section-title">Health & Wellness</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.healthWellness)}
-      </div>
-    </div>
+    <h3 class="key-dates-title">Key dates</h3>
     
-    <!-- Spiritual Growth Section -->
-    <div class="content-section">
-      <h2 class="section-title">Spiritual Growth</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.spiritualGrowth)}
+    ${(rc.careerKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
       </div>
-    </div>
+    `).join('')}
     
-    <!-- Monthly Predictions Section -->
-    <div class="content-section">
-      <h2 class="section-title">Monthly Predictions</h2>
-      <div class="section-content">
-        ${formatTextContent(reportData.reportContent.monthlyPredictions)}
-      </div>
-    </div>
-    
-    <!-- Remedies Section -->
-    ${reportData.reportContent.remedies && reportData.reportContent.remedies.length > 0 ? `
-    <div class="content-section">
-      <h2 class="section-title">Recommended Remedies</h2>
-      <div class="section-content">
-        <ul class="remedies-list">
-          ${reportData.reportContent.remedies.map(remedy => `<li>${remedy}</li>`).join('')}
-        </ul>
-      </div>
-    </div>
-    ` : ''}
-    
-    <!-- Footer -->
-    <div class="footer">
-      <p>Generated by Graho - Your Trusted Astrology Platform</p>
-      <p class="footer-note">This report is based on Vedic astrology principles and should be used for guidance purposes.</p>
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.careerRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
     </div>
   </div>
+
+  <!-- PAGE 3: Personal Relationships and Growth -->
+  <div class="page">
+    <h1 class="section-title">Personal Relationships and Growth</h1>
+    
+    <div class="description-text">
+      ${rc.relationships || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.relationshipPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.relationshipKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.relationshipRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
+  <!-- PAGE 4: Financial Growth and Management -->
+  <div class="page">
+    <h1 class="section-title">Financial Growth and Management</h1>
+    
+    <div class="description-text">
+      ${rc.finance || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.financePeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.financeKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.financeRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
+  <!-- PAGE 5: Health and Well-being -->
+  <div class="page">
+    <h1 class="section-title">Health and Well-being</h1>
+    
+    <div class="description-text">
+      ${rc.healthWellness || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.healthPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.healthKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.healthRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
+  <!-- PAGE 6: Spiritual Growth and Exploration -->
+  <div class="page">
+    <h1 class="section-title">Spiritual Growth and Exploration</h1>
+    
+    <div class="description-text">
+      ${rc.spiritualGrowth || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.spiritualPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.spiritualKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.spiritualRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
+  <!-- PAGE 7: Travel Opportunities and Experiences -->
+  <div class="page">
+    <h1 class="section-title">Travel Opportunities and Experiences</h1>
+    
+    <div class="description-text">
+      ${rc.travel || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.travelPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.travelKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.travelRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
+  <!-- PAGE 8: Educational Growth and Opportunities -->
+  <div class="page">
+    <h1 class="section-title">Educational Growth and Opportunities</h1>
+    
+    <div class="description-text">
+      ${rc.education || ''}
+    </div>
+    
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th>Focus</th>
+          <th>Prediction</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${(rc.educationPeriods || []).map(p => `
+          <tr>
+            <td>${p.period}</td>
+            <td>${p.focus}</td>
+            <td>${p.prediction}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+    
+    <h3 class="key-dates-title">Key dates</h3>
+    
+    ${(rc.educationKeyDates || []).map(d => `
+      <div class="date-card ${d.type}">
+        <div class="date-label ${d.type}">${d.type.toUpperCase()}</div>
+        <div class="date-title">${d.date}</div>
+        <div class="date-desc">${d.title}</div>
+      </div>
+    `).join('')}
+    
+    <div class="remedies-section">
+      <h3 class="remedies-title">Remedies</h3>
+      <ul class="remedies-list">
+        ${(rc.educationRemedies || []).map(r => `<li>${r}</li>`).join('')}
+      </ul>
+    </div>
+  </div>
+
 </body>
 </html>
   `;
-}
-
-/**
- * Generate chart HTML visualization
- */
-function generateChartHTML(chartData) {
-  // Create a simple diamond chart visualization
-  // chartData is an array where each element represents a house
-  
-  if (!chartData || chartData.length === 0) {
-    return '<p style="color: #b8b8b8;">Chart data not available</p>';
-  }
-  
-  let chartHTML = '<div class="chart-wrapper"><div class="chart">';
-  
-  // North Indian chart has 12 houses
-  for (let i = 1; i <= 12; i++) {
-    const houseData = chartData.find(h => h.house === i) || {};
-    const planets = houseData.planets || houseData.sign || i;
-    
-    chartHTML += `
-      <div class="chart-house house-${i}">
-        <span>${planets}</span>
-        <span class="house-label">${i}</span>
-      </div>
-    `;
-  }
-  
-  chartHTML += '</div></div>';
-  
-  return chartHTML;
-}
-
-/**
- * Format text content with paragraphs
- */
-function formatTextContent(text) {
-  if (!text) return '<p>Content not available</p>';
-  
-  // Split by double newlines or periods followed by newlines
-  const paragraphs = text.split(/\n\n|\.\s+(?=[A-Z])/);
-  
-  return paragraphs
-    .filter(p => p.trim())
-    .map(p => `<p>${p.trim()}</p>`)
-    .join('');
 }
 
 module.exports = {
