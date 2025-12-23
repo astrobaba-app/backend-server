@@ -32,14 +32,20 @@ class NotificationService {
       // Send push notification via FCM
       if (sendPush) {
         try {
+          // Convert all data values to strings (FCM requirement)
+          const stringifiedData = {};
+          for (const [key, value] of Object.entries(data)) {
+            stringifiedData[key] = String(value);
+          }
+
           await pushNotificationService.sendToUser(userId, {
             title,
             body: message,
             data: {
-              ...data,
-              type,
-              notificationId: notification.id,
-              actionUrl: actionUrl || "",
+              ...stringifiedData,
+              type: String(type),
+              notificationId: String(notification.id),
+              actionUrl: String(actionUrl || ""),
             },
           });
         } catch (pushError) {
@@ -83,13 +89,19 @@ class NotificationService {
       // Send push notifications via FCM
       if (sendPush) {
         try {
+          // Convert all data values to strings (FCM requirement)
+          const stringifiedData = {};
+          for (const [key, value] of Object.entries(data)) {
+            stringifiedData[key] = String(value);
+          }
+
           await pushNotificationService.broadcastToAll({
             title,
             body: message,
             data: {
-              ...data,
-              type,
-              actionUrl: actionUrl || "",
+              ...stringifiedData,
+              type: String(type),
+              actionUrl: String(actionUrl || ""),
             },
           });
         } catch (pushError) {
