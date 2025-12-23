@@ -5,8 +5,8 @@ const setTokenCookieAstrologer = (res, token, astrologerToken) => {
     serialize("token", token, {
       domain:".graho.in",
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
@@ -14,8 +14,8 @@ const setTokenCookieAstrologer = (res, token, astrologerToken) => {
     serialize("token_astrologer", astrologerToken, {
       domain:".graho.in",
       httpOnly: false,
-      secure: false,
-      sameSite: "lax",
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
