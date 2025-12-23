@@ -19,14 +19,23 @@ async function generateKundliReportContent(kundliData, userDetails) {
     const moonSign = kundliData.basicDetails?.moon_sign || "Not available";
     const sunSign = kundliData.basicDetails?.sun_sign || "Not available";
     
-    // Get planetary positions
-    const planets = kundliData.planetary || [];
+    // Get planetary positions - convert to array if it's an object
+    const planetaryData = kundliData.planetary || [];
+    const planets = Array.isArray(planetaryData) 
+      ? planetaryData 
+      : Object.values(planetaryData);
     
-    // Get yogas
-    const yogas = kundliData.yogas || [];
+    // Get yogas - convert to array if it's an object
+    const yogasData = kundliData.yogas || [];
+    const yogas = Array.isArray(yogasData) 
+      ? yogasData 
+      : Object.values(yogasData);
     
     // Get dasha information
-    const dashas = kundliData.dasha?.major_dashas || [];
+    const dashasData = kundliData.dasha?.major_dashas || [];
+    const dashas = Array.isArray(dashasData) 
+      ? dashasData 
+      : Object.values(dashasData);
     const currentDasha = dashas[0] || null;
 
     const prompt = `Generate a comprehensive Yearly Vedic Astrology Report for ${fullName}.
