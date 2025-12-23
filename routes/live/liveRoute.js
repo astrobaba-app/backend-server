@@ -11,12 +11,14 @@ const {
   getAstrologerLiveSessions,
   getLiveHistory,
   getLiveChatMessages,
+  getSocketStatus,
 } = require("../../controller/live/liveController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 
 // Public routes
 router.get("/active", getActiveLiveSessions);
+router.get("/socket-status", getSocketStatus); // Debug endpoint
 
 // Astrologer routes (require authentication)
 router.post("/create", checkForAuthenticationCookie(), upload.single("thumbnail"), createLiveSession);

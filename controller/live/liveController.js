@@ -526,12 +526,34 @@ const endLiveSession = async (req, res) => {
       currentViewers: 0,
     });
 
-    // Emit socket event to all participants in the room
+    // Emit socket event to all participants in the room AND entire namespace
+    const socketsInRoom = liveNamespace.adapter.rooms.get(roomName)?.size || 0;
+    
+    console.log(`[Live Controller] Ending session ${sessionId}`);
+    console.log(`[Live Controller] Room ${roomName} has ${socketsInRoom} sockets`);
+    console.log(`[Live Controller] Namespace /live has ${liveNamespace.sockets.size} total sockets`);
+    
+    // Emit to room with both event names for compatibility
     liveNamespace.to(roomName).emit("live_session_ended", {
       sessionId: liveSession.id,
       message: `${liveSession.astrologer.fullName} has ended the live session`,
       astrologerName: liveSession.astrologer.fullName,
     });
+    
+    liveNamespace.to(roomName).emit("live:ended", {
+      sessionId: liveSession.id,
+      message: `${liveSession.astrologer.fullName} has ended the live session`,
+      astrologerName: liveSession.astrologer.fullName,
+    });
+    
+    // Also broadcast to entire namespace to ensure delivery
+    liveNamespace.emit("live:session_ended", {
+      sessionId: liveSession.id,
+      message: `${liveSession.astrologer.fullName} has ended the live session`,
+      astrologerName: liveSession.astrologer.fullName,
+    });
+    
+    console.log(`[Live Controller] Emitted end events for session ${sessionId}`);
 
     res.status(200).json({
       success: true,
@@ -726,6 +748,50 @@ const getLiveChatMessages = async (req, res) => {
   }
 };
 
+// Debug endpoint - Check Socket.IO status
+const getSocketStatus = async (req, res) => {
+  try {
+    const io = req.app.get("io");
+    const liveNamespace = io.of("/live");
+    const { getLiveSessionRoom } = require("../../services/chatSocket");
+    
+    // Get all rooms
+    const rooms = Array.from(liveNamespace.adapter.rooms.entries())
+      .filter(([roomName]) => roomName.startsWith("live:"))
+      .map(([roomName, socketIds]) => ({
+        roomName,
+        socketCount: socketIds.size,
+        socketIds: Array.from(socketIds),
+      }));
+    
+    // Get all active sessions
+    const activeSessions = await LiveSession.findAll({
+      where: { status: "live" },
+      attributes: ["id", "title", "currentViewers", "astrologerId"],
+    });
+    
+    res.status(200).json({
+      success: true,
+      namespace: "/live",
+      totalConnectedSockets: liveNamespace.sockets.size,
+      rooms: rooms,
+      activeSessionsInDB: activeSessions.map(s => ({
+        sessionId: s.id,
+        title: s.title,
+        currentViewers: s.currentViewers,
+        expectedRoom: getLiveSessionRoom(s.id),
+      })),
+    });
+  } catch (error) {
+    console.error("Get socket status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to get socket status",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createLiveSession,
   startLiveSession,
@@ -734,6 +800,7 @@ module.exports = {
   leaveLiveSession,
   endLiveSession,
   getActiveLiveSessions,
+  getSocketStatus,
   getAstrologerLiveSessions,
   getLiveHistory,
   getLiveChatMessages,

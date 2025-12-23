@@ -84,7 +84,10 @@ function initializeLiveStreamSocket(io) {
     // Track which session this socket is in for cleanup on disconnect
     socket.currentLiveSession = null;
 
-    console.log(`[Live Socket] Connected: ${authId}, Role: ${role}`);
+    console.log(`[Live Socket] Connected: ${authId}, Role: ${role}, Socket ID: ${socket.id}`);
+    console.log(`[Live Socket] Total connected sockets in /live namespace: ${liveNamespace.sockets.size}`);
+    console.log(`[Live Socket] Transport: ${socket.conn.transport.name}`);
+    console.log(`[Live Socket] Origin: ${socket.handshake.headers.origin || 'no origin'}`);
 
     // Join live session room
     socket.on("join_live_session", async ({ sessionId }) => {
@@ -109,6 +112,9 @@ function initializeLiveStreamSocket(io) {
         
         // Track current session for disconnect cleanup
         socket.currentLiveSession = sessionId;
+        
+        console.log(`[Live Socket] User ${authId} joined room: ${roomName}`);
+        console.log(`[Live Socket] Sockets in room ${roomName}:`, liveNamespace.adapter.rooms.get(roomName)?.size || 0);
 
         // Get participant count
         const participantCount = await LiveParticipant.count({
@@ -126,6 +132,7 @@ function initializeLiveStreamSocket(io) {
 
         // Notify others about new participant (only if user, not astrologer)
         if (!isAstrologer) {
+          console.log(`[Live Socket] Notifying room about new participant. Count: ${participantCount}`);
           liveNamespace.to(roomName).emit("live:participant_joined", {
             sessionId,
             participantCount,
@@ -158,6 +165,7 @@ function initializeLiveStreamSocket(io) {
         console.log(`[Live Socket] ${role} ${authId} left session ${sessionId}`);
 
         // Notify others about participant leaving
+        console.log(`[Live Socket] Notifying room about participant leaving. Count: ${participantCount}`);
         liveNamespace.to(roomName).emit("live:participant_left", {
           sessionId,
           participantCount,
@@ -233,6 +241,9 @@ function initializeLiveStreamSocket(io) {
 
         // Broadcast to all participants in the room
         const roomName = getLiveSessionRoom(sessionId);
+        const socketsInRoom = liveNamespace.adapter.rooms.get(roomName)?.size || 0;
+        
+        console.log(`[Live Chat] Broadcasting to room ${roomName} with ${socketsInRoom} sockets`);
         liveNamespace.to(roomName).emit("live:chat_message", messagePayload);
 
         console.log(`[Live Chat] Message sent successfully to room ${roomName}`);
@@ -342,7 +353,20 @@ function initializeLiveStreamSocket(io) {
 
           // Notify all participants
           const roomName = getLiveSessionRoom(sessionId);
+          const socketsInRoom = liveNamespace.adapter.rooms.get(roomName)?.size || 0;
+          
+          console.log(`[Live Session] Ending session ${sessionId}`);
+          console.log(`[Live Session] Broadcasting to ${socketsInRoom} sockets in room ${roomName}`);
+          
+          // Emit to room
           liveNamespace.to(roomName).emit("live:ended", { sessionId });
+          
+          // Also emit to all sockets in the namespace as a backup
+          liveNamespace.emit("live:session_ended", { sessionId });
+          
+          console.log(`[Live Session] Broadcast complete for session ${sessionId}`);
+          
+          console.log(`[Live Session] Broadcast complete for session ${sessionId}`);
         }
       } catch (error) {
         console.error("update_live_status error:", error);
