@@ -5,8 +5,8 @@ const setTokenCookie = (res, token, middlewareToken) => {
     serialize("token", token, {
       domain:".graho.in",
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: false,
+      sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
@@ -14,8 +14,8 @@ const setTokenCookie = (res, token, middlewareToken) => {
     serialize("token_middleware", middlewareToken, {
       domain:".graho.in",
       httpOnly: false,
-      secure: true,
-      sameSite: "none",
+      secure: false,
+      sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
