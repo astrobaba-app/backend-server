@@ -30,6 +30,7 @@ const Notification = sequelize.define(
         "review_reply",
         "wallet_credited",
         "admin_broadcast",
+        "astrologer_online",
         "test",
         "general"
       ),

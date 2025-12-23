@@ -6,6 +6,8 @@ const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
 const { createToken, createMiddlewareToken } = require("../../services/authService");
 const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
 const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
+const Follow = require("../../model/follow/follow");
+const notificationService = require("../../services/notificationService");
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -451,6 +453,44 @@ const toggleOnlineStatus = async (req, res) => {
     const newStatus = !astrologer.isOnline;
     await astrologer.update({ isOnline: newStatus });
 
+    // Send push notification to followers when astrologer goes online
+    if (newStatus === true) {
+      try {
+        // Get all followers of this astrologer
+        const followers = await Follow.findAll({
+          where: { astrologerId },
+          attributes: ['userId'],
+        });
+
+        const followerIds = followers.map(f => f.userId);
+
+        if (followerIds.length > 0) {
+          // Send notification to each follower
+          await Promise.all(
+            followerIds.map(userId =>
+              notificationService.sendToUser(userId, {
+                type: 'astrologer_online',
+                title: `${astrologer.fullName} is now Online! 🟢`,
+                message: `${astrologer.fullName} is available for consultation. Connect now!`,
+                data: {
+                  astrologerId: astrologer.id,
+                  astrologerName: astrologer.fullName,
+                  astrologerPhoto: astrologer.photo || '',
+                },
+                actionUrl: `/astrologer/${astrologer.id}`,
+                priority: 'high',
+                sendPush: true,
+              })
+            )
+          );
+          console.log(`[Astrologer Online] Sent notifications to ${followerIds.length} followers`);
+        }
+      } catch (notifError) {
+        console.error('Error sending follower notifications:', notifError);
+        // Don't fail the request if notifications fail
+      }
+    }
+
     res.status(200).json({
       success: true,
       message: `Status changed to ${newStatus ? "online" : "offline"}`,
@@ -471,10 +511,52 @@ const goOnline = async (req, res) => {
   try {
     const astrologerId = req.user.id;
 
-    await Astrologer.update(
-      { isOnline: true },
-      { where: { id: astrologerId } }
-    );
+    const astrologer = await Astrologer.findByPk(astrologerId);
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    await astrologer.update({ isOnline: true });
+
+    // Send push notification to followers
+    try {
+      // Get all followers of this astrologer
+      const followers = await Follow.findAll({
+        where: { astrologerId },
+        attributes: ['userId'],
+      });
+
+      const followerIds = followers.map(f => f.userId);
+
+      if (followerIds.length > 0) {
+        // Send notification to each follower
+        await Promise.all(
+          followerIds.map(userId =>
+            notificationService.sendToUser(userId, {
+              type: 'astrologer_online',
+              title: `${astrologer.fullName} is now Online! 🟢`,
+              message: `${astrologer.fullName} is available for consultation. Connect now!`,
+              data: {
+                astrologerId: astrologer.id,
+                astrologerName: astrologer.fullName,
+                astrologerPhoto: astrologer.photo || '',
+              },
+              actionUrl: `/astrologer/${astrologer.id}`,
+              priority: 'high',
+              sendPush: true,
+            })
+          )
+        );
+        console.log(`[Astrologer Online] Sent notifications to ${followerIds.length} followers`);
+      }
+    } catch (notifError) {
+      console.error('Error sending follower notifications:', notifError);
+      // Don't fail the request if notifications fail
+    }
 
     res.status(200).json({
       success: true,
