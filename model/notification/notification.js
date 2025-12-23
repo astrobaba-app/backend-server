@@ -29,6 +29,8 @@ const Notification = sequelize.define(
         "chat_request",
         "review_reply",
         "wallet_credited",
+        "admin_broadcast",
+        "test",
         "general"
       ),
       allowNull: false,

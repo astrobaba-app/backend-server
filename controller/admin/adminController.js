@@ -10,6 +10,7 @@ const {
 const { createMiddlewareToken, createToken } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
+const notificationService = require("../../services/notificationService");
 
 
 const register = async (req, res) => {
@@ -448,6 +449,45 @@ const logout = async (req, res) => {
   }
 };
 
+/**
+ * Broadcast push notification to all users
+ */
+const broadcastNotification = async (req, res) => {
+  try {
+    const { title, message, actionUrl, imageUrl, data } = req.body;
+
+    if (!title || !message) {
+      return res.status(400).json({
+        success: false,
+        message: "Title and message are required",
+      });
+    }
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title,
+      message,
+      data: data || {},
+      actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Broadcast notification sent successfully",
+      data: result,
+    });
+  } catch (error) {
+    console.error("Broadcast notification error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to send broadcast notification",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -459,4 +499,5 @@ module.exports = {
   approveAstrologer,
   rejectAstrologer,
   logout,
+  broadcastNotification,
 };

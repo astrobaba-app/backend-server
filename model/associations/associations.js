@@ -4,6 +4,7 @@ const Kundli = require("../horoscope/kundli");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
 const Address = require("../user/address");
+const DeviceToken = require("../user/deviceToken");
 const Wallet = require("../wallet/wallet");
 const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
@@ -90,6 +91,18 @@ const CachedHoroscope = require("../horoscope/cachedHoroscope");
   });
 
   Address.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // DeviceToken associations
+  User.hasMany(DeviceToken, {
+    foreignKey: "userId",
+    as: "deviceTokens",
+    onDelete: "CASCADE",
+  });
+
+  DeviceToken.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

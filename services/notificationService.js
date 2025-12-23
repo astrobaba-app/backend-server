@@ -1,11 +1,12 @@
 const Notification = require("../model/notification/notification");
 const User = require("../model/user/userAuth");
+const pushNotificationService = require("./pushNotificationService");
 
 class NotificationService {
   /**
    * Send notification to specific user
    */
-  async sendToUser(userId, { type, title, message, data = {}, actionUrl = null, priority = "medium" }) {
+  async sendToUser(userId, { type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true }) {
     try {
       // Ensure the target user actually exists in the users table to
       // avoid foreign key violations (e.g. when passing an astrologerId).
@@ -28,8 +29,24 @@ class NotificationService {
         priority,
       });
 
-      // TODO: Integrate with Firebase Cloud Messaging (FCM) or Socket.io for real-time push
-      // await this.sendPushNotification(userId, notification);
+      // Send push notification via FCM
+      if (sendPush) {
+        try {
+          await pushNotificationService.sendToUser(userId, {
+            title,
+            body: message,
+            data: {
+              ...data,
+              type,
+              notificationId: notification.id,
+              actionUrl: actionUrl || "",
+            },
+          });
+        } catch (pushError) {
+          console.error("Error sending push notification:", pushError);
+          // Don't fail the entire notification if push fails
+        }
+      }
 
       return notification;
     } catch (error) {
@@ -41,7 +58,7 @@ class NotificationService {
   /**
    * Broadcast notification to all users
    */
-  async broadcastToAll({ type, title, message, data = {}, actionUrl = null, priority = "medium" }) {
+  async broadcastToAll({ type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true }) {
     try {
       // Get all users (User model doesn't have isActive column)
       const users = await User.findAll({
@@ -63,8 +80,23 @@ class NotificationService {
         )
       );
 
-      // TODO: Send push notifications via FCM
-      // await this.sendBulkPushNotifications(notifications);
+      // Send push notifications via FCM
+      if (sendPush) {
+        try {
+          await pushNotificationService.broadcastToAll({
+            title,
+            body: message,
+            data: {
+              ...data,
+              type,
+              actionUrl: actionUrl || "",
+            },
+          });
+        } catch (pushError) {
+          console.error("Error sending broadcast push notification:", pushError);
+          // Don't fail the entire notification if push fails
+        }
+      }
 
       return {
         success: true,

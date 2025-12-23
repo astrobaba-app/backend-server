@@ -11,6 +11,7 @@ const {
   approveAstrologer,
   rejectAstrologer,
   logout,
+  broadcastNotification,
 } = require("../../controller/admin/adminController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
@@ -62,6 +63,14 @@ router.put(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   rejectAstrologer
+);
+
+// Broadcast push notification to all users
+router.post(
+  "/broadcast-notification",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  broadcastNotification
 );
 
 module.exports = router;
