@@ -43,6 +43,11 @@ const Astrologer = sequelize.define(
       type: DataTypes.DATEONLY,
       allowNull: true,
     },
+    gender: {
+      type: DataTypes.ENUM('Male', 'Female', 'Other'),
+      allowNull: true,
+      comment: "Gender of the astrologer: Male, Female, Other",
+    },
     languages: {
       type: DataTypes.ARRAY(DataTypes.STRING),
       allowNull: false,

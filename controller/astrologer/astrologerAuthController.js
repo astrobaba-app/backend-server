@@ -112,6 +112,7 @@ const completeRegistration = async (req, res) => {
       password,
       fullName,
       dateOfBirth,
+      gender,
       languages,
       skills,
       categories,
@@ -197,6 +198,17 @@ const completeRegistration = async (req, res) => {
       });
     }
 
+    // Validate gender if provided
+    if (gender) {
+      const validGenders = ['Male', 'Female', 'Other'];
+      if (!validGenders.includes(gender)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid gender: ${gender}. Valid genders are: Male, Female, Other`,
+        });
+      }
+    }
+
     // Validate pricePerMinute
     const pricePerMin = pricePerMinute ? parseFloat(pricePerMinute) : 0.0;
     if (pricePerMin < 0) {
@@ -243,6 +255,7 @@ const completeRegistration = async (req, res) => {
       fullName,
       photo,
       dateOfBirth: dateOfBirth || null,
+      gender: gender || null,
       languages: languagesArray,
       skills: skillsArray,
       categories: categoriesArray,
@@ -261,6 +274,7 @@ const completeRegistration = async (req, res) => {
         email: astrologer.email,
         fullName: astrologer.fullName,
         photo: astrologer.photo,
+        gender: astrologer.gender,
         isApproved: astrologer.isApproved,
         languages: astrologer.languages,
         skills: astrologer.skills,
@@ -403,6 +417,7 @@ const updateProfile = async (req, res) => {
     const {
       fullName,
       dateOfBirth,
+      gender,
       languages,
       skills,
       categories,
@@ -426,6 +441,17 @@ const updateProfile = async (req, res) => {
     if (fullName) updateData.fullName = fullName;
     if (req.fileUrl) updateData.photo = req.fileUrl;
     if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
+    if (gender) {
+      // Validate gender
+      const validGenders = ['Male', 'Female', 'Other'];
+      if (!validGenders.includes(gender)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid gender: ${gender}. Valid genders are: Male, Female, Other`,
+        });
+      }
+      updateData.gender = gender;
+    }
     if (languages) updateData.languages = languages;
     if (skills) updateData.skills = skills;
     if (categories) {
@@ -459,6 +485,7 @@ const updateProfile = async (req, res) => {
         fullName: astrologer.fullName,
         photo: astrologer.photo,
         dateOfBirth: astrologer.dateOfBirth,
+        gender: astrologer.gender,
         languages: astrologer.languages,
         skills: astrologer.skills,
         categories: astrologer.categories,
