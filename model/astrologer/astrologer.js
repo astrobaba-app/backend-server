@@ -55,6 +55,25 @@ const Astrologer = sequelize.define(
       defaultValue: [],
       comment: "Skills: Vedic, KP, Numerology, Tarot, Palmistry, Vastu, Prashna, Nadi, Lal Kitab, Face Reading",
     },
+    categories: {
+      type: DataTypes.ARRAY(DataTypes.ENUM(
+        'Love',
+        'Relationship',
+        'Education',
+        'Health',
+        'Career',
+        'Finance',
+        'Marriage',
+        'Family',
+        'Business',
+        'Legal',
+        'Travel',
+        'Spiritual'
+      )),
+      allowNull: false,
+      defaultValue: [],
+      comment: "Consultation categories: Love, Relationship, Education, Health, Career, Finance, Marriage, Family, Business, Legal, Travel, Spiritual",
+    },
     yearsOfExperience: {
       type: DataTypes.INTEGER,
       allowNull: false,

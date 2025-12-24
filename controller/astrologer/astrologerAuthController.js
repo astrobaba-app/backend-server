@@ -114,7 +114,9 @@ const completeRegistration = async (req, res) => {
       dateOfBirth,
       languages,
       skills,
+      categories,
       yearsOfExperience,
+      pricePerMinute,
       bio,
     } = req.body;
 
@@ -151,6 +153,19 @@ const completeRegistration = async (req, res) => {
       skillsArray = [skillsArray];
     }
 
+    // Ensure categories is an array
+    let categoriesArray = categories;
+    if (typeof categories === 'string') {
+      try {
+        categoriesArray = JSON.parse(categories);
+      } catch (e) {
+        categoriesArray = categories.split(',').map(cat => cat.trim());
+      }
+    }
+    if (!Array.isArray(categoriesArray)) {
+      categoriesArray = [categoriesArray];
+    }
+
     if (!languagesArray || languagesArray.length === 0) {
       return res.status(400).json({
         success: false,
@@ -162,6 +177,32 @@ const completeRegistration = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Please select at least one skill",
+      });
+    }
+
+    if (!categoriesArray || categoriesArray.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one consultation category",
+      });
+    }
+
+    // Validate categories against enum values
+    const validCategories = ['Love', 'Relationship', 'Education', 'Health', 'Career', 'Finance', 'Marriage', 'Family', 'Business', 'Legal', 'Travel', 'Spiritual'];
+    const invalidCategories = categoriesArray.filter(cat => !validCategories.includes(cat));
+    if (invalidCategories.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid categories: ${invalidCategories.join(', ')}. Valid categories are: ${validCategories.join(', ')}`,
+      });
+    }
+
+    // Validate pricePerMinute
+    const pricePerMin = pricePerMinute ? parseFloat(pricePerMinute) : 0.0;
+    if (pricePerMin < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Price per minute cannot be negative",
       });
     }
 
@@ -204,7 +245,9 @@ const completeRegistration = async (req, res) => {
       dateOfBirth: dateOfBirth || null,
       languages: languagesArray,
       skills: skillsArray,
+      categories: categoriesArray,
       yearsOfExperience: yearsOfExperience || 0,
+      pricePerMinute: pricePerMin,
       bio: bio || null,
       isApproved: false,
     });
@@ -221,6 +264,8 @@ const completeRegistration = async (req, res) => {
         isApproved: astrologer.isApproved,
         languages: astrologer.languages,
         skills: astrologer.skills,
+        categories: astrologer.categories,
+        pricePerMinute: astrologer.pricePerMinute,
       },
     });
   } catch (error) {
