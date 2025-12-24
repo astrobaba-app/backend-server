@@ -405,6 +405,7 @@ const updateProfile = async (req, res) => {
       dateOfBirth,
       languages,
       skills,
+      categories,
       yearsOfExperience,
       bio,
       pricePerMinute,
@@ -427,6 +428,21 @@ const updateProfile = async (req, res) => {
     if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
     if (languages) updateData.languages = languages;
     if (skills) updateData.skills = skills;
+    if (categories) {
+      // Validate categories
+      const validCategories = ['Love', 'Relationship', 'Education', 'Health', 'Career', 'Finance', 'Marriage', 'Family', 'Business', 'Legal', 'Travel', 'Spiritual'];
+      const categoryArray = Array.isArray(categories) ? categories : [categories];
+      const invalidCategories = categoryArray.filter(cat => !validCategories.includes(cat));
+      
+      if (invalidCategories.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid categories: ${invalidCategories.join(', ')}. Valid categories are: ${validCategories.join(', ')}`,
+        });
+      }
+      
+      updateData.categories = categoryArray;
+    }
     if (yearsOfExperience !== undefined) updateData.yearsOfExperience = yearsOfExperience;
     if (bio !== undefined) updateData.bio = bio;
     if (pricePerMinute !== undefined) updateData.pricePerMinute = pricePerMinute;
@@ -445,6 +461,7 @@ const updateProfile = async (req, res) => {
         dateOfBirth: astrologer.dateOfBirth,
         languages: astrologer.languages,
         skills: astrologer.skills,
+        categories: astrologer.categories,
         yearsOfExperience: astrologer.yearsOfExperience,
         bio: astrologer.bio,
         pricePerMinute: parseFloat(astrologer.pricePerMinute),

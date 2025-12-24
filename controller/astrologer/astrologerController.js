@@ -5,7 +5,7 @@ const User = require("../../model/user/userAuth");
 // Get all astrologers with basic details (public)
 const getAllAstrologers = async (req, res) => {
   try {
-    const { page = 1, limit = 20, skills, languages, minRating, maxPrice } = req.query;
+    const { page = 1, limit = 20, skills, languages, categories, minRating, maxPrice } = req.query;
     const offset = (page - 1) * limit;
 
     const where = { isApproved: true, isActive: true };
@@ -23,6 +23,14 @@ const getAllAstrologers = async (req, res) => {
       const languagesArray = languages.split(",");
       where.languages = {
         [require("sequelize").Op.overlap]: languagesArray,
+      };
+    }
+
+    // Filter by categories
+    if (categories) {
+      const categoriesArray = categories.split(",");
+      where.categories = {
+        [require("sequelize").Op.overlap]: categoriesArray,
       };
     }
 
@@ -48,6 +56,7 @@ const getAllAstrologers = async (req, res) => {
         "photo",
         "skills",
         "languages",
+        "categories",
         "yearsOfExperience",
         "rating",
         "pricePerMinute",
@@ -164,6 +173,7 @@ const getTopRatedAstrologers = async (req, res) => {
         "photo",
         "skills",
         "languages",
+        "categories",
         "yearsOfExperience",
         "rating",
         "pricePerMinute",
@@ -218,6 +228,7 @@ const searchAstrologers = async (req, res) => {
         "photo",
         "skills",
         "languages",
+        "categories",
         "yearsOfExperience",
         "rating",
         "pricePerMinute",
