@@ -115,6 +115,16 @@ const login = async (req, res) => {
       });
     }
 
+    // Check if 2FA is enabled
+    if (admin.twoFactorEnabled) {
+      return res.status(200).json({
+        success: true,
+        requires2FA: true,
+        tempToken: jwt.sign({ adminId: admin.id }, process.env.JWT_SECRET, { expiresIn: '5m' }),
+        message: "Please enter your 2FA code",
+      });
+    }
+
     // Update last login
     await admin.update({ lastLogin: new Date() });
     
@@ -132,6 +142,7 @@ const login = async (req, res) => {
         email: admin.email,
         role: admin.role,
         lastLogin: admin.lastLogin,
+        twoFactorEnabled: admin.twoFactorEnabled,
       },
       token,
     });
@@ -140,6 +151,92 @@ const login = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to login",
+      error: error.message,
+    });
+  }
+};
+
+const verify2FALogin = async (req, res) => {
+  try {
+    const { tempToken, code } = req.body;
+
+    if (!tempToken || !code) {
+      return res.status(400).json({
+        success: false,
+        message: "Temporary token and verification code are required",
+      });
+    }
+
+    // Verify temp token
+    let decoded;
+    try {
+      decoded = jwt.verify(tempToken, process.env.JWT_SECRET);
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    // Find admin
+    const admin = await Admin.findByPk(decoded.adminId);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    if (!admin.twoFactorEnabled || !admin.twoFactorSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "2FA is not enabled for this account",
+      });
+    }
+
+    // Verify TOTP code
+    const speakeasy = require('speakeasy');
+    const verified = speakeasy.totp.verify({
+      secret: admin.twoFactorSecret,
+      encoding: 'base32',
+      token: code,
+      window: 2,
+    });
+
+    if (!verified) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid verification code",
+      });
+    }
+
+    // Update last login
+    await admin.update({ lastLogin: new Date() });
+    
+    const token = createToken(admin);
+    const middlewareToken = createMiddlewareToken(admin);
+
+    setTokenCookie(res, token, middlewareToken);
+
+    res.status(200).json({
+      success: true,
+      message: "Login successful",
+      admin: {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        lastLogin: admin.lastLogin,
+        twoFactorEnabled: admin.twoFactorEnabled,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error("2FA verification error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to verify 2FA code",
       error: error.message,
     });
   }
@@ -488,9 +585,322 @@ const broadcastNotification = async (req, res) => {
   }
 };
 
+// Get admin profile
+const getProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+
+    const admin = await Admin.findByPk(adminId, {
+      attributes: ["id", "name", "email", "role", "createdAt", "twoFactorEnabled"],
+    });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      admin,
+    });
+  } catch (error) {
+    console.error("Get admin profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch profile",
+      error: error.message,
+    });
+  }
+};
+
+// Update admin profile
+const updateProfile = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { name, email } = req.body;
+
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Check if email is being changed and if it's already taken
+    if (email && email !== admin.email) {
+      const existingAdmin = await Admin.findOne({ where: { email } });
+      if (existingAdmin) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already in use",
+        });
+      }
+    }
+
+    // Update fields
+    if (name) admin.name = name;
+    if (email) admin.email = email;
+
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      admin: {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+      },
+    });
+  } catch (error) {
+    console.error("Update admin profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update profile",
+      error: error.message,
+    });
+  }
+};
+
+// Change admin password
+const changePassword = async (req, res) => {
+  try {
+    const adminId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Current password and new password are required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, admin.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "Current password is incorrect",
+      });
+    }
+
+    // Hash and update new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    admin.password = hashedPassword;
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    console.error("Change password error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to change password",
+      error: error.message,
+    });
+  }
+};
+
+// Enable 2FA - Generate secret and QR code
+const enableTwoFactor = async (req, res) => {
+  try {
+    const speakeasy = require("speakeasy");
+    const QRCode = require("qrcode");
+    const adminId = req.user.id;
+
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    if (admin.twoFactorEnabled) {
+      return res.status(400).json({
+        success: false,
+        message: "Two-factor authentication is already enabled",
+      });
+    }
+
+    // Generate secret
+    const secret = speakeasy.generateSecret({
+      name: `Graho Admin (${admin.email})`,
+      issuer: "Graho",
+    });
+
+    // Save secret temporarily (will be confirmed after verification)
+    admin.twoFactorSecret = secret.base32;
+    await admin.save();
+
+    // Generate QR code
+    const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url);
+
+    res.status(200).json({
+      success: true,
+      message: "Scan this QR code with Google Authenticator",
+      secret: secret.base32,
+      qrCode: qrCodeUrl,
+    });
+  } catch (error) {
+    console.error("Enable 2FA error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to enable two-factor authentication",
+      error: error.message,
+    });
+  }
+};
+
+// Verify and activate 2FA
+const verifyTwoFactor = async (req, res) => {
+  try {
+    const speakeasy = require("speakeasy");
+    const adminId = req.user.id;
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification token is required",
+      });
+    }
+
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin || !admin.twoFactorSecret) {
+      return res.status(400).json({
+        success: false,
+        message: "Two-factor setup not initiated",
+      });
+    }
+
+    // Verify token
+    const verified = speakeasy.totp.verify({
+      secret: admin.twoFactorSecret,
+      encoding: "base32",
+      token: token,
+      window: 2,
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid verification code",
+      });
+    }
+
+    // Enable 2FA
+    admin.twoFactorEnabled = true;
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Two-factor authentication enabled successfully",
+    });
+  } catch (error) {
+    console.error("Verify 2FA error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to verify two-factor authentication",
+      error: error.message,
+    });
+  }
+};
+
+// Disable 2FA
+const disableTwoFactor = async (req, res) => {
+  try {
+    const speakeasy = require("speakeasy");
+    const adminId = req.user.id;
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification token is required",
+      });
+    }
+
+    const admin = await Admin.findByPk(adminId);
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    if (!admin.twoFactorEnabled) {
+      return res.status(400).json({
+        success: false,
+        message: "Two-factor authentication is not enabled",
+      });
+    }
+
+    // Verify token before disabling
+    const verified = speakeasy.totp.verify({
+      secret: admin.twoFactorSecret,
+      encoding: "base32",
+      token: token,
+      window: 2,
+    });
+
+    if (!verified) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid verification code",
+      });
+    }
+
+    // Disable 2FA
+    admin.twoFactorEnabled = false;
+    admin.twoFactorSecret = null;
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Two-factor authentication disabled successfully",
+    });
+  } catch (error) {
+    console.error("Disable 2FA error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to disable two-factor authentication",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
+  verify2FALogin,
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
@@ -500,4 +910,10 @@ module.exports = {
   rejectAstrologer,
   logout,
   broadcastNotification,
+  getProfile,
+  updateProfile,
+  changePassword,
+  enableTwoFactor,
+  verifyTwoFactor,
+  disableTwoFactor,
 };

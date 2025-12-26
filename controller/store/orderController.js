@@ -683,7 +683,7 @@ exports.getAllOrders = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "email", "phoneNumber"],
+          attributes: ["id", "fullName", "email", "mobile"],
         },
       ],
       limit: parseInt(limit),

@@ -2,7 +2,7 @@ const SupportTicket = require("../../model/support/supportTicket");
 const TicketReply = require("../../model/support/ticketReply");
 const User = require("../../model/user/userAuth");
 const Admin = require("../../model/admin/admin");
-const { Op } = require("sequelize");
+const { Op, fn, col } = require("sequelize");
 const {
   sendTicketCreatedEmail,
   sendTicketReplyEmail,
@@ -202,7 +202,9 @@ const getTicketDetails = async (req, res) => {
           id: reply.id,
           message: reply.message,
           attachments: reply.attachments,
-          sender: senderInfo,
+          repliedBy: reply.repliedBy,
+          repliedByType: reply.repliedByType,
+          replier: senderInfo,
           createdAt: reply.createdAt,
         };
       })
@@ -439,7 +441,9 @@ const getTicketDetailsAdmin = async (req, res) => {
           message: reply.message,
           attachments: reply.attachments,
           isInternal: reply.isInternal,
-          sender: senderInfo,
+          repliedBy: reply.repliedBy,
+          repliedByType: reply.repliedByType,
+          replier: senderInfo,
           createdAt: reply.createdAt,
         };
       })
@@ -713,7 +717,7 @@ const getTicketStatistics = async (req, res) => {
     const categoryCounts = await SupportTicket.findAll({
       attributes: [
         "category",
-        [sequelize.fn("COUNT", sequelize.col("id")), "count"],
+        [fn("COUNT", col("id")), "count"],
       ],
       group: ["category"],
       raw: true,

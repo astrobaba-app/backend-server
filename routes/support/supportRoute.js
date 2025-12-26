@@ -17,18 +17,24 @@ const {authorizeRoles} = require("../../middleware/roleMiddleware");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 
 // User routes
-router.post("/user/create", checkForAuthenticationCookie(), ...upload.array("images", 5), createTicket);
-router.get("/user/my-tickets", checkForAuthenticationCookie(), getMyTickets);
-router.get(
-  "/user/ticket/:ticketId",
-  checkForAuthenticationCookie(),
-  getTicketDetails
-);
-router.post(
-  "/user/ticket/:ticketId/reply",
-  checkForAuthenticationCookie(),
-  replyToTicket
-);
+router.post("/tickets", checkForAuthenticationCookie(), ...upload.array("images", 5), createTicket);
+router.get("/tickets/my-tickets", checkForAuthenticationCookie(), getMyTickets);
+router.get("/tickets/:ticketId", checkForAuthenticationCookie(), getTicketDetails);
+router.post("/tickets/:ticketId/reply", checkForAuthenticationCookie(), ...upload.array("images", 5), replyToTicket);
+
+// Upload route for images
+router.post("/upload", checkForAuthenticationCookie(), ...upload.array("images", 5), (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: "No files uploaded" });
+    }
+    const urls = req.files.map(file => file.location || file.path);
+    res.status(200).json({ success: true, urls });
+  } catch (error) {
+    console.error("Error uploading images:", error);
+    res.status(500).json({ success: false, message: "Failed to upload images" });
+  }
+});
 
 // Admin routes
 router.get(
@@ -36,6 +42,12 @@ router.get(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getAllTickets
+);
+router.get(
+  "/admin/tickets/statistics",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getTicketStatistics
 );
 router.get(
   "/admin/ticket/:ticketId",
