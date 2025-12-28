@@ -22,12 +22,9 @@ let allowedOrigins = [
 if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
   allowedOrigins = ["http://localhost:3000"];
 }
-
-// Log allowed origins for debugging (especially useful in production)
 console.log('[CORS] Allowed origins:', allowedOrigins);
 console.log('[CORS] Environment:', process.env.NODE_ENV || 'development');
 
-// Socket.IO server for real-time features (chat, notifications, etc.)
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => {
