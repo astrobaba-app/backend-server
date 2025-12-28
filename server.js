@@ -13,14 +13,12 @@ const PORT = process.env.PORT || 6001;
 const app = express();
 const server = http.createServer(app);
 
-// Determine allowed origins for CORS (Socket.IO + Express)
 let allowedOrigins = [
   process.env.FRONTEND_URL, 
   process.env.FRONTEND_URL1,
-  process.env.MOBILE_APP_ORIGIN // Add mobile app origin if configured
+  process.env.MOBILE_APP_ORIGIN 
 ].filter(Boolean);
 
-// In development, if no explicit frontend URLs are configured, default to localhost:3000
 if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
   allowedOrigins = ["http://localhost:3000"];
 }
