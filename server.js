@@ -242,16 +242,12 @@ wss.on('connection', async (ws, req) => {
   }
 });
 
-// Initialize database and start HTTP + WebSocket/Socket.IO servers
 initDB(() => {
-  // Attach chat-specific Socket.IO handlers
   initializeChatSocket(io);
   
-  // Attach live streaming Socket.IO handlers
   const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
   initializeLiveStreamSocket(io);
   
-  // Sync live viewer counts every 30 seconds to ensure accuracy
   setInterval(syncLiveViewerCounts, 30000);
 
   server.listen(PORT, () => {
