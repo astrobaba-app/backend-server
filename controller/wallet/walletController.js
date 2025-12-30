@@ -506,12 +506,17 @@ const deductForAIUsage = async (req, res) => {
     const { amount, type, minutes } = req.body;
 
     console.log('=== AI WALLET DEDUCTION START ===');
-    console.log('User ID:', userId);
-    console.log('Amount:', amount);
-    console.log('Type:', type);
-    console.log('Minutes:', minutes);
+    console.log('[PRODUCTION DEBUG] Timestamp:', new Date().toISOString());
+    console.log('[PRODUCTION DEBUG] User ID:', userId);
+    console.log('[PRODUCTION DEBUG] User object:', JSON.stringify(req.user));
+    console.log('[PRODUCTION DEBUG] Amount:', amount, 'Type:', typeof amount);
+    console.log('[PRODUCTION DEBUG] Type:', type);
+    console.log('[PRODUCTION DEBUG] Minutes:', minutes);
+    console.log('[PRODUCTION DEBUG] Request body:', JSON.stringify(req.body));
+    console.log('[PRODUCTION DEBUG] Request headers:', JSON.stringify(req.headers));
 
     if (!amount || amount <= 0) {
+      console.error('[PRODUCTION DEBUG] Invalid amount validation failed:', { amount, type: typeof amount });
       return res.status(400).json({
         success: false,
         message: "Invalid amount",
@@ -519,6 +524,7 @@ const deductForAIUsage = async (req, res) => {
     }
 
     if (!type || !['chat', 'voice'].includes(type)) {
+      console.error('[PRODUCTION DEBUG] Invalid type validation failed:', { type, validTypes: ['chat', 'voice'] });
       return res.status(400).json({
         success: false,
         message: "Type must be 'chat' or 'voice'",
@@ -526,27 +532,50 @@ const deductForAIUsage = async (req, res) => {
     }
 
     // Get wallet
+    console.log('[PRODUCTION DEBUG] Fetching wallet for userId:', userId);
     const wallet = await Wallet.findOne({ where: { userId } });
 
     if (!wallet) {
+      console.error('[PRODUCTION DEBUG] Wallet not found for userId:', userId);
       return res.status(404).json({
         success: false,
         message: "Wallet not found",
       });
     }
 
+    console.log('[PRODUCTION DEBUG] Wallet found:', {
+      walletId: wallet.id,
+      balance: wallet.balance,
+      balanceType: typeof wallet.balance,
+      parsedBalance: parseFloat(wallet.balance),
+      totalSpent: wallet.totalSpent
+    });
+
     // Check sufficient balance
-    if (parseFloat(wallet.balance) < amount) {
-      console.log('Insufficient balance for AI usage');
+    const currentBalance = parseFloat(wallet.balance);
+    console.log('[PRODUCTION DEBUG] Balance check:', {
+      currentBalance,
+      requiredAmount: amount,
+      hasSufficientBalance: currentBalance >= amount
+    });
+
+    if (currentBalance < amount) {
+      console.error('[PRODUCTION DEBUG] Insufficient balance for AI usage:', {
+        userId,
+        currentBalance,
+        requiredAmount: amount,
+        deficit: amount - currentBalance
+      });
       return res.status(400).json({
         success: false,
         message: "Insufficient wallet balance",
-        currentBalance: parseFloat(wallet.balance),
+        currentBalance: currentBalance,
       });
     }
 
     // Use transaction for atomicity
     const sequelize = require("../../dbConnection/dbConfig").sequelize;
+    console.log('[PRODUCTION DEBUG] Starting database transaction');
     const dbTransaction = await sequelize.transaction();
 
     try {
@@ -554,7 +583,16 @@ const deductForAIUsage = async (req, res) => {
       const newBalance = balanceBefore - amount;
       const newTotalSpent = parseFloat(wallet.totalSpent) + amount;
 
+      console.log('[PRODUCTION DEBUG] Calculating new balances:', {
+        balanceBefore,
+        amount,
+        newBalance,
+        currentTotalSpent: wallet.totalSpent,
+        newTotalSpent
+      });
+
       // Update wallet
+      console.log('[PRODUCTION DEBUG] Updating wallet in database');
       await wallet.update(
         {
           balance: newBalance,
@@ -562,8 +600,10 @@ const deductForAIUsage = async (req, res) => {
         },
         { transaction: dbTransaction }
       );
+      console.log('[PRODUCTION DEBUG] Wallet updated successfully');
 
       // Create transaction record
+      console.log('[PRODUCTION DEBUG] Creating transaction record');
       const transaction = await WalletTransaction.create(
         {
           userId,
@@ -578,18 +618,27 @@ const deductForAIUsage = async (req, res) => {
         },
         { transaction: dbTransaction }
       );
+      console.log('[PRODUCTION DEBUG] Transaction record created:', {
+        transactionId: transaction.id,
+        amount: transaction.amount,
+        description: transaction.description
+      });
 
+      console.log('[PRODUCTION DEBUG] Committing database transaction');
       await dbTransaction.commit();
+      console.log('[PRODUCTION DEBUG] Database transaction committed successfully');
 
-      console.log('AI wallet deduction successful', {
+      console.log('[PRODUCTION DEBUG] AI wallet deduction successful:', {
         userId,
         amount,
         type,
         minutes,
+        balanceBefore,
         newBalance,
+        transactionId: transaction.id
       });
 
-      res.status(200).json({
+      const responseData = {
         success: true,
         message: "Amount deducted successfully",
         newBalance,
@@ -599,15 +648,30 @@ const deductForAIUsage = async (req, res) => {
           balanceBefore,
           balanceAfter: newBalance,
         },
-      });
+      };
+      console.log('[PRODUCTION DEBUG] Sending success response:', JSON.stringify(responseData));
+      res.status(200).json(responseData);
+      console.log('[PRODUCTION DEBUG] === AI WALLET DEDUCTION SUCCESS ===');
     } catch (dbError) {
+      console.error('[PRODUCTION DEBUG] Database error, rolling back transaction');
       await dbTransaction.rollback();
-      console.error("Database error during AI wallet deduction", dbError);
+      console.error('[PRODUCTION DEBUG] Database error during AI wallet deduction:', {
+        error: dbError.message,
+        stack: dbError.stack,
+        userId,
+        amount,
+        type
+      });
       throw dbError;
     }
   } catch (error) {
     console.error("=== AI WALLET DEDUCTION ERROR ===");
-    console.error("Deduct for AI usage error:", error);
+    console.error("[PRODUCTION DEBUG] Deduct for AI usage error:", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+      body: req.body
+    });
     res.status(500).json({
       success: false,
       message: "Failed to deduct from wallet",
