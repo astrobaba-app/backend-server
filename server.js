@@ -153,6 +153,7 @@ const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
+const locationRoute = require("./routes/maps/locationRoute");
 
 app.use("/api/auth", phoneAuthRoute,googleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -178,6 +179,7 @@ app.use("/api/store", storeRoute);
 app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/maps", mapsRoute);
+app.use("/api/location", locationRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });

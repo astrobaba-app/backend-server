@@ -1,4 +1,5 @@
 const User = require("../../model/user/userAuth");
+const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
 
 
 const getProfile = async (req, res) => {
@@ -38,6 +39,8 @@ const updateProfile = async (req, res) => {
       dateOfbirth,
       timeOfbirth,
       placeOfBirth,
+      latitude,
+      longitude,
       currentAddress,
       city,
       state,
@@ -107,11 +110,50 @@ const updateProfile = async (req, res) => {
     }
     
     if (placeOfBirth !== undefined) user.placeOfBirth = placeOfBirth;
+    
+    // Handle latitude and longitude - convert empty strings to null
+    if (latitude !== undefined) {
+      user.latitude = latitude === "" || latitude === null ? null : parseFloat(latitude);
+    }
+    if (longitude !== undefined) {
+      user.longitude = longitude === "" || longitude === null ? null : parseFloat(longitude);
+    }
+    
     if (currentAddress !== undefined) user.currentAddress = currentAddress;
     if (city !== undefined) user.city = city;
-    if (state !== undefined) user.state = state;
-    if (country !== undefined) user.country = country;
-    if (pincode !== undefined) user.pincode = pincode;
+    
+    // Validate state if provided
+    if (state !== undefined) {
+      if (state && !isValidState(state)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid state. Please select a valid Indian state",
+        });
+      }
+      user.state = state;
+    }
+    
+    // Validate country (only India allowed)
+    if (country !== undefined) {
+      if (country && country !== "India") {
+        return res.status(400).json({
+          success: false,
+          message: "Only India is supported for country selection",
+        });
+      }
+      user.country = country || "India";
+    }
+    
+    // Validate pincode if provided
+    if (pincode !== undefined) {
+      if (pincode && !validatePincode(pincode)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid pincode. Indian pincode must be 6 digits",
+        });
+      }
+      user.pincode = pincode;
+    }
     
     await user.save();
 
@@ -127,6 +169,8 @@ const updateProfile = async (req, res) => {
         dateOfbirth: user.dateOfbirth,
         timeOfbirth: user.timeOfbirth,
         placeOfBirth: user.placeOfBirth,
+        latitude: user.latitude,
+        longitude: user.longitude,
         currentAddress: user.currentAddress,
         city: user.city,
         state: user.state,

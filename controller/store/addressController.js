@@ -1,5 +1,6 @@
 const Address = require("../../model/user/address");
 const User = require("../../model/user/userAuth");
+const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
 
 // Create a new address
 exports.createAddress = async (req, res) => {
@@ -24,6 +25,30 @@ exports.createAddress = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Please provide all required fields",
+      });
+    }
+
+    // Validate country (only India allowed)
+    if (country && country !== "India") {
+      return res.status(400).json({
+        success: false,
+        message: "Only India is supported for country selection",
+      });
+    }
+
+    // Validate state
+    if (state && !isValidState(state)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid state. Please select a valid Indian state",
+      });
+    }
+
+    // Validate pincode
+    if (pincode && !validatePincode(pincode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pincode. Indian pincode must be 6 digits",
       });
     }
 
@@ -154,6 +179,30 @@ exports.updateAddress = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "Address not found",
+      });
+    }
+
+    // Validate country (only India allowed)
+    if (country && country !== "India") {
+      return res.status(400).json({
+        success: false,
+        message: "Only India is supported for country selection",
+      });
+    }
+
+    // Validate state if provided
+    if (state && !isValidState(state)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid state. Please select a valid Indian state",
+      });
+    }
+
+    // Validate pincode if provided
+    if (pincode && !validatePincode(pincode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pincode. Indian pincode must be 6 digits",
       });
     }
 
