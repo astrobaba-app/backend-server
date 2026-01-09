@@ -2,6 +2,7 @@ const { sequelize } = require("../dbConnection/dbConfig");
 const { DataTypes } = require("sequelize");
 const User = require("../model/user/userAuth");
 const UserRequest = require("../model/user/userRequest");
+const AccountDeletionRequest = require("../model/user/accountDeletionRequest");
 const Kundli = require("../model/horoscope/kundli");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const Wallet = require("../model/wallet/wallet");
