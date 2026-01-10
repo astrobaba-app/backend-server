@@ -147,9 +147,58 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
-    // If new images uploaded, use them; otherwise keep existing
+    // Handle images
     if (req.fileUrls && req.fileUrls.length > 0) {
+      // New images uploaded
       updateData.images = req.fileUrls;
+    } else if (updateData.existingImages) {
+      // Parse existing images from JSON string
+      try {
+        updateData.images = JSON.parse(updateData.existingImages);
+      } catch (error) {
+        console.error("Error parsing existingImages:", error);
+        updateData.images = [];
+      }
+    }
+    
+    // Remove existingImages from updateData as it's not a model field
+    delete updateData.existingImages;
+
+    // Handle tags - convert comma-separated string to array
+    if (updateData.tags && typeof updateData.tags === 'string') {
+      updateData.tags = updateData.tags
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(tag => tag.length > 0);
+    }
+
+    // Handle seoKeywords - convert comma-separated string to array
+    if (updateData.seoKeywords && typeof updateData.seoKeywords === 'string') {
+      updateData.seoKeywords = updateData.seoKeywords
+        .split(',')
+        .map(keyword => keyword.trim())
+        .filter(keyword => keyword.length > 0);
+    }
+
+    // Handle dimensions - parse JSON string if needed
+    if (updateData.dimensions && typeof updateData.dimensions === 'string') {
+      try {
+        updateData.dimensions = JSON.parse(updateData.dimensions);
+      } catch (error) {
+        console.error("Error parsing dimensions:", error);
+        delete updateData.dimensions;
+      }
+    }
+
+    // Normalize numeric fields
+    if (updateData.price !== undefined) {
+      updateData.price = normalizeDecimal(updateData.price);
+    }
+    if (updateData.discountPrice !== undefined) {
+      updateData.discountPrice = normalizeDecimal(updateData.discountPrice);
+    }
+    if (updateData.weight !== undefined) {
+      updateData.weight = normalizeDecimal(updateData.weight);
     }
 
     // Update slug if productName changed

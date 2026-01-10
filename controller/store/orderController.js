@@ -196,14 +196,18 @@ exports.checkout = async (req, res) => {
       };
     }
 
-    // Calculate shipping (free for digital, ₹50 for physical orders below ₹500)
+    // Calculate shipping using env (uniform for physical/mixed)
+    const SHIPPING_CHARGE = Number(process.env.SHIPPING_CHARGE || 0);
+    const TAX_PERCENTAGE = Number(process.env.TAX_PERCENTAGE || 0);
     let shippingCharges = 0;
     if (orderType === "physical" || orderType === "mixed") {
-      shippingCharges = subtotal >= 500 ? 0 : 50;
+      shippingCharges = SHIPPING_CHARGE;
     }
 
-    // Calculate tax (18% GST)
-    const taxAmount = parseFloat(((subtotal + shippingCharges) * 0.18).toFixed(2));
+    // Calculate tax using env percentage
+    const taxAmount = parseFloat(
+      ((subtotal + shippingCharges) * (TAX_PERCENTAGE / 100)).toFixed(2)
+    );
 
     // Calculate total
     const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
@@ -925,14 +929,17 @@ exports.createRazorpayOrder = async (req, res) => {
       subtotal += parseFloat(currentPrice) * cartItem.quantity;
     }
 
-    // Calculate shipping
+    // Calculate shipping/tax using env
+    const SHIPPING_CHARGE = Number(process.env.SHIPPING_CHARGE || 0);
+    const TAX_PERCENTAGE = Number(process.env.TAX_PERCENTAGE || 0);
     let shippingCharges = 0;
     if (orderType === "physical" || orderType === "mixed") {
-      shippingCharges = subtotal >= 500 ? 0 : 50;
+      shippingCharges = SHIPPING_CHARGE;
     }
 
-    // Calculate tax
-    const taxAmount = parseFloat(((subtotal + shippingCharges) * 0.18).toFixed(2));
+    const taxAmount = parseFloat(
+      ((subtotal + shippingCharges) * (TAX_PERCENTAGE / 100)).toFixed(2)
+    );
 
     // Calculate total
     const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
@@ -1165,13 +1172,17 @@ exports.verifyAndCreateOrder = async (req, res) => {
       };
     }
 
-    // Calculate charges
+    // Calculate charges using env values
+    const SHIPPING_CHARGE = Number(process.env.SHIPPING_CHARGE || 0);
+    const TAX_PERCENTAGE = Number(process.env.TAX_PERCENTAGE || 0);
     let shippingCharges = 0;
     if (orderType === "physical" || orderType === "mixed") {
-      shippingCharges = subtotal >= 500 ? 0 : 50;
+      shippingCharges = SHIPPING_CHARGE;
     }
 
-    const taxAmount = parseFloat(((subtotal + shippingCharges) * 0.18).toFixed(2));
+    const taxAmount = parseFloat(
+      ((subtotal + shippingCharges) * (TAX_PERCENTAGE / 100)).toFixed(2)
+    );
     const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
 
     // Generate order number

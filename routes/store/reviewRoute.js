@@ -4,6 +4,7 @@ const {
   addReview,
   getProductReviews,
   getMyReviews,
+  getUserProductReview,
   updateReview,
   deleteReview,
   markReviewHelpful,
@@ -16,6 +17,7 @@ const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 // ==================== USER ROUTES ====================
 router.post("/reviews/products/:productId", checkForAuthenticationCookie(), addReview);
 router.get("/reviews/my-reviews", checkForAuthenticationCookie(), getMyReviews);
+router.get("/reviews/products/:productId/my-review", checkForAuthenticationCookie(), getUserProductReview);
 router.put("/reviews/:reviewId", checkForAuthenticationCookie(), updateReview);
 router.delete("/reviews/:reviewId", checkForAuthenticationCookie(), deleteReview);
 router.post("/reviews/:reviewId/helpful", markReviewHelpful);
