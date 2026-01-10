@@ -146,13 +146,17 @@ const updateProfile = async (req, res) => {
     
     // Validate pincode if provided
     if (pincode !== undefined) {
-      if (pincode && !validatePincode(pincode)) {
+      // Handle empty string or null - convert to null for integer field
+      if (pincode === "" || pincode === null) {
+        user.pincode = null;
+      } else if (!validatePincode(pincode)) {
         return res.status(400).json({
           success: false,
           message: "Invalid pincode. Indian pincode must be 6 digits",
         });
+      } else {
+        user.pincode = parseInt(pincode, 10);
       }
-      user.pincode = pincode;
     }
     
     await user.save();
