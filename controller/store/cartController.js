@@ -118,6 +118,8 @@ exports.getMyCart = async (req, res) => {
     });
 
     // Calculate cart summary
+    const SHIPPING_CHARGE = Number(process.env.SHIPPING_CHARGE || 0);
+    const TAX_PERCENTAGE = Number(process.env.TAX_PERCENTAGE || 0);
     let subtotal = 0;
     let totalItems = 0;
     const validItems = [];
@@ -149,6 +151,19 @@ exports.getMyCart = async (req, res) => {
       validItems.push(item);
     }
 
+    // Determine if any physical products exist for shipping applicability
+    const hasPhysical = validItems.some(
+      (ci) => ci.product && ci.product.productType === "physical"
+    );
+
+    const shippingCharges = hasPhysical ? SHIPPING_CHARGE : 0;
+    const taxAmount = parseFloat(
+      ((subtotal + shippingCharges) * (TAX_PERCENTAGE / 100)).toFixed(2)
+    );
+    const totalAmount = parseFloat(
+      (subtotal + shippingCharges + taxAmount).toFixed(2)
+    );
+
     return res.status(200).json({
       success: true,
       cart: {
@@ -156,8 +171,10 @@ exports.getMyCart = async (req, res) => {
         unavailableItems,
         summary: {
           totalItems,
-          subtotal: subtotal.toFixed(2),
-          estimatedTotal: subtotal.toFixed(2),
+          subtotal: parseFloat(subtotal.toFixed(2)),
+          shippingCharges,
+          taxAmount,
+          totalAmount,
         },
       },
     });

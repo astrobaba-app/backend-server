@@ -216,6 +216,44 @@ exports.getMyReviews = async (req, res) => {
   }
 };
 
+// Check if user has reviewed a specific product
+exports.getUserProductReview = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { productId } = req.params;
+
+    const review = await ProductReview.findOne({
+      where: { userId, productId },
+      include: [
+        {
+          model: Product,
+          as: "product",
+          attributes: ["id", "productName", "slug", "images"],
+        },
+      ],
+    });
+
+    if (!review) {
+      return res.status(404).json({
+        success: false,
+        message: "No review found for this product",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      review,
+    });
+  } catch (error) {
+    console.error("Error fetching user product review:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch review",
+      error: error.message,
+    });
+  }
+};
+
 // Update review
 exports.updateReview = async (req, res) => {
   try {
