@@ -12,6 +12,7 @@ const User = require("../../model/user/userAuth");
 const GoogleAuth = require("../../model/user/googleAuth");
 const { createToken, createMiddlewareToken } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
+const { applySignupBonus } = require("../../services/signupBonusService");
 
 const redirectToGoogle = (req, res) => {
   // Validate environment variables
@@ -125,6 +126,7 @@ const googleCallback = async (req, res) => {
     });
 
     let user;
+    let isNewUser = false;
 
     if (googleAuth) {
       // User already exists with this Google ID - login
@@ -156,6 +158,8 @@ const googleCallback = async (req, res) => {
           userId: user.id,
           googleId,
         });
+        
+        isNewUser = true;
       }
     }
 
@@ -163,6 +167,16 @@ const googleCallback = async (req, res) => {
     const middlewareToken = createMiddlewareToken(user);
 
     setTokenCookie(res, token, middlewareToken);
+
+    // Apply signup bonus for new users
+    if (isNewUser) {
+      try {
+        await applySignupBonus(user.id, "google");
+      } catch (error) {
+        console.error("Failed to apply signup bonus:", error);
+        // Don't fail the registration if bonus fails
+      }
+    }
 
     // Use source parameter to determine redirect destination
     // Only redirect to app deep link if explicitly from app (source=app)

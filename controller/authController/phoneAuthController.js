@@ -4,6 +4,7 @@ const { createToken, createMiddlewareToken } = require("../../services/authServi
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const redis = require("../../config/redis/redis");
+const { applySignupBonus } = require("../../services/signupBonusService");
 
 
 const generateOtp = async (req, res) => {
@@ -105,12 +106,14 @@ const verifyOtp = async (req, res) => {
     // Find or create user
     let user = await User.findOne({ where: { mobile } });
     
+    let isNewUser = false;
     if (!user) {
       // Create new user
       user = await User.create({
         mobile,
         isUserRequested: false,
       });
+      isNewUser = true;
     }
 
     // Generate tokens and set cookies
@@ -119,15 +122,33 @@ const verifyOtp = async (req, res) => {
 
     setTokenCookie(res, token, middlewareToken);
 
+    // Apply signup bonus for new users
+    let bonusInfo = null;
+    if (isNewUser) {
+      try {
+        const bonusResult = await applySignupBonus(user.id, "phone");
+        if (bonusResult.bonusApplied) {
+          bonusInfo = {
+            amount: bonusResult.amount,
+            message: bonusResult.message,
+          };
+        }
+      } catch (error) {
+        console.error("Failed to apply signup bonus:", error);
+        // Don't fail the registration if bonus fails
+      }
+    }
+
     // Check if this is a new user (no fullName means not completed profile)
-    const isNewUser = !user.fullName;
+    const profileIncomplete = !user.fullName;
 
     return res.status(200).json({
       success: true,
       message: isNewUser ? "Registration successful" : "Login successful",
-      isNewUser,
+      isNewUser: profileIncomplete,
       token: token,
       middlewareToken: middlewareToken,
+      bonusInfo: bonusInfo,
       user: {
         id: user.id,
         fullName: user.fullName,

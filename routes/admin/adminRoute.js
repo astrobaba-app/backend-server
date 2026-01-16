@@ -20,6 +20,11 @@ const {
   verifyTwoFactor,
   disableTwoFactor,
 } = require("../../controller/admin/adminController");
+const {
+  getSignupBonusSettings,
+  updateSignupBonusSettings,
+  toggleSignupBonus,
+} = require("../../controller/admin/signupBonusController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
@@ -119,6 +124,26 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   broadcastNotification
+);
+
+// Signup bonus settings routes
+router.get(
+  "/signup-bonus/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getSignupBonusSettings
+);
+router.put(
+  "/signup-bonus/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateSignupBonusSettings
+);
+router.post(
+  "/signup-bonus/toggle",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  toggleSignupBonus
 );
 
 module.exports = router;

@@ -45,8 +45,9 @@ const WalletTransaction = sequelize.define(
       defaultValue: "pending",
     },
     paymentMethod: {
-      type: DataTypes.ENUM("razorpay", "manual", "refund", "bonus"),
+      type: DataTypes.ENUM("razorpay", "manual", "refund", "bonus", "signup_bonus"),
       allowNull: true,
+      comment: "Payment method used for the transaction",
     },
     // Razorpay details
     razorpayOrderId: {
