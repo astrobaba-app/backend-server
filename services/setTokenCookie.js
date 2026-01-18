@@ -14,7 +14,7 @@ const setTokenCookie = (res, token, middlewareToken) => {
     serialize("token_middleware", middlewareToken, {
       domain:".graho.in",
       httpOnly: false,
-      secure: false,
+      secure: true,
       sameSite: "none",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
