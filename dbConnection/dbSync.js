@@ -1,15 +1,78 @@
 const { sequelize } = require("../dbConnection/dbConfig");
 const { DataTypes } = require("sequelize");
+
+// Admin models
+const Admin = require("../model/admin/admin");
+const AdminSettings = require("../model/admin/adminSettings");
+
+// AI Chat models
+const AiChatMessage = require("../model/aiChat/aiChatMessage");
+const AiChatSession = require("../model/aiChat/aiChatSession");
+
+// Assistant models
+const AssistantChat = require("../model/assistant/assistantChat");
+const AssistantPlan = require("../model/assistant/assistantPlan");
+
+// Astrologer models
+const Astrologer = require("../model/astrologer/astrologer");
+const AstrologerEarning = require("../model/astrologer/astrologerEarning");
+
+// Blog models
+const Blog = require("../model/blog/blog");
+const BlogLike = require("../model/blog/blogLike");
+
+// Call models
+const CallSession = require("../model/call/callSession");
+
+// Chat models
+const ChatMessage = require("../model/chat/chatMessage");
+const ChatSession = require("../model/chat/chatSession");
+
+// Coupon models
+const Coupon = require("../model/coupon/coupon");
+const CouponUsage = require("../model/coupon/couponUsage");
+
+// Follow models
+const Follow = require("../model/follow/follow");
+
+// Horoscope models
+const Horoscope = require("../model/horoscope/horoscope");
+const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
+const Kundli = require("../model/horoscope/kundli");
+const MatchingProfile = require("../model/horoscope/matchingProfile");
+
+// Live models
+const LiveChatMessage = require("../model/live/liveChatMessage");
+const LiveParticipant = require("../model/live/liveParticipant");
+const LiveSession = require("../model/live/liveSession");
+
+// Notification models
+const Notification = require("../model/notification/notification");
+
+// Review models
+const Review = require("../model/review/review");
+
+// Store models
+const Cart = require("../model/store/cart");
+const Order = require("../model/store/order");
+const Product = require("../model/store/product");
+const ProductReview = require("../model/store/productReview");
+
+// Support models
+const SupportTicket = require("../model/support/supportTicket");
+const TicketReply = require("../model/support/ticketReply");
+
+// User models
 const User = require("../model/user/userAuth");
 const UserRequest = require("../model/user/userRequest");
 const AccountDeletionRequest = require("../model/user/accountDeletionRequest");
-const Kundli = require("../model/horoscope/kundli");
-const MatchingProfile = require("../model/horoscope/matchingProfile");
+const Address = require("../model/user/address");
+const DeviceToken = require("../model/user/deviceToken");
+const GoogleAuth = require("../model/user/googleAuth");
+
+// Wallet models
 const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
-const horoscope = require("../model/horoscope/horoscope");
-const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
-const LiveChatMessage = require("../model/live/liveChatMessage");
 
 
 
