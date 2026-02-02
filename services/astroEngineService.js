@@ -113,7 +113,24 @@ const getPanchang = async (userRequest) => {
 const getPlanetaryPositions = async (userRequest) => {
   try {
     const chartData = await getBirthChart(userRequest);
-    return chartData.chart.planets;
+    const planets = chartData.chart.planets || {};
+    const asc = chartData.chart.ascendant;
+
+    // Provide Ascendant in the same shape as other planetary rows for UI convenience
+    if (asc && asc.longitude !== undefined && asc.longitude !== null) {
+      const ascLon = Number(asc.longitude);
+      if (!Number.isNaN(ascLon)) {
+        planets.Ascendant = {
+          planet: 'Ascendant',
+          longitude: ascLon,
+          sign: asc.sign,
+          sign_num: Math.floor(((ascLon + 360) % 360) / 30),
+          sign_degree: asc.degree ?? (ascLon % 30),
+        };
+      }
+    }
+
+    return planets;
   } catch (error) {
     console.error("Error in getPlanetaryPositions:", error.response?.data || error.message);
     return null;
