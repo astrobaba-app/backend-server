@@ -5,6 +5,7 @@ const {
   getKundli,
   getAllKundlis,
   getAllUserRequests,
+  checkAiReportStatus,
 } = require("../../controller/horoscope/kundliController");
 const {
   getUserKundlisForCall,
@@ -19,6 +20,7 @@ router.post("/create", checkForAuthenticationCookie(), createKundli);
 router.get("/all", checkForAuthenticationCookie(), getAllKundlis);
 router.get("/user-requests", checkForAuthenticationCookie(), getAllUserRequests);
 router.get("/:userRequestId", checkForAuthenticationCookie(), getKundli);
+router.get("/:userRequestId/ai-status", checkForAuthenticationCookie(), checkAiReportStatus);
 
 // Routes for astrologer to view user's kundli during call
 router.get(

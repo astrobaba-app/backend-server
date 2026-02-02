@@ -175,28 +175,34 @@ const createKundli = async (req, res) => {
       horoscope,
     });
 
-    // Generate AI-enhanced Free Report narratives (General, Remedies, Dosha)
-    let aiFreeReport = null;
-    try {
-      aiFreeReport = await generateFreeReportNarratives({
-        basicDetails: basicDetailsVal,
-        personality: personalityVal,
-        remedies,
-        horoscope,
-        manglikAnalysis: manglikAnalysisVal,
+    // Generate AI-enhanced Free Report narratives in the background (non-blocking)
+    // The AI generation takes 30+ seconds, so we don't want to block the response
+    generateFreeReportNarratives({
+      basicDetails: basicDetailsVal,
+      personality: personalityVal,
+      remedies,
+      horoscope,
+      manglikAnalysis: manglikAnalysisVal,
+    })
+      .then((aiFreeReport) => {
+        if (aiFreeReport) {
+          // Update the kundli record with AI report when ready
+          return Kundli.update(
+            { aiFreeReport },
+            { where: { id: kundli.id } }
+          );
+        }
+      })
+      .catch((err) => {
+        console.error("[KundliController] Background AI Free Report generation failed:", err?.message || err);
       });
-    } catch (err) {
-      console.error("[KundliController] Failed to generate AI Free Report:", err?.message || err);
-    }
 
+    // Return immediately without waiting for AI generation
     res.status(201).json({
       success: true,
       message: "Kundli created successfully",
       userRequest,
-      kundli: {
-        ...kundli.toJSON(),
-        aiFreeReport,
-      },
+      kundli: kundli.toJSON(),
     });
   } catch (error) {
     console.error("Create Kundli error:", error);
@@ -238,25 +244,12 @@ const getKundli = async (req, res) => {
       });
     }
 
-    // Generate AI-enhanced Free Report narratives on demand for fetched kundli
-    let aiFreeReport = null;
-    try {
-      aiFreeReport = await generateFreeReportNarratives({
-        basicDetails: kundli.basicDetails,
-        personality: kundli.personality,
-        remedies: kundli.remedies,
-        horoscope: kundli.horoscope,
-        manglikAnalysis: kundli.manglikAnalysis,
-      });
-    } catch (err) {
-      console.error("[KundliController] Failed to generate AI Free Report (getKundli):", err?.message || err);
-    }
-
+    // Simply return the kundli data with whatever AI report exists (or null)
+    // The frontend polling will handle getting AI content when it's ready
     res.status(200).json({
       success: true,
       kundli: {
         ...kundli.toJSON(),
-        aiFreeReport,
       },
     });
   } catch (error) {
@@ -332,6 +325,50 @@ const getAllKundlis = async (req, res) => {
   }
 };
 
+// Check if AI Free Report is ready (for polling)
+const checkAiReportStatus = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId } = req.params;
+
+    // Verify ownership
+    const userRequest = await UserRequest.findOne({
+      where: { id: userRequestId, userId },
+    });
+
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "User request not found",
+      });
+    }
+
+    const kundli = await Kundli.findOne({ 
+      where: { requestId: userRequestId },
+      attributes: ['id', 'aiFreeReport'],
+    });
+
+    if (!kundli) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      isReady: !!kundli.aiFreeReport,
+      aiFreeReport: kundli.aiFreeReport,
+    });
+  } catch (error) {
+    console.error("Check AI Report Status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to check AI report status",
+      error: error.message,
+    });
+  }
+};
 
 
 module.exports = {
@@ -339,5 +376,5 @@ module.exports = {
   getKundli,
   getAllKundlis,
   getAllUserRequests,
-
+  checkAiReportStatus,
 };
