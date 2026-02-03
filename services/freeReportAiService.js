@@ -111,8 +111,8 @@ ${JSON.stringify(context)}
         { role: "user", content: userPrompt },
       ],
       temperature: 0.7,
-      // Give enough room so JSON is not cut in the middle of a string
-      max_tokens: 1400,
+      // Increased token limit to prevent JSON truncation
+      max_tokens: 2500,
       response_format: { type: "json_object" },
     });
 
