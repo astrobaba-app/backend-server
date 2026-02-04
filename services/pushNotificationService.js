@@ -4,12 +4,10 @@ const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
 class PushNotificationService {
-  /**
-   * Send push notification to a single user by userId
-   */
+
   async sendToUser(userId, { title, body, data = {}, imageUrl = null }) {
     try {
-      // Get all active device tokens for this user
+     
       const tokens = await DeviceToken.findAll({
         where: {
           userId,
