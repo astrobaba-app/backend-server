@@ -19,6 +19,11 @@ const AIChatSession = sequelize.define(
       onDelete: "CASCADE",
       onUpdate: "CASCADE",
     },
+    astrologerId: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+      comment: "Identifier for the AI astrologer (e.g., 'ai-astrologer-devansh', 'ai-astrologer-ritika', 'ai-astrologer-arjun')",
+    },
     title: {
       type: DataTypes.STRING(200),
       allowNull: true,
@@ -47,6 +52,9 @@ const AIChatSession = sequelize.define(
       },
       {
         fields: ["lastMessageAt"],
+      },
+      {
+        fields: ["userId", "astrologerId"],
       },
     ],
   }

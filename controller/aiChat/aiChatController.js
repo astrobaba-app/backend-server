@@ -10,8 +10,36 @@ const openai = new OpenAI({
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
-// System prompt - Always sent with every conversation
-const SYSTEM_PROMPT = `You are an expert Vedic astrologer and spiritual guide named "Astro AI" for an astrology platform. You provide accurate, compassionate, and insightful astrological guidance about all aspects of life.
+// Astrologer-specific system prompts
+const ASTROLOGER_PROFILES = {
+  "ai-astrologer-devansh": {
+    name: "Acharya Devansh Sharma",
+    expertise: "traditional Vedic astrology, timing predictions, career, education, family, and legal matters",
+    style: "logical and timing-accurate predictions with focus on long-term life direction",
+    skills: ["Vedic", "KP", "Nadi", "Prashna"],
+  },
+  "ai-astrologer-ritika": {
+    name: "Ritika Mehra",
+    expertise: "relationship astrology, tarot, love, marriage, and emotional clarity",
+    style: "intuitive insights blended with astrological patterns, compassionate guidance",
+    skills: ["Tarot", "Face Reading"],
+  },
+  "ai-astrologer-arjun": {
+    name: "Pandit Arjun Iyer",
+    expertise: "wealth patterns, health indicators, energy alignment, numerology, palmistry, and vastu",
+    style: "practical and solution-oriented readings focused on removing financial and energetic blockages",
+    skills: ["Numerology", "Palmistry", "Vastu"],
+  },
+};
+
+// Generate astrologer-specific system prompt
+const getSystemPrompt = (astrologerId) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId];
+  const astrologerName = profile ? profile.name : "Astro AI";
+  const expertise = profile ? profile.expertise : "all aspects of life";
+  const style = profile ? profile.style : "accurate, compassionate, and insightful astrological guidance";
+  
+  return `You are ${astrologerName}, an expert Vedic astrologer and spiritual guide for an astrology platform. You specialize in ${expertise}. Your approach is characterized by ${style}.
 
 CRITICAL RULES - MUST FOLLOW:
 - NEVER assume, make up, or fabricate any user information (DOB, time, place, name)
@@ -110,6 +138,7 @@ REMEMBER:
 - If info not in conversation: ASK, don't assume
 - Only use what user actually told you in THIS chat
 - Switch languages smoothly when user switches`;
+};
 
 
 
@@ -122,10 +151,12 @@ REMEMBER:
 const createChatSession = async (req, res) => {
   try {
     const userId = req.user.id;
+    const { astrologerId } = req.body; // Get astrologer ID from request
 
-    // Create new session
+    // Create new session with astrologer ID
     const session = await AIChatSession.create({
       userId,
+      astrologerId: astrologerId || null,
       title: "New Chat",
       isActive: true,
       lastMessageAt: new Date(),
@@ -225,11 +256,14 @@ const sendMessage = async (req, res) => {
 
 IMPORTANT: When user asks about "today", "now", "this year", "current", etc., use the above date and time for your response.`;
 
+    // Get astrologer-specific system prompt
+    const systemPrompt = getSystemPrompt(session.astrologerId);
+
     // Build messages array for OpenAI with optimized context
     const messages = [
       {
         role: "system",
-        content: SYSTEM_PROMPT + userContext + currentDateTime, // Add extracted user info and current date/time to system prompt
+        content: systemPrompt + userContext + currentDateTime, // Add extracted user info and current date/time to system prompt
       },
       ...previousMessages.map((msg) => ({
         role: msg.role,
@@ -299,11 +333,17 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
 const getMyChatSessions = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { page = 1, limit = 20 } = req.query;
+    const { page = 1, limit = 20, astrologerId } = req.query;
     const offset = (page - 1) * limit;
 
+    // Build where clause - filter by astrologer if provided
+    const whereClause = { userId, isActive: true };
+    if (astrologerId) {
+      whereClause.astrologerId = astrologerId;
+    }
+
     const { rows: sessions, count } = await AIChatSession.findAndCountAll({
-      where: { userId, isActive: true },
+      where: whereClause,
       order: [["lastMessageAt", "DESC"]],
       limit: parseInt(limit),
       offset: parseInt(offset),
