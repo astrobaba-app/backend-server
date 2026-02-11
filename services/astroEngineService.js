@@ -94,15 +94,31 @@ const getAstroDetails = async (userRequest) => {
  */
 const getPanchang = async (userRequest) => {
   try {
-    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/panchang`, {
+    console.log('[DEBUG] getPanchang called with:', {
       date: formatDate(userRequest.dateOfbirth),
+      time: formatTime(userRequest.timeOfbirth),
+      latitude: userRequest.latitude,
+      longitude: userRequest.longitude
+    });
+    
+    const payload = {
+      date: formatDate(userRequest.dateOfbirth),
+      time: formatTime(userRequest.timeOfbirth),
       latitude: parseFloat(userRequest.latitude),
       longitude: parseFloat(userRequest.longitude),
       timezone: "Asia/Kolkata",
-    });
+    };
+    
+    console.log('[DEBUG] Calling astro engine URL:', `${ASTRO_ENGINE_BASE_URL}/panchang`);
+    console.log('[DEBUG] Payload:', JSON.stringify(payload, null, 2));
+    
+    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/panchang`, payload);
+    
+    console.log('[DEBUG] getPanchang response received');
     return response.data.panchang;
   } catch (error) {
     console.error("Error in getPanchang:", error.response?.data || error.message);
+    console.error("Error details:", error.response?.status, error.response?.statusText);
     return null;
   }
 };
