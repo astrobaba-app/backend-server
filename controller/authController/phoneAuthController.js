@@ -7,6 +7,10 @@ const redis = require("../../config/redis/redis");
 const { applySignupBonus } = require("../../services/signupBonusService");
 
 
+// Demo credentials – no real SMS is sent for this number
+const DEMO_MOBILE = "8112590070";
+const DEMO_OTP = "000000";
+
 const generateOtp = async (req, res) => {
   try {
     const { mobile } = req.body;
@@ -27,13 +31,29 @@ const generateOtp = async (req, res) => {
       });
     }
 
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
     // Check if user exists (for determining new vs existing user)
     let user = await User.findOne({ where: { mobile } });
     const isNewUser = !user;
-    
+
+    // Demo mode – skip Twilio, use fixed OTP
+    if (mobile === DEMO_MOBILE) {
+      const otpKey = `user:otp:${mobile}`;
+      await redis.setex(otpKey, 300, {
+        otp: DEMO_OTP,
+        mobile,
+        isNewUser,
+        createdAt: Date.now(),
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP sent successfully",
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
     // Store OTP in Redis with 5 minutes expiry
     const otpKey = `user:otp:${mobile}`;
     await redis.setex(otpKey, 300, {
