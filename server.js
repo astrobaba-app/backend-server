@@ -16,7 +16,8 @@ const server = http.createServer(app);
 let allowedOrigins = [
   process.env.FRONTEND_URL, 
   process.env.FRONTEND_URL1,
-  process.env.MOBILE_APP_ORIGIN 
+  process.env.MOBILE_APP_ORIGIN,
+  "https://appleid.apple.com"
 ].filter(Boolean);
 
 if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
