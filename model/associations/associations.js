@@ -3,6 +3,7 @@ const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
+const AppleAuth = require("../user/appleAuth");
 const Address = require("../user/address");
 const DeviceToken = require("../user/deviceToken");
 const Wallet = require("../wallet/wallet");
@@ -67,6 +68,17 @@ const CachedHoroscope = require("../horoscope/cachedHoroscope");
   });
 
   GoogleAuth.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  User.hasOne(AppleAuth, {
+    foreignKey: "userId",
+    as: "appleAuth",
+    onDelete: "CASCADE",
+  });
+
+  AppleAuth.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

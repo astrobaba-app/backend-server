@@ -151,11 +151,12 @@ const supportRoute = require("./routes/support/supportRoute");
 const storeRoute = require("./routes/store/storeRoute");
 const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
+const appleAuthRoute = require("./routes/authRoute/appleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
 
-app.use("/api/auth", phoneAuthRoute,googleAuthRoute);
+app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
 app.use("/api/kundli", kundliRoute);
 app.use("/api/horoscope", dailyHoroscopeRoute);

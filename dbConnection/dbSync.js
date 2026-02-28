@@ -69,6 +69,7 @@ const AccountDeletionRequest = require("../model/user/accountDeletionRequest");
 const Address = require("../model/user/address");
 const DeviceToken = require("../model/user/deviceToken");
 const GoogleAuth = require("../model/user/googleAuth");
+const AppleAuth = require("../model/user/appleAuth");
 
 // Wallet models
 const Wallet = require("../model/wallet/wallet");
