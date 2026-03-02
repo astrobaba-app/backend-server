@@ -129,15 +129,24 @@ const createKundli = async (req, res) => {
         const getPointsArray = (signPoints = []) =>
           signPoints.map((sp) => sp.points ?? 0);
 
+        // Ascendant sign index (0=Aries) — used to rotate arrays so index 0 = house 1
+        const ascLon = basicDetailsVal?.ascendant?.longitude ?? 0;
+        const ascSignIndex = Math.floor(ascLon / 30) % 12;
+        const rotate = (arr) => {
+          if (!arr || arr.length !== 12) return arr;
+          return [...arr.slice(ascSignIndex), ...arr.slice(0, ascSignIndex)];
+        };
+
         ashtakvarga = {
-          sav: getPointsArray(sarvashtakavarga.sign_points || []),
-          sun: getPointsArray(individualCharts.Sun?.sign_points || []),
-          moon: getPointsArray(individualCharts.Moon?.sign_points || []),
-          mars: getPointsArray(individualCharts.Mars?.sign_points || []),
-          mercury: getPointsArray(individualCharts.Mercury?.sign_points || []),
-          jupiter: getPointsArray(individualCharts.Jupiter?.sign_points || []),
-          venus: getPointsArray(individualCharts.Venus?.sign_points || []),
-          saturn: getPointsArray(individualCharts.Saturn?.sign_points || []),
+          sav:     rotate(getPointsArray(sarvashtakavarga.sign_points || [])),
+          sun:     rotate(getPointsArray(individualCharts.Sun?.sign_points || [])),
+          moon:    rotate(getPointsArray(individualCharts.Moon?.sign_points || [])),
+          mars:    rotate(getPointsArray(individualCharts.Mars?.sign_points || [])),
+          mercury: rotate(getPointsArray(individualCharts.Mercury?.sign_points || [])),
+          jupiter: rotate(getPointsArray(individualCharts.Jupiter?.sign_points || [])),
+          venus:   rotate(getPointsArray(individualCharts.Venus?.sign_points || [])),
+          saturn:  rotate(getPointsArray(individualCharts.Saturn?.sign_points || [])),
+          asc:     rotate(getPointsArray(individualCharts.Ascendant?.sign_points || [])),
         };
       } catch (err) {
         console.error("Failed to transform Ashtakavarga data for UI:", err);
