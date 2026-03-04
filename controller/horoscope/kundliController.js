@@ -16,6 +16,54 @@ const {
   getCompleteHoroscope,
 } = require("../../services/astroEngineService");
 
+/**
+ * Shared helper — converts raw Ashtakavarga API response into the compact
+ * house-rotated structure stored in the DB and consumed by the frontend.
+ *
+ * @param {object} ashtakvargaData  - the full object returned by getAshtakavarga()
+ *                                    (includes sarvashtakavarga, analysis, transit_guide)
+ * @param {number} ascLongitude     - sidereal ascendant longitude (0-360)
+ * @returns {object|null}           - { sav, sun, moon, … asc } or null on failure
+ */
+function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
+  if (!ashtakvargaData || !ashtakvargaData.sarvashtakavarga) return null;
+  try {
+    const sarvashtakavarga = ashtakvargaData.sarvashtakavarga;
+    const individualCharts = sarvashtakavarga.individual_charts || {};
+
+    const getPointsArray = (signPoints = []) =>
+      signPoints.map((sp) => sp.points ?? 0);
+
+    // Rotate sign-indexed array (Aries=0) so that index 0 = House 1 (Lagna sign)
+    const ascSignIndex = Math.floor((ascLongitude ?? 0) / 30) % 12;
+    const rotate = (arr) => {
+      if (!arr || arr.length !== 12) return arr;
+      return [...arr.slice(ascSignIndex), ...arr.slice(0, ascSignIndex)];
+    };
+
+    // Debug: log individual Ascendant (Lagna) BAV values before and after rotation
+    const rawAscPoints = getPointsArray(individualCharts.Ascendant?.sign_points || []);
+    console.log("[Ashtakvarga] ascSignIndex =", ascSignIndex,
+      "| raw Lagna BAV (Aries→Pisces):", rawAscPoints,
+      "| rotated (House1→House12):", rotate(rawAscPoints));
+
+    return {
+      sav:     rotate(getPointsArray(sarvashtakavarga.sign_points || [])),
+      sun:     rotate(getPointsArray(individualCharts.Sun?.sign_points || [])),
+      moon:    rotate(getPointsArray(individualCharts.Moon?.sign_points || [])),
+      mars:    rotate(getPointsArray(individualCharts.Mars?.sign_points || [])),
+      mercury: rotate(getPointsArray(individualCharts.Mercury?.sign_points || [])),
+      jupiter: rotate(getPointsArray(individualCharts.Jupiter?.sign_points || [])),
+      venus:   rotate(getPointsArray(individualCharts.Venus?.sign_points || [])),
+      saturn:  rotate(getPointsArray(individualCharts.Saturn?.sign_points || [])),
+      asc:     rotate(getPointsArray(individualCharts.Ascendant?.sign_points || [])),
+    };
+  } catch (err) {
+    console.error("buildAshtakvargaPayload error:", err);
+    return null;
+  }
+}
+
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
 
@@ -120,39 +168,10 @@ const createKundli = async (req, res) => {
     const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
 
     // Prepare compact Ashtakavarga structure expected by frontend
-    let ashtakvarga = null;
-    if (ashtakvargaData && ashtakvargaData.sarvashtakavarga) {
-      try {
-        const sarvashtakavarga = ashtakvargaData.sarvashtakavarga;
-        const individualCharts = sarvashtakavarga.individual_charts || {};
-
-        const getPointsArray = (signPoints = []) =>
-          signPoints.map((sp) => sp.points ?? 0);
-
-        // Ascendant sign index (0=Aries) — used to rotate arrays so index 0 = house 1
-        const ascLon = basicDetailsVal?.ascendant?.longitude ?? 0;
-        const ascSignIndex = Math.floor(ascLon / 30) % 12;
-        const rotate = (arr) => {
-          if (!arr || arr.length !== 12) return arr;
-          return [...arr.slice(ascSignIndex), ...arr.slice(0, ascSignIndex)];
-        };
-
-        ashtakvarga = {
-          sav:     rotate(getPointsArray(sarvashtakavarga.sign_points || [])),
-          sun:     rotate(getPointsArray(individualCharts.Sun?.sign_points || [])),
-          moon:    rotate(getPointsArray(individualCharts.Moon?.sign_points || [])),
-          mars:    rotate(getPointsArray(individualCharts.Mars?.sign_points || [])),
-          mercury: rotate(getPointsArray(individualCharts.Mercury?.sign_points || [])),
-          jupiter: rotate(getPointsArray(individualCharts.Jupiter?.sign_points || [])),
-          venus:   rotate(getPointsArray(individualCharts.Venus?.sign_points || [])),
-          saturn:  rotate(getPointsArray(individualCharts.Saturn?.sign_points || [])),
-          asc:     rotate(getPointsArray(individualCharts.Ascendant?.sign_points || [])),
-        };
-      } catch (err) {
-        console.error("Failed to transform Ashtakavarga data for UI:", err);
-        ashtakvarga = null;
-      }
-    }
+    const ashtakvargaPayload = buildAshtakvargaPayload(
+      ashtakvargaData,
+      basicDetailsVal?.ascendant?.longitude ?? 0
+    );
 
     // Prepare yogas list from complete horoscope if available
     let yogas = null;
@@ -179,7 +198,7 @@ const createKundli = async (req, res) => {
       personality: personalityVal,
       planetary: planetaryVal,
       remedies,
-      ashtakvarga,
+      ashtakvarga: ashtakvargaPayload,
       yogas,
       horoscope,
     });
@@ -380,10 +399,82 @@ const checkAiReportStatus = async (req, res) => {
 };
 
 
+/**
+ * PUT /kundli/:userRequestId/refresh-ashtakvarga
+ * Re-fetches Ashtakavarga from the Python engine and overwrites the stored
+ * ashtakvarga field. Useful when the stored data is stale / from old code.
+ */
+const refreshAshtakvarga = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId } = req.params;
+
+    // Verify ownership
+    const userRequest = await UserRequest.findOne({
+      where: { id: userRequestId, userId },
+    });
+    if (!userRequest) {
+      return res.status(404).json({ success: false, message: "User request not found" });
+    }
+
+    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
+    if (!kundli) {
+      return res.status(404).json({ success: false, message: "Kundli not found" });
+    }
+
+    // Re-fetch from astro engine (basic details for ascendant + ashtakavarga)
+    const [basicDetailsResult, ashtakvargaResult] = await Promise.allSettled([
+      getBasicDetails(userRequest),
+      getAshtakavarga(userRequest),
+    ]);
+
+    const basicDetailsVal = basicDetailsResult.status === "fulfilled" ? basicDetailsResult.value : null;
+    const ashtakvargaData = ashtakvargaResult.status === "fulfilled" ? ashtakvargaResult.value : null;
+
+    if (!basicDetailsVal?.ascendant?.longitude) {
+      console.error("[refreshAshtakvarga] Could not get ascendant longitude", basicDetailsVal);
+    }
+    if (!ashtakvargaData?.sarvashtakavarga) {
+      console.error("[refreshAshtakvarga] Could not get ashtakvarga data", ashtakvargaData);
+      return res.status(500).json({ success: false, message: "Failed to fetch Ashtakavarga from astro engine" });
+    }
+
+    const freshPayload = buildAshtakvargaPayload(
+      ashtakvargaData,
+      basicDetailsVal?.ascendant?.longitude ?? 0
+    );
+
+    if (!freshPayload) {
+      return res.status(500).json({ success: false, message: "Failed to build Ashtakavarga payload" });
+    }
+
+    await Kundli.update(
+      { ashtakvarga: freshPayload },
+      { where: { requestId: userRequestId } }
+    );
+
+    // Return full updated kundli
+    const updatedKundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+      include: [{ model: UserRequest, as: "userRequest" }],
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Ashtakavarga refreshed successfully",
+      kundli: updatedKundli.toJSON(),
+    });
+  } catch (error) {
+    console.error("refreshAshtakvarga error:", error);
+    res.status(500).json({ success: false, message: "Failed to refresh Ashtakavarga", error: error.message });
+  }
+};
+
 module.exports = {
   createKundli,
   getKundli,
   getAllKundlis,
   getAllUserRequests,
   checkAiReportStatus,
+  refreshAshtakvarga,
 };
