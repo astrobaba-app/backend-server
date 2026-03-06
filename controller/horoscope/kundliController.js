@@ -31,32 +31,21 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
     const sarvashtakavarga = ashtakvargaData.sarvashtakavarga;
     const individualCharts = sarvashtakavarga.individual_charts || {};
 
+    // Store raw sign-indexed arrays (Aries=index 0 … Pisces=index 11).
+    // The frontend does the sign→house rotation using the Ascendant sign.
     const getPointsArray = (signPoints = []) =>
       signPoints.map((sp) => sp.points ?? 0);
 
-    // Rotate sign-indexed array (Aries=0) so that index 0 = House 1 (Lagna sign)
-    const ascSignIndex = Math.floor((ascLongitude ?? 0) / 30) % 12;
-    const rotate = (arr) => {
-      if (!arr || arr.length !== 12) return arr;
-      return [...arr.slice(ascSignIndex), ...arr.slice(0, ascSignIndex)];
-    };
-
-    // Debug: log individual Ascendant (Lagna) BAV values before and after rotation
-    const rawAscPoints = getPointsArray(individualCharts.Ascendant?.sign_points || []);
-    console.log("[Ashtakvarga] ascSignIndex =", ascSignIndex,
-      "| raw Lagna BAV (Aries→Pisces):", rawAscPoints,
-      "| rotated (House1→House12):", rotate(rawAscPoints));
-
     return {
-      sav:     rotate(getPointsArray(sarvashtakavarga.sign_points || [])),
-      sun:     rotate(getPointsArray(individualCharts.Sun?.sign_points || [])),
-      moon:    rotate(getPointsArray(individualCharts.Moon?.sign_points || [])),
-      mars:    rotate(getPointsArray(individualCharts.Mars?.sign_points || [])),
-      mercury: rotate(getPointsArray(individualCharts.Mercury?.sign_points || [])),
-      jupiter: rotate(getPointsArray(individualCharts.Jupiter?.sign_points || [])),
-      venus:   rotate(getPointsArray(individualCharts.Venus?.sign_points || [])),
-      saturn:  rotate(getPointsArray(individualCharts.Saturn?.sign_points || [])),
-      asc:     rotate(getPointsArray(individualCharts.Ascendant?.sign_points || [])),
+      sav:     getPointsArray(sarvashtakavarga.sign_points || []),
+      sun:     getPointsArray(individualCharts.Sun?.sign_points || []),
+      moon:    getPointsArray(individualCharts.Moon?.sign_points || []),
+      mars:    getPointsArray(individualCharts.Mars?.sign_points || []),
+      mercury: getPointsArray(individualCharts.Mercury?.sign_points || []),
+      jupiter: getPointsArray(individualCharts.Jupiter?.sign_points || []),
+      venus:   getPointsArray(individualCharts.Venus?.sign_points || []),
+      saturn:  getPointsArray(individualCharts.Saturn?.sign_points || []),
+      asc:     getPointsArray(individualCharts.Ascendant?.sign_points || []),
     };
   } catch (err) {
     console.error("buildAshtakvargaPayload error:", err);
