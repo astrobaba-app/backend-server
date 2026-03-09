@@ -13,6 +13,8 @@ const {
   rejectAstrologer,
   logout,
   broadcastNotification,
+  getBroadcastHistory,
+  resendBroadcast,
   getProfile,
   updateProfile,
   changePassword,
@@ -124,6 +126,18 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   broadcastNotification
+);
+router.get(
+  "/broadcast-history",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getBroadcastHistory
+);
+router.post(
+  "/broadcast-resend/:logId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  resendBroadcast
 );
 
 // Signup bonus settings routes

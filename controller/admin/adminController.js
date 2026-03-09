@@ -1,6 +1,7 @@
 const Admin = require("../../model/admin/admin");
 const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
+const BroadcastLog = require("../../model/admin/broadcastLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const {
@@ -551,7 +552,7 @@ const logout = async (req, res) => {
  */
 const broadcastNotification = async (req, res) => {
   try {
-    const { title, message, actionUrl, imageUrl, data } = req.body;
+    const { title, message, actionUrl, data } = req.body;
 
     if (!title || !message) {
       return res.status(400).json({
@@ -570,16 +571,123 @@ const broadcastNotification = async (req, res) => {
       sendPush: true,
     });
 
+    // Persist broadcast log so admin can review history
+    const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+    await BroadcastLog.create({
+      adminId: req.user.id,
+      adminName: admin?.name || "",
+      title,
+      message,
+      actionUrl: actionUrl || null,
+      totalUsers: result.totalSent || 0,
+      pushSuccessCount: result.pushSuccessCount || 0,
+      pushFailureCount: result.pushFailureCount || 0,
+    });
+
     res.status(200).json({
       success: true,
       message: "Broadcast notification sent successfully",
-      data: result,
+      data: {
+        totalUsers: result.totalSent || 0,
+        pushSuccessCount: result.pushSuccessCount || 0,
+        pushFailureCount: result.pushFailureCount || 0,
+      },
     });
   } catch (error) {
     console.error("Broadcast notification error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to send broadcast notification",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Get paginated history of all broadcasts sent by admins
+ */
+const getBroadcastHistory = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 10));
+    const offset = (page - 1) * limit;
+
+    const { rows, count } = await BroadcastLog.findAndCountAll({
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+    });
+
+    res.status(200).json({
+      success: true,
+      history: rows,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get broadcast history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch broadcast history",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Resend a previous broadcast by its log ID
+ */
+const resendBroadcast = async (req, res) => {
+  try {
+    const { logId } = req.params;
+
+    const log = await BroadcastLog.findByPk(logId);
+    if (!log) {
+      return res.status(404).json({ success: false, message: "Broadcast log not found" });
+    }
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title: log.title,
+      message: log.message,
+      data: {},
+      actionUrl: log.actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    // Save a new log entry for the resend
+    const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+    const newLog = await BroadcastLog.create({
+      adminId: req.user.id,
+      adminName: admin?.name || "",
+      title: log.title,
+      message: log.message,
+      actionUrl: log.actionUrl,
+      totalUsers: result.totalSent || 0,
+      pushSuccessCount: result.pushSuccessCount || 0,
+      pushFailureCount: result.pushFailureCount || 0,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Notification resent successfully",
+      data: {
+        logId: newLog.id,
+        totalUsers: result.totalSent || 0,
+        pushSuccessCount: result.pushSuccessCount || 0,
+        pushFailureCount: result.pushFailureCount || 0,
+      },
+    });
+  } catch (error) {
+    console.error("Resend broadcast error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to resend broadcast",
       error: error.message,
     });
   }
@@ -910,6 +1018,8 @@ module.exports = {
   rejectAstrologer,
   logout,
   broadcastNotification,
+  getBroadcastHistory,
+  resendBroadcast,
   getProfile,
   updateProfile,
   changePassword,

@@ -1,6 +1,7 @@
 const Blog = require("../../model/blog/blog");
 const BlogLike = require("../../model/blog/blogLike");
 const Astrologer = require("../../model/astrologer/astrologer");
+const Admin = require("../../model/admin/admin");
 const { addLikeStatusToBlogs, addLikeStatus } = require("../../services/blogLikeService");
 const { getClientInfo } = require("../../utils/clientInfo");
 
@@ -77,6 +78,13 @@ const getAllBlogs = async (req, res) => {
           model: Astrologer,
           as: "astrologer",
           attributes: ["id", "fullName", "photo", "email", "rating", "yearsOfExperience"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "admin",
+          attributes: ["id", "name", "email"],
+          required: false,
         },
       ],
     });
@@ -112,6 +120,13 @@ const getBlogById = async (req, res) => {
           model: Astrologer,
           as: "astrologer",
           attributes: ["id", "fullName", "photo", "email", "rating", "yearsOfExperience", "bio"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "admin",
+          attributes: ["id", "name", "email"],
+          required: false,
         },
       ],
     });

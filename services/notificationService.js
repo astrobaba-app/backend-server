@@ -87,6 +87,8 @@ class NotificationService {
       );
 
       // Send push notifications via FCM
+      let pushSuccessCount = 0;
+      let pushFailureCount = 0;
       if (sendPush) {
         try {
           // Convert all data values to strings (FCM requirement)
@@ -95,7 +97,7 @@ class NotificationService {
             stringifiedData[key] = String(value);
           }
 
-          await pushNotificationService.broadcastToAll({
+          const pushResult = await pushNotificationService.broadcastToAll({
             title,
             body: message,
             data: {
@@ -104,6 +106,8 @@ class NotificationService {
               actionUrl: String(actionUrl || ""),
             },
           });
+          pushSuccessCount = pushResult?.successCount ?? 0;
+          pushFailureCount = pushResult?.failureCount ?? 0;
         } catch (pushError) {
           console.error("Error sending broadcast push notification:", pushError);
           // Don't fail the entire notification if push fails
@@ -113,6 +117,8 @@ class NotificationService {
       return {
         success: true,
         totalSent: notifications.length,
+        pushSuccessCount,
+        pushFailureCount,
       };
     } catch (error) {
       console.error("Error broadcasting notification:", error);

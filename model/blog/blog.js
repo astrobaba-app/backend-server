@@ -11,12 +11,22 @@ const Blog = sequelize.define(
     },
     astrologerId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "astrologers",
         key: "id",
       },
-      onDelete: "CASCADE",
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
+    },
+    adminId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "admins",
+        key: "id",
+      },
+      onDelete: "SET NULL",
       onUpdate: "CASCADE",
     },
     title: {
@@ -29,11 +39,34 @@ const Blog = sequelize.define(
     description: {
       type: DataTypes.TEXT,
       allowNull: false,
-      validate: {
-        len: [10, 10000],
-      },
     },
     image: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      defaultValue: null,
+    },
+    images: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      defaultValue: null,
+      get() {
+        const raw = this.getDataValue("images");
+        if (!raw) return [];
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return [];
+        }
+      },
+      set(val) {
+        if (!val || (Array.isArray(val) && val.length === 0)) {
+          this.setDataValue("images", null);
+        } else {
+          this.setDataValue("images", JSON.stringify(val));
+        }
+      },
+    },
+    category: {
       type: DataTypes.STRING,
       allowNull: true,
       defaultValue: null,

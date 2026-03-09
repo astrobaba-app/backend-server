@@ -3,6 +3,9 @@ const OpenAI = require("openai");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
 const AIChatMessage = require("../../model/aiChat/aiChatMessage");
 const User = require("../../model/user/userAuth");
+const UserRequest = require("../../model/user/userRequest");
+const Kundli = require("../../model/horoscope/kundli");
+const { Op } = require("sequelize");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -143,6 +146,133 @@ REMEMBER:
 
 
 
+// ============= KUNDLI CONTEXT HELPER =============
+
+/**
+ * Extracts the relevant Kundli fields (as specified in the AI context spec)
+ * and returns a formatted string block to inject into the system prompt.
+ */
+const extractKundliContext = (kundli, userRequest) => {
+  if (!kundli) return "";
+
+  const parts = [];
+
+  // ── User context ──────────────────────────────────────────────
+  if (userRequest) {
+    if (userRequest.fullName)    parts.push(`- Name: ${userRequest.fullName}`);
+    if (userRequest.gender)      parts.push(`- Gender: ${userRequest.gender}`);
+    if (userRequest.dateOfbirth) parts.push(`- Date of Birth: ${userRequest.dateOfbirth}`);
+    if (userRequest.timeOfbirth) parts.push(`- Time of Birth: ${userRequest.timeOfbirth}`);
+    if (userRequest.placeOfBirth)parts.push(`- Place of Birth: ${userRequest.placeOfBirth}`);
+  }
+
+  // ── Ascendant (Lagna) ─────────────────────────────────────────
+  const ascendant =
+    kundli.basicDetails?.ascendant?.sign ||
+    kundli.personality?.ascendant_sign;
+  if (ascendant) parts.push(`- Ascendant (Lagna): ${ascendant}`);
+
+  // ── Sun & Moon signs ──────────────────────────────────────────
+  const sunSign  = kundli.basicDetails?.sun_sign;
+  const moonSign = kundli.basicDetails?.moon_sign;
+  if (sunSign)  parts.push(`- Sun Sign: ${sunSign}`);
+  if (moonSign) parts.push(`- Moon Sign: ${moonSign}`);
+
+  // ── Moon nakshatra ────────────────────────────────────────────
+  const moonNakshatra =
+    kundli.panchang?.nakshatra?.name ||
+    kundli.planetary?.Moon?.nakshatra;
+  if (moonNakshatra) parts.push(`- Moon Nakshatra: ${moonNakshatra}`);
+
+  // ── Planetary house positions ─────────────────────────────────
+  const PLANETS = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"];
+  const planetHouses = [];
+  for (const planet of PLANETS) {
+    const house = kundli.horoscope?.planetary_analysis?.[planet]?.house;
+    if (house != null) planetHouses.push(`${planet}: House ${house}`);
+  }
+  if (planetHouses.length > 0) {
+    parts.push(`- Planetary House Positions: ${planetHouses.join(", ")}`);
+  }
+
+  // ── Current Vimshottari dasha ─────────────────────────────────
+  const currentDasha = kundli.horoscope?.dasha_predictions?.current_dasha;
+  if (currentDasha?.planet) {
+    parts.push(
+      `- Current Vimshottari Dasha: ${currentDasha.planet}` +
+      (currentDasha.start_date ? ` (from ${currentDasha.start_date}` : "") +
+      (currentDasha.end_date   ? ` to ${currentDasha.end_date})` : "")
+    );
+  }
+
+  // ── Sade Sati ─────────────────────────────────────────────────
+  const sadesati = kundli.sadesati || kundli.horoscope?.sadesati;
+  if (sadesati) {
+    parts.push(
+      `- Sade Sati: ${sadesati.is_sadesati ? "Yes" : "No"}` +
+      (sadesati.status ? ` (${sadesati.status})` : "")
+    );
+  }
+
+  // ── Key Yogas (top 2) ─────────────────────────────────────────
+  const yogaAnalysis = kundli.horoscope?.yoga_analysis || kundli.yogas;
+  if (Array.isArray(yogaAnalysis) && yogaAnalysis.length > 0) {
+    const topYogas = yogaAnalysis
+      .slice(0, 2)
+      .map((y) => y.name)
+      .filter(Boolean);
+    if (topYogas.length > 0) parts.push(`- Key Yogas: ${topYogas.join(", ")}`);
+  }
+
+  // ── Manglik ───────────────────────────────────────────────────
+  const isManglik = kundli.manglikAnalysis?.is_manglik;
+  if (isManglik != null) {
+    parts.push(`- Manglik: ${isManglik ? "Yes" : "No"}`);
+  }
+
+  if (parts.length === 0) return "";
+
+  return `
+
+KUNDLI CONTEXT (User's Birth Chart - Already Provided):
+${parts.join("\n")}
+IMPORTANT KUNDLI INSTRUCTIONS:
+- The user's complete birth details and chart data are listed above.
+- DO NOT ask for date of birth, time of birth, or place of birth — you already have them.
+- Use this Kundli data directly as the foundation for all astrological readings.
+- Reference their specific ascendant, signs, planetary positions, dasha, yogas, etc. in responses.
+- Treat all readings as personalised to this specific birth chart.`;
+};
+
+// ============= GREETING HELPER =============
+
+/**
+ * Builds the Hinglish welcome message shown at the start of every new chat.
+ * @param {string} userName   - User's display name (first name preferred)
+ * @param {string} astrologerId - e.g. "ai-astrologer-devansh"
+ * @param {boolean} hasKundli - Whether a kundli is already linked
+ * @param {object|null} userRequest - UserRequest record (DOB / place context)
+ * @returns {string}
+ */
+const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || null;
+  const astrologerName = profile ? profile.name : "Aapka AI Astrologer";
+
+  // Derive a friendly first name for the user
+  const firstName = userName
+    ? userName.trim().split(/\s+/)[0]
+    : "aap";
+
+  if (hasKundli && userRequest) {
+    const kundliName = userRequest.fullName
+      ? userRequest.fullName.trim().split(/\s+/)[0]
+      : firstName;
+    return `Namaste ${firstName}!  Main ${astrologerName} hun, aapka AI astrologer. Maine ${kundliName} ki kundli dekh li hai. Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Main yahan hun aapke liye! `;
+  }
+
+  return `Namaste ${firstName}!  Main ${astrologerName} hun, aapka AI astrologer. Aaj main aapki kya madad kar sakta hun? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
+};
+
 // ============= USER ROUTES =============
 
 /**
@@ -216,6 +346,26 @@ const sendMessage = async (req, res) => {
       content: message.trim(),
     });
 
+    // Load Kundli context if a Kundli is attached to this session
+    let kundliContextStr = "";
+    if (session.kundliUserRequestId) {
+      try {
+        const [kundliRecord, userRequestRecord] = await Promise.all([
+          Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
+          UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
+        ]);
+        if (kundliRecord && userRequestRecord) {
+          kundliContextStr = extractKundliContext(
+            kundliRecord.toJSON(),
+            userRequestRecord.toJSON()
+          );
+        }
+      } catch (kundliErr) {
+        console.error("Failed to load Kundli context for session:", kundliErr.message);
+        // Non-fatal — continue without Kundli context
+      }
+    }
+
     // Get recent conversation history (last 20 messages for context)
     // This keeps token usage efficient while maintaining important context
     const previousMessages = await AIChatMessage.findAll({
@@ -263,7 +413,9 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     const messages = [
       {
         role: "system",
-        content: systemPrompt + userContext + currentDateTime, // Add extracted user info and current date/time to system prompt
+        // Inject Kundli context (if available) between the system prompt and the
+        // conversation-extracted user context, so the AI uses the real chart data.
+        content: systemPrompt + kundliContextStr + userContext + currentDateTime,
       },
       ...previousMessages.map((msg) => ({
         role: msg.role,
@@ -504,6 +656,184 @@ const clearChatSession = async (req, res) => {
   }
 };
 
+/**
+ * Attach a Kundli (user request) to an existing chat session.
+ * This persists the link so that every message in this session
+ * automatically uses the user's birth chart as context.
+ */
+const attachKundliToSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const { kundliUserRequestId } = req.body;
+
+    if (!kundliUserRequestId) {
+      return res.status(400).json({
+        success: false,
+        message: "kundliUserRequestId is required",
+      });
+    }
+
+    // Verify session belongs to this user
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    // Verify the UserRequest belongs to this user
+    const userRequest = await UserRequest.findOne({
+      where: { id: kundliUserRequestId, userId },
+    });
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found for this user",
+      });
+    }
+
+    // Verify a Kundli has actually been generated for this request
+    const kundli = await Kundli.findOne({
+      where: { requestId: kundliUserRequestId },
+    });
+    if (!kundli) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli has not been generated yet for this request",
+      });
+    }
+
+    // Attach Kundli to session
+    await session.update({ kundliUserRequestId });
+
+    // Generate greeting message only if this session has no messages yet
+    let greetingMessage = null;
+    const existingMessageCount = await AIChatMessage.count({
+      where: { sessionId },
+    });
+
+    if (existingMessageCount === 0) {
+      // Get the user's display name
+      const userRecord = await User.findOne({ where: { id: userId }, attributes: ["fullName"] });
+      const userName = userRecord?.fullName || "";
+
+      const greetingText = buildGreetingMessage(userName, session.astrologerId, true, userRequest.toJSON());
+
+      greetingMessage = await AIChatMessage.create({
+        sessionId,
+        role: "assistant",
+        content: greetingText,
+      });
+
+      await session.update({ lastMessageAt: new Date() });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Kundli attached to chat session successfully",
+      session: {
+        id: session.id,
+        kundliUserRequestId,
+      },
+      greetingMessage: greetingMessage
+        ? {
+            id: greetingMessage.id,
+            sessionId: greetingMessage.sessionId,
+            role: greetingMessage.role,
+            content: greetingMessage.content,
+            createdAt: greetingMessage.createdAt,
+            updatedAt: greetingMessage.updatedAt,
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error("Attach Kundli to session error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to attach Kundli",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Send a Hinglish greeting as the first AI message in a session.
+ * Used when a session is fresh (no messages) regardless of kundli attachment.
+ * If a kundli is already attached its context is included in the greeting.
+ * Idempotent: returns the existing greeting if the session already has messages.
+ */
+const greetSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    // Verify session belongs to this user
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+    if (!session) {
+      return res.status(404).json({ success: false, message: "Chat session not found" });
+    }
+
+    // Check if any messages already exist
+    const existingCount = await AIChatMessage.count({ where: { sessionId } });
+    if (existingCount > 0) {
+      // Return the first assistant message as the existing greeting
+      const firstMsg = await AIChatMessage.findOne({
+        where: { sessionId, role: "assistant" },
+        order: [["createdAt", "ASC"]],
+      });
+      return res.status(200).json({
+        success: true,
+        alreadyGreeted: true,
+        greetingMessage: firstMsg
+          ? { id: firstMsg.id, sessionId: firstMsg.sessionId, role: firstMsg.role, content: firstMsg.content, createdAt: firstMsg.createdAt, updatedAt: firstMsg.updatedAt }
+          : null,
+      });
+    }
+
+    // Get user's name
+    const userRecord = await User.findOne({ where: { id: userId }, attributes: ["fullName"] });
+    const userName = userRecord?.fullName || "";
+
+    // Try to load kundli context for the greeting
+    let userRequest = null;
+    if (session.kundliUserRequestId) {
+      userRequest = await UserRequest.findOne({ where: { id: session.kundliUserRequestId } });
+    }
+
+    const greetingText = buildGreetingMessage(userName, session.astrologerId, !!(session.kundliUserRequestId && userRequest), userRequest ? userRequest.toJSON() : null);
+
+    const greetingMessage = await AIChatMessage.create({
+      sessionId,
+      role: "assistant",
+      content: greetingText,
+    });
+
+    await session.update({ lastMessageAt: new Date() });
+
+    return res.status(201).json({
+      success: true,
+      alreadyGreeted: false,
+      greetingMessage: {
+        id: greetingMessage.id,
+        sessionId: greetingMessage.sessionId,
+        role: greetingMessage.role,
+        content: greetingMessage.content,
+        createdAt: greetingMessage.createdAt,
+        updatedAt: greetingMessage.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Greet session error:", error);
+    res.status(500).json({ success: false, message: "Failed to send greeting", error: error.message });
+  }
+};
+
 module.exports = {
   createChatSession,
   sendMessage,
@@ -511,4 +841,6 @@ module.exports = {
   getChatMessages,
   deleteChatSession,
   clearChatSession,
+  attachKundliToSession,
+  greetSession,
 };

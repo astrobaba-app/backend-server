@@ -4,6 +4,7 @@ const { DataTypes } = require("sequelize");
 // Admin models
 const Admin = require("../model/admin/admin");
 const AdminSettings = require("../model/admin/adminSettings");
+const BroadcastLog = require("../model/admin/broadcastLog");
 
 // AI Chat models
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
@@ -236,6 +237,84 @@ async function ensureChatMessageColumns() {
   }
 }
 
+async function ensureBlogColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("blogs");
+    const operations = [];
+
+    // Make astrologerId nullable (raw query for safety with FK constraints)
+    try {
+      await sequelize.query(`ALTER TABLE "blogs" ALTER COLUMN "astrologerId" DROP NOT NULL`);
+    } catch (err) {
+      // Already nullable or doesn't exist yet
+    }
+
+    if (!table.adminId) {
+      operations.push(
+        queryInterface.addColumn("blogs", "adminId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.images) {
+      operations.push(
+        queryInterface.addColumn("blogs", "images", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.category) {
+      operations.push(
+        queryInterface.addColumn("blogs", "category", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured blog columns exist (adminId, images, category)");
+    }
+  } catch (error) {
+    // Table doesn't exist yet - will be created by sync
+    console.log("blogs table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureAIChatSessionColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("ai_chat_sessions");
+    const operations = [];
+
+    if (!table.kundliUserRequestId && !table.kundli_user_request_id) {
+      operations.push(
+        queryInterface.addColumn("ai_chat_sessions", "kundliUserRequestId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+          comment: "The Kundli (user request) linked to this chat session for personalised readings",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Added kundliUserRequestId column to ai_chat_sessions");
+    } else {
+      console.log("✓ ai_chat_sessions table is up to date");
+    }
+  } catch (error) {
+    // Table doesn't exist yet — will be created by sync
+    console.log("ai_chat_sessions table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -248,6 +327,8 @@ const initDB = (callback) => {
     .then(() => ensureChatSessionColumns())
     .then(() => ensureChatMessageColumns())
     .then(() => ensureLiveChatMessageColumns())
+    .then(() => ensureBlogColumns())
+    .then(() => ensureAIChatSessionColumns())
     .then(() => {
       console.log("All models synced");
       callback();

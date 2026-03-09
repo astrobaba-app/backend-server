@@ -158,12 +158,24 @@ const CachedHoroscope = require("../horoscope/cachedHoroscope");
   Astrologer.hasMany(Blog, {
     foreignKey: "astrologerId",
     as: "blogs",
-    onDelete: "CASCADE",
+    onDelete: "SET NULL",
   });
 
   Blog.belongsTo(Astrologer, {
     foreignKey: "astrologerId",
     as: "astrologer",
+  });
+
+  // Admin Blog associations
+  Admin.hasMany(Blog, {
+    foreignKey: "adminId",
+    as: "adminBlogs",
+    onDelete: "SET NULL",
+  });
+
+  Blog.belongsTo(Admin, {
+    foreignKey: "adminId",
+    as: "admin",
   });
 
   // Blog - BlogLike

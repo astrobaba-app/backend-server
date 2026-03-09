@@ -39,6 +39,17 @@ const AIChatSession = sequelize.define(
       allowNull: true,
       comment: "Timestamp of last message in this session",
     },
+    kundliUserRequestId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "user_requests",
+        key: "id",
+      },
+      onDelete: "SET NULL",
+      onUpdate: "CASCADE",
+      comment: "The Kundli (user request) linked to this chat session for personalized readings",
+    },
   },
   {
     tableName: "ai_chat_sessions",
