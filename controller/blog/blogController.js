@@ -5,10 +5,16 @@ const Admin = require("../../model/admin/admin");
 const { addLikeStatusToBlogs, addLikeStatus } = require("../../services/blogLikeService");
 const { getClientInfo } = require("../../utils/clientInfo");
 
+const parseBoolean = (value, defaultValue = true) => {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  if (typeof value === "boolean") return value;
+  return value === "true";
+};
+
 const createBlog = async (req, res) => {
   try {
     const astrologerId = req.user.id;
-    const { title, description } = req.body;
+    const { title, description, category, isPublished } = req.body;
 
     if (!title || !description) {
       return res.status(400).json({
@@ -17,14 +23,17 @@ const createBlog = async (req, res) => {
       });
     }
 
-    // Get image URL from uploaded file (if any)
-    const image = req.fileUrl || null;
+    const imageUrls = req.fileUrls && req.fileUrls.length > 0 ? req.fileUrls : [];
+    const primaryImage = imageUrls.length > 0 ? imageUrls[0] : req.fileUrl || null;
 
     const blog = await Blog.create({
       astrologerId,
       title,
       description,
-      image,
+      category: category || null,
+      image: primaryImage,
+      images: imageUrls.length > 0 ? imageUrls : null,
+      isPublished: parseBoolean(isPublished, true),
     });
 
     // Get astrologer details
@@ -36,14 +45,7 @@ const createBlog = async (req, res) => {
       success: true,
       message: "Blog created successfully",
       blog: {
-        id: blog.id,
-        title: blog.title,
-        description: blog.description,
-        image: blog.image,
-        isPublished: blog.isPublished,
-        views: blog.views,
-        likes: blog.likes,
-        createdAt: blog.createdAt,
+        ...blog.toJSON(),
         astrologer,
       },
     });
@@ -170,6 +172,20 @@ const getMyBlogs = async (req, res) => {
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [["createdAt", "DESC"]],
+      include: [
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "email"],
+          required: false,
+        },
+        {
+          model: Admin,
+          as: "admin",
+          attributes: ["id", "name", "email"],
+          required: false,
+        },
+      ],
     });
 
     res.status(200).json({
@@ -197,7 +213,7 @@ const updateBlog = async (req, res) => {
   try {
     const astrologerId =  req.user.id;
     const { blogId } = req.params;
-    const { title, description, isPublished } = req.body;
+    const { title, description, category, isPublished } = req.body;
 
     const blog = await Blog.findOne({
       where: { id: blogId, astrologerId },
@@ -212,12 +228,20 @@ const updateBlog = async (req, res) => {
 
     // Update fields
     const updateData = {};
-    if (title) updateData.title = title;
-    if (description) updateData.description = description;
-    if (req.fileUrl) updateData.image = req.fileUrl;
-    if (isPublished !== undefined) updateData.isPublished = isPublished;
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (category !== undefined) updateData.category = category || null;
+    if (isPublished !== undefined) updateData.isPublished = parseBoolean(isPublished);
+
+    if (req.fileUrls && req.fileUrls.length > 0) {
+      updateData.images = req.fileUrls;
+      updateData.image = req.fileUrls[0];
+    } else if (req.fileUrl) {
+      updateData.image = req.fileUrl;
+    }
 
     await blog.update(updateData);
+    await blog.reload();
 
     res.status(200).json({
       success: true,
@@ -231,6 +255,55 @@ const updateBlog = async (req, res) => {
       message: "Failed to update blog",
       error: error.message,
     });
+  }
+};
+
+// Toggle blog publish status (astrologer only - own blogs)
+const toggleBlogPublish = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { blogId } = req.params;
+
+    const blog = await Blog.findOne({
+      where: { id: blogId, astrologerId },
+    });
+
+    if (!blog) {
+      return res.status(404).json({
+        success: false,
+        message: "Blog not found or you don't have permission to update it",
+      });
+    }
+
+    const newStatus = !blog.isPublished;
+    await blog.update({ isPublished: newStatus });
+
+    res.status(200).json({
+      success: true,
+      message: `Blog ${newStatus ? "published" : "unpublished"} successfully`,
+      blog,
+    });
+  } catch (error) {
+    console.error("Toggle blog publish error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to toggle blog publish status",
+      error: error.message,
+    });
+  }
+};
+
+// Upload a single inline image (for use inside blog content blocks)
+const uploadInlineImage = async (req, res) => {
+  try {
+    const imageUrl = req.fileUrl;
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: "No image uploaded" });
+    }
+    res.status(200).json({ success: true, url: imageUrl });
+  } catch (error) {
+    console.error("Upload inline image error:", error);
+    res.status(500).json({ success: false, message: "Failed to upload image", error: error.message });
   }
 };
 
@@ -376,6 +449,8 @@ module.exports = {
   getMyBlogs,
   updateBlog,
   deleteBlog,
+  toggleBlogPublish,
+  uploadInlineImage,
   likeBlog,
   checkBlogLikeStatus,
 };

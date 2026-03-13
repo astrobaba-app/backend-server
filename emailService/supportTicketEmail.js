@@ -49,7 +49,7 @@ const sendTicketCreatedEmail = async (user, ticket) => {
           
           <p style="text-align: center; margin-top: 20px;">
             Best regards,<br>
-            <strong>AstroBaba Support Team</strong>
+            <strong>Graho Support Team</strong>
           </p>
         </div>
       `,
@@ -116,7 +116,7 @@ const sendTicketReplyEmail = async (user, ticket, reply, adminName) => {
           
           <p style="text-align: center; margin-top: 20px;">
             Best regards,<br>
-            <strong>AstroBaba Support Team</strong>
+            <strong>Graho Support Team</strong>
           </p>
         </div>
       `,
@@ -176,7 +176,7 @@ const sendTicketStatusUpdateEmail = async (user, ticket, oldStatus, newStatus) =
           
           ${newStatus === 'resolved' ? `
           <div style="background-color: #e8f5e9; padding: 15px; border-left: 4px solid #4CAF50; margin: 20px 0;">
-            <p style="margin: 0;"><strong>✅ Your issue has been resolved!</strong></p>
+            <p style="margin: 0;"><strong> Your issue has been resolved!</strong></p>
             <p style="margin: 10px 0 0 0;">If your issue persists or you need further assistance, please reply to the ticket or create a new one.</p>
           </div>
           ` : ''}
@@ -203,7 +203,7 @@ const sendTicketStatusUpdateEmail = async (user, ticket, oldStatus, newStatus) =
           
           <p style="text-align: center; margin-top: 20px;">
             Best regards,<br>
-            <strong>AstroBaba Support Team</strong>
+            <strong>Graho Support Team</strong>
           </p>
         </div>
       `,
