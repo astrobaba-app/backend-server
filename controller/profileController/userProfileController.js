@@ -45,7 +45,10 @@ const updateProfile = async (req, res) => {
       city,
       state,
       country,
-      pincode
+      pincode,
+      pushNotifications,
+      emailUpdates,
+      smsAlerts,
     } = req.body;
 
     const user = await User.findByPk(userId);
@@ -158,6 +161,16 @@ const updateProfile = async (req, res) => {
         user.pincode = parseInt(pincode, 10);
       }
     }
+
+    if (pushNotifications !== undefined) {
+      user.pushNotifications = Boolean(pushNotifications);
+    }
+    if (emailUpdates !== undefined) {
+      user.emailUpdates = Boolean(emailUpdates);
+    }
+    if (smsAlerts !== undefined) {
+      user.smsAlerts = Boolean(smsAlerts);
+    }
     
     await user.save();
 
@@ -180,6 +193,9 @@ const updateProfile = async (req, res) => {
         state: user.state,
         country: user.country,
         pincode: user.pincode,
+        pushNotifications: user.pushNotifications,
+        emailUpdates: user.emailUpdates,
+        smsAlerts: user.smsAlerts,
       },
     });
   } catch (error) {

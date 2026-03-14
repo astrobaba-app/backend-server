@@ -315,6 +315,51 @@ async function ensureAIChatSessionColumns() {
   }
 }
 
+async function ensureUserPreferenceColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("users");
+    const operations = [];
+
+    if (!table.pushNotifications && !table.push_notifications) {
+      operations.push(
+        queryInterface.addColumn("users", "pushNotifications", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: true,
+        })
+      );
+    }
+
+    if (!table.emailUpdates && !table.email_updates) {
+      operations.push(
+        queryInterface.addColumn("users", "emailUpdates", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.smsAlerts && !table.sms_alerts) {
+      operations.push(
+        queryInterface.addColumn("users", "smsAlerts", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured user preference columns exist");
+    }
+  } catch (error) {
+    console.log("users table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -329,6 +374,7 @@ const initDB = (callback) => {
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
+    .then(() => ensureUserPreferenceColumns())
     .then(() => {
       console.log("All models synced");
       callback();
