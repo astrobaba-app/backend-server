@@ -49,6 +49,7 @@ const updateProfile = async (req, res) => {
       pushNotifications,
       emailUpdates,
       smsAlerts,
+      forumIdentityMode,
     } = req.body;
 
     const user = await User.findByPk(userId);
@@ -171,6 +172,17 @@ const updateProfile = async (req, res) => {
     if (smsAlerts !== undefined) {
       user.smsAlerts = Boolean(smsAlerts);
     }
+
+    if (forumIdentityMode !== undefined) {
+      if (!["real", "anonymous"].includes(forumIdentityMode)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid forum identity mode",
+        });
+      }
+
+      user.forumIdentityMode = forumIdentityMode;
+    }
     
     await user.save();
 
@@ -196,6 +208,9 @@ const updateProfile = async (req, res) => {
         pushNotifications: user.pushNotifications,
         emailUpdates: user.emailUpdates,
         smsAlerts: user.smsAlerts,
+        forumIdentityMode: user.forumIdentityMode,
+        forumAnonymousHandle: user.forumAnonymousHandle,
+        forumAnonymousHash: user.forumAnonymousHash,
       },
     });
   } catch (error) {

@@ -22,6 +22,13 @@ const AstrologerEarning = require("../model/astrologer/astrologerEarning");
 const Blog = require("../model/blog/blog");
 const BlogLike = require("../model/blog/blogLike");
 
+// Forum models
+const ForumPost = require("../model/forum/forumPost");
+const ForumComment = require("../model/forum/forumComment");
+const ForumPostLike = require("../model/forum/forumPostLike");
+const ForumPostReport = require("../model/forum/forumPostReport");
+const ForumPostAppeal = require("../model/forum/forumPostAppeal");
+
 // Call models
 const CallSession = require("../model/call/callSession");
 
@@ -351,12 +358,359 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.forumIdentityMode && !table.forum_identity_mode) {
+      operations.push(
+        queryInterface.addColumn("users", "forumIdentityMode", {
+          type: DataTypes.ENUM("real", "anonymous"),
+          allowNull: false,
+          defaultValue: "real",
+        })
+      );
+    }
+
+    if (!table.forumAnonymousHandle && !table.forum_anonymous_handle) {
+      operations.push(
+        queryInterface.addColumn("users", "forumAnonymousHandle", {
+          type: DataTypes.STRING,
+          allowNull: true,
+          unique: true,
+        })
+      );
+    }
+
+    if (!table.forumAnonymousHash && !table.forum_anonymous_hash) {
+      operations.push(
+        queryInterface.addColumn("users", "forumAnonymousHash", {
+          type: DataTypes.STRING,
+          allowNull: true,
+          unique: true,
+        })
+      );
+    }
+
+    if (!table.forumWarningsCount && !table.forum_warnings_count) {
+      operations.push(
+        queryInterface.addColumn("users", "forumWarningsCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (!table.forumBlockedUntil && !table.forum_blocked_until) {
+      operations.push(
+        queryInterface.addColumn("users", "forumBlockedUntil", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.forumIsBanned && !table.forum_is_banned) {
+      operations.push(
+        queryInterface.addColumn("users", "forumIsBanned", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured user preference columns exist");
     }
   } catch (error) {
     console.log("users table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureForumPostModerationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("forum_posts");
+    const operations = [];
+
+    if (!table.isActive && !table.is_active) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "isActive", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: true,
+        })
+      );
+    }
+
+    if (!table.moderationReason && !table.moderation_reason) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "moderationReason", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.moderatedByAdminId && !table.moderated_by_admin_id) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "moderatedByAdminId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.moderatedAt && !table.moderated_at) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "moderatedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.aiModerationStatus && !table.ai_moderation_status) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "aiModerationStatus", {
+          type: DataTypes.ENUM("pending", "approved", "rejected", "error"),
+          allowNull: false,
+          defaultValue: "pending",
+        })
+      );
+    }
+
+    if (!table.aiModerationReason && !table.ai_moderation_reason) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "aiModerationReason", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.aiModeratedAt && !table.ai_moderated_at) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "aiModeratedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.duplicateCheckStatus && !table.duplicate_check_status) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "duplicateCheckStatus", {
+          type: DataTypes.ENUM("pending", "processing", "clean", "duplicate", "error"),
+          allowNull: false,
+          defaultValue: "pending",
+        })
+      );
+    }
+
+    if (!table.duplicateCheckReason && !table.duplicate_check_reason) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "duplicateCheckReason", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.contentFingerprint && !table.content_fingerprint) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "contentFingerprint", {
+          type: DataTypes.STRING(128),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.titleNormalized && !table.title_normalized) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "titleNormalized", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.contentEmbedding && !table.content_embedding) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "contentEmbedding", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.duplicateOfPostId && !table.duplicate_of_post_id) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "duplicateOfPostId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.duplicateConfidence && !table.duplicate_confidence) {
+      operations.push(
+        queryInterface.addColumn("forum_posts", "duplicateConfidence", {
+          type: DataTypes.FLOAT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured forum_posts moderation columns exist");
+    }
+
+    const latestTable = await queryInterface.describeTable("forum_posts");
+    const existingIndexes = await queryInterface.showIndex("forum_posts");
+    const hasIsActiveIndex = existingIndexes.some((index) => index.name === "forum_posts_is_active");
+    const hasFingerprintIndex = existingIndexes.some((index) => index.name === "forum_posts_content_fingerprint");
+    const hasDuplicateStatusIndex = existingIndexes.some((index) => index.name === "forum_posts_duplicate_check_status");
+    const hasDuplicateOfIndex = existingIndexes.some((index) => index.name === "forum_posts_duplicate_of_post_id");
+
+    if (!hasIsActiveIndex && (latestTable.isActive || latestTable.is_active)) {
+      await queryInterface.addIndex("forum_posts", ["isActive"], {
+        name: "forum_posts_is_active",
+      });
+      console.log("✓ Added forum_posts isActive index");
+    }
+
+    if (!hasFingerprintIndex && (latestTable.contentFingerprint || latestTable.content_fingerprint)) {
+      await queryInterface.addIndex("forum_posts", ["contentFingerprint"], {
+        name: "forum_posts_content_fingerprint",
+      });
+      console.log("✓ Added forum_posts contentFingerprint index");
+    }
+
+    if (!hasDuplicateStatusIndex && (latestTable.duplicateCheckStatus || latestTable.duplicate_check_status)) {
+      await queryInterface.addIndex("forum_posts", ["duplicateCheckStatus"], {
+        name: "forum_posts_duplicate_check_status",
+      });
+      console.log("✓ Added forum_posts duplicateCheckStatus index");
+    }
+
+    if (!hasDuplicateOfIndex && (latestTable.duplicateOfPostId || latestTable.duplicate_of_post_id)) {
+      await queryInterface.addIndex("forum_posts", ["duplicateOfPostId"], {
+        name: "forum_posts_duplicate_of_post_id",
+      });
+      console.log("✓ Added forum_posts duplicateOfPostId index");
+    }
+  } catch (error) {
+    console.log("forum_posts table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureForumCommentModerationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("forum_comments");
+    const operations = [];
+
+    if (!table.aiModerationStatus && !table.ai_moderation_status) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "aiModerationStatus", {
+          type: DataTypes.ENUM("pending", "approved", "rejected", "error"),
+          allowNull: false,
+          defaultValue: "pending",
+        })
+      );
+    }
+
+    if (!table.aiModerationReason && !table.ai_moderation_reason) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "aiModerationReason", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.aiModeratedAt && !table.ai_moderated_at) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "aiModeratedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.isEdited && !table.is_edited) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "isEdited", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.editedAt && !table.edited_at) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "editedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.isDeletedByAuthor && !table.is_deleted_by_author) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "isDeletedByAuthor", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.deletedAt && !table.deleted_at) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "deletedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.isRemovedByModerator && !table.is_removed_by_moderator) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "isRemovedByModerator", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.removedBy && !table.removed_by) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "removedBy", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.removedAt && !table.removed_at) {
+      operations.push(
+        queryInterface.addColumn("forum_comments", "removedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured forum_comments moderation columns exist");
+    }
+  } catch (error) {
+    console.log("forum_comments table will be created by sequelize.sync()");
   }
 }
 
@@ -375,6 +729,8 @@ const initDB = (callback) => {
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureUserPreferenceColumns())
+    .then(() => ensureForumPostModerationColumns())
+    .then(() => ensureForumCommentModerationColumns())
     .then(() => {
       console.log("All models synced");
       callback();

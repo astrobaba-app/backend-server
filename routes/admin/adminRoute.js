@@ -27,6 +27,15 @@ const {
   updateSignupBonusSettings,
   toggleSignupBonus,
 } = require("../../controller/admin/signupBonusController");
+const {
+  getForumAppealsForAdmin,
+  getForumPostsForAdmin,
+  getForumReportsForAdmin,
+  updateForumAppealStatus,
+  updateForumPostStatus,
+  updateForumReportStatus,
+  updateForumUserRestriction,
+} = require("../../controller/admin/adminForumController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
@@ -158,6 +167,56 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   toggleSignupBonus
+);
+
+// Forum moderation routes
+router.get(
+  "/forum/posts",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getForumPostsForAdmin
+);
+
+router.get(
+  "/forum/reports",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getForumReportsForAdmin
+);
+
+router.patch(
+  "/forum/posts/:postId/status",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateForumPostStatus
+);
+
+router.patch(
+  "/forum/reports/:reportId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateForumReportStatus
+);
+
+router.patch(
+  "/forum/users/:userId/restriction",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateForumUserRestriction
+);
+
+router.get(
+  "/forum/appeals",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getForumAppealsForAdmin
+);
+
+router.patch(
+  "/forum/appeals/:appealId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateForumAppealStatus
 );
 
 module.exports = router;

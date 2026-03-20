@@ -8,6 +8,8 @@ const { WebSocketServer } = require("ws");
 const { Server } = require("socket.io");
 const { initializeChatSocket } = require("./services/chatSocket");
 const { initializeLiveStreamSocket } = require("./services/liveStreamSocket");
+const { startForumAIModerationWorker } = require("./services/forumAIModerationService");
+const { startForumDuplicateWorker } = require("./services/forumDuplicateService");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -157,6 +159,7 @@ const appleAuthRoute = require("./routes/authRoute/appleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
+const forumRoute = require("./routes/forum/forumRoute");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -184,6 +187,7 @@ app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
 app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
+app.use("/api/forum", forumRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });
@@ -264,7 +268,11 @@ initDB(() => {
     // Initialize horoscope scheduler with cron jobs
     const { initializeScheduler } = require("./services/horoscopeScheduler");
     initializeScheduler();
+    startForumAIModerationWorker();
+    startForumDuplicateWorker();
     console.log("Horoscope scheduler initialized");
+    console.log("Forum AI moderation worker initialized");
+    console.log("Forum duplicate worker initialized");
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });

@@ -34,6 +34,11 @@ const AstrologerEarning = require("../astrologer/astrologerEarning");
 const AIChatSession = require("../aiChat/aiChatSession");
 const AIChatMessage = require("../aiChat/aiChatMessage");
 const CachedHoroscope = require("../horoscope/cachedHoroscope");
+const ForumPost = require("../forum/forumPost");
+const ForumComment = require("../forum/forumComment");
+const ForumPostLike = require("../forum/forumPostLike");
+const ForumPostReport = require("../forum/forumPostReport");
+const ForumPostAppeal = require("../forum/forumPostAppeal");
 
 
   // User has many UserRequests
@@ -358,6 +363,124 @@ const CachedHoroscope = require("../horoscope/cachedHoroscope");
     as: "couponUsages",
     onDelete: "CASCADE",
   });
+
+  // Forum associations
+  User.hasMany(ForumPost, {
+    foreignKey: "authorUserId",
+    as: "forumPosts",
+    onDelete: "CASCADE",
+  });
+
+  ForumPost.belongsTo(User, {
+    foreignKey: "authorUserId",
+    as: "author",
+  });
+
+  Admin.hasMany(ForumPost, {
+    foreignKey: "moderatedByAdminId",
+    as: "moderatedForumPosts",
+    onDelete: "SET NULL",
+  });
+
+  ForumPost.belongsTo(Admin, {
+    foreignKey: "moderatedByAdminId",
+    as: "moderatedBy",
+  });
+
+  User.hasMany(ForumComment, {
+    foreignKey: "authorUserId",
+    as: "forumComments",
+    onDelete: "CASCADE",
+  });
+
+  ForumComment.belongsTo(User, {
+    foreignKey: "authorUserId",
+    as: "author",
+  });
+
+  ForumPost.hasMany(ForumComment, {
+    foreignKey: "postId",
+    as: "comments",
+    onDelete: "CASCADE",
+  });
+
+  ForumComment.belongsTo(ForumPost, {
+    foreignKey: "postId",
+    as: "post",
+  });
+
+  ForumComment.hasMany(ForumComment, {
+    foreignKey: "parentCommentId",
+    as: "replies",
+    onDelete: "CASCADE",
+  });
+
+  ForumComment.belongsTo(ForumComment, {
+    foreignKey: "parentCommentId",
+    as: "parentComment",
+  });
+
+  ForumPost.hasMany(ForumPostLike, {
+    foreignKey: "postId",
+    as: "likes",
+    onDelete: "CASCADE",
+  });
+
+  ForumPostLike.belongsTo(ForumPost, {
+    foreignKey: "postId",
+    as: "post",
+  });
+
+  User.hasMany(ForumPostLike, {
+    foreignKey: "userId",
+    as: "forumPostLikes",
+    onDelete: "CASCADE",
+  });
+
+  ForumPostLike.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  ForumPost.hasMany(ForumPostReport, {
+    foreignKey: "postId",
+    as: "reports",
+    onDelete: "CASCADE",
+  });
+
+  ForumPostReport.belongsTo(ForumPost, {
+    foreignKey: "postId",
+    as: "post",
+  });
+
+  User.hasMany(ForumPostReport, {
+    foreignKey: "reporterUserId",
+    as: "forumPostReports",
+    onDelete: "CASCADE",
+  });
+
+  ForumPostReport.belongsTo(User, {
+    foreignKey: "reporterUserId",
+    as: "reporter",
+  });
+
+  Admin.hasMany(ForumPostReport, {
+    foreignKey: "reviewedByAdminId",
+    as: "reviewedForumPostReports",
+    onDelete: "SET NULL",
+  });
+
+  ForumPostReport.belongsTo(Admin, {
+    foreignKey: "reviewedByAdminId",
+    as: "reviewedBy",
+  });
+
+  ForumPost.hasMany(ForumPostAppeal, { foreignKey: "postId", as: "appeals", onDelete: "CASCADE" });
+  ForumPostAppeal.belongsTo(ForumPost, { foreignKey: "postId", as: "post" });
+  User.hasMany(ForumPostAppeal, { foreignKey: "userId", as: "forumPostAppeals", onDelete: "CASCADE" });
+  ForumPostAppeal.belongsTo(User, { foreignKey: "userId", as: "appellant" });
+  Admin.hasMany(ForumPostAppeal, { foreignKey: "reviewedByAdminId", as: "reviewedForumPostAppeals", onDelete: "SET NULL" });
+  ForumPostAppeal.belongsTo(Admin, { foreignKey: "reviewedByAdminId", as: "appealReviewedBy" });
 
   CouponUsage.belongsTo(User, {
     foreignKey: "userId",

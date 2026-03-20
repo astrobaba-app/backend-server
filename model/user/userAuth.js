@@ -93,6 +93,35 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+    forumIdentityMode: {
+      type: DataTypes.ENUM("real", "anonymous"),
+      allowNull: false,
+      defaultValue: "real",
+    },
+    forumAnonymousHandle: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true,
+    },
+    forumAnonymousHash: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      unique: true,
+    },
+    forumWarningsCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    forumBlockedUntil: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    forumIsBanned: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "users",
