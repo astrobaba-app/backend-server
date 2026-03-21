@@ -436,6 +436,40 @@ const updateProfile = async (req, res) => {
       });
     }
 
+    const toStringArray = (value) => {
+      if (value === undefined || value === null) return undefined;
+      if (Array.isArray(value)) {
+        return value
+          .map((item) => (item === undefined || item === null ? '' : String(item).trim()))
+          .filter(Boolean);
+      }
+
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return [];
+
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              return parsed
+                .map((item) => (item === undefined || item === null ? '' : String(item).trim()))
+                .filter(Boolean);
+            }
+          } catch (e) {
+            // Fall through to comma-separated parsing
+          }
+        }
+
+        return trimmed
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
+      }
+
+      return [String(value).trim()].filter(Boolean);
+    };
+
     // Update fields
     const updateData = {};
     if (fullName) updateData.fullName = fullName;
@@ -452,12 +486,18 @@ const updateProfile = async (req, res) => {
       }
       updateData.gender = gender;
     }
-    if (languages) updateData.languages = languages;
-    if (skills) updateData.skills = skills;
-    if (categories) {
+    if (languages !== undefined) {
+      updateData.languages = toStringArray(languages) || [];
+    }
+
+    if (skills !== undefined) {
+      updateData.skills = toStringArray(skills) || [];
+    }
+
+    if (categories !== undefined) {
       // Validate categories
       const validCategories = ['Love', 'Relationship', 'Education', 'Health', 'Career', 'Finance', 'Marriage', 'Family', 'Business', 'Legal', 'Travel', 'Spiritual'];
-      const categoryArray = Array.isArray(categories) ? categories : [categories];
+      const categoryArray = toStringArray(categories) || [];
       const invalidCategories = categoryArray.filter(cat => !validCategories.includes(cat));
       
       if (invalidCategories.length > 0) {

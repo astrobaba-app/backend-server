@@ -3,19 +3,19 @@ const setTokenCookieAstrologer = (res, token, astrologerToken) => {
   res.setHeader("Set-Cookie", [
     // Secure, HttpOnly cookie
     serialize("token", token, {
-      domain:".graho.in",
+      // domain:".graho.in",
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: false,
+      sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
     // Non-HttpOnly for middleware
     serialize("token_astrologer", astrologerToken, {
-      domain:".graho.in",
+      // domain:".graho.in",
       httpOnly: false,
-      secure: true,
-      sameSite: "none",
+      secure: false,
+      sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
     }),
