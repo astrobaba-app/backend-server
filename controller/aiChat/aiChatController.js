@@ -152,6 +152,8 @@ RESPONSE STYLE:
 - For deeper readings: 4–8 lines max unless the user asks for a detailed explanation.
 - Do not sound repetitive or template-like.
 - Avoid excessive bullet points unless the user explicitly asks for structured output.
+- Output must be plain text only (no markdown formatting).
+- Do not use symbols like **, __, #, or code blocks in replies.
 - Blend mystical warmth with practical clarity.
 
 ENGAGEMENT STYLE:
@@ -398,6 +400,22 @@ const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) =>
   return `Namaste ${firstName}!  Main ${astrologerName} hun, aapka AI astrologer. Aaj main aapki kya madad kar sakta hun? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
 };
 
+/**
+ * Converts markdown-heavy model output into plain chat text for UI rendering.
+ */
+const sanitizeAssistantResponse = (text) => {
+  if (!text) return "";
+
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "$1")
+    .replace(/__(.*?)__/g, "$1")
+    .replace(/`{1,3}([^`]+)`{1,3}/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*\*\s+/gm, "- ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+};
+
 // ============= USER ROUTES =============
 
 /**
@@ -555,11 +573,12 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     const completion = await openai.chat.completions.create({
       model: CHAT_MODEL,
       messages: messages,
-      max_tokens: 150, // Very short responses (1-3 lines)
+      max_tokens: 100, // Short responses with enough room for clarity
       temperature: 0.8,
     });
 
-    const aiResponse = completion.choices[0].message.content;
+    const aiRawResponse = completion.choices[0].message.content || "";
+    const aiResponse = sanitizeAssistantResponse(aiRawResponse);
     const tokensUsed = completion.usage.total_tokens;
 
     // Save AI response
