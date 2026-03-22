@@ -154,6 +154,7 @@ RESPONSE STYLE:
 - Avoid excessive bullet points unless the user explicitly asks for structured output.
 - Output must be plain text only (no markdown formatting).
 - Do not use symbols like **, __, #, or code blocks in replies.
+- Always finish with complete, clear sentences (never leave the reply cut off mid-thought).
 - Blend mystical warmth with practical clarity.
 
 ENGAGEMENT STYLE:
@@ -416,6 +417,18 @@ const sanitizeAssistantResponse = (text) => {
     .trim();
 };
 
+const buildCompletionRepairMessages = (userMessage, draftResponse) => [
+  {
+    role: "system",
+    content:
+      "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it concise (2-5 lines), avoid markdown, and ensure the final sentence is complete.",
+  },
+  {
+    role: "user",
+    content: `User message: ${userMessage}\n\nDraft reply (may be cut): ${draftResponse}`,
+  },
+];
+
 // ============= USER ROUTES =============
 
 /**
@@ -573,13 +586,26 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     const completion = await openai.chat.completions.create({
       model: CHAT_MODEL,
       messages: messages,
-      max_tokens: 100, // Short responses with enough room for clarity
-      temperature: 0.8,
+      max_tokens: 100,
+      temperature: 0.7,
     });
 
-    const aiRawResponse = completion.choices[0].message.content || "";
+    let aiRawResponse = completion.choices[0].message.content || "";
+    let tokensUsed = completion.usage?.total_tokens || 0;
+
+    if (completion.choices[0].finish_reason === "length") {
+      const repairCompletion = await openai.chat.completions.create({
+        model: CHAT_MODEL,
+        messages: buildCompletionRepairMessages(message.trim(), aiRawResponse),
+        max_tokens: 100,
+        temperature: 0.5,
+      });
+
+      aiRawResponse = repairCompletion.choices[0].message.content || aiRawResponse;
+      tokensUsed += repairCompletion.usage?.total_tokens || 0;
+    }
+
     const aiResponse = sanitizeAssistantResponse(aiRawResponse);
-    const tokensUsed = completion.usage.total_tokens;
 
     // Save AI response
     const aiMessage = await AIChatMessage.create({
