@@ -28,6 +28,11 @@ const {
   toggleSignupBonus,
 } = require("../../controller/admin/signupBonusController");
 const {
+  getAstrologerPayoutRequests,
+  markPayoutRequestPaid,
+  rejectPayoutRequest,
+} = require("../../controller/admin/astrologerPayoutController");
+const {
   getForumAppealsForAdmin,
   getForumPostsForAdmin,
   getForumReportsForAdmin,
@@ -217,6 +222,27 @@ router.patch(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   updateForumAppealStatus
+);
+
+router.get(
+  "/payout-requests",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAstrologerPayoutRequests
+);
+
+router.post(
+  "/payout-requests/:payoutRequestId/pay",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  markPayoutRequestPaid
+);
+
+router.post(
+  "/payout-requests/:payoutRequestId/reject",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  rejectPayoutRequest
 );
 
 module.exports = router;

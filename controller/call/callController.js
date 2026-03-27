@@ -432,7 +432,7 @@ const endCall = async (req, res) => {
 
           // Credit to astrologer earnings
           const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
-          const commissionPercentage = 20; // 20% platform commission
+          const commissionPercentage = 10; // 10% platform commission
           const platformCommission = deductionAmount * (commissionPercentage / 100);
           const netEarning = deductionAmount - platformCommission;
 
@@ -441,6 +441,7 @@ const endCall = async (req, res) => {
             userId: callSession.userId,
             sessionId: callSession.id,
             sessionType: "call",
+            consultationType: callSession.callType === "video" ? "video_call" : "voice_call",
             durationMinutes: totalMinutes,
             pricePerMinute: parseFloat(callSession.pricePerMinute),
             totalAmount: deductionAmount,

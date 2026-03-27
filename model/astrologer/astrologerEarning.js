@@ -37,6 +37,13 @@ const AstrologerEarning = sequelize.define(
       allowNull: false,
       comment: "Type of consultation session",
     },
+    consultationType: {
+      type: DataTypes.ENUM("chat", "voice_call", "video_call", "live"),
+      allowNull: false,
+      defaultValue: "chat",
+      field: "consultation_type",
+      comment: "Detailed consultation type used for dashboard split",
+    },
     durationMinutes: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,
@@ -74,7 +81,7 @@ const AstrologerEarning = sequelize.define(
     commissionPercentage: {
       type: DataTypes.DECIMAL(5, 2),
       allowNull: false,
-      defaultValue: 20,
+      defaultValue: 10,
       comment: "Platform commission percentage at time of session",
       validate: {
         min: 0,
@@ -130,6 +137,10 @@ const AstrologerEarning = sequelize.define(
     timestamps: true,
     hooks: {
       beforeValidate: (earning) => {
+        if (!earning.consultationType && earning.sessionType) {
+          earning.consultationType = earning.sessionType === "call" ? "voice_call" : earning.sessionType;
+        }
+
         // Calculate totalAmount if not provided
         if (earning.durationMinutes && earning.pricePerMinute) {
           earning.totalAmount = (

@@ -480,7 +480,7 @@ const endLiveSession = async (req, res) => {
 
           // Credit to astrologer earnings
           const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
-          const commissionPercentage = 20; // 20% platform commission
+          const commissionPercentage = 10; // 10% platform commission
           const platformCommission = deductionAmount * (commissionPercentage / 100);
           const netEarning = deductionAmount - platformCommission;
 
@@ -489,6 +489,7 @@ const endLiveSession = async (req, res) => {
             userId: participant.userId,
             sessionId: liveSession.id,
             sessionType: "live",
+            consultationType: "live",
             durationMinutes: minutes,
             pricePerMinute: parseFloat(liveSession.pricePerMinute),
             totalAmount: deductionAmount,

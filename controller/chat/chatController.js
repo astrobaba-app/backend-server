@@ -4,7 +4,131 @@ const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
+const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const { Op } = require("sequelize");
+
+const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
+const PLATFORM_COMMISSION_PERCENTAGE = 10;
+
+function isPendingRequestExpired(session) {
+  if (!session || session.requestStatus !== "pending") return false;
+  const startedAt = session.startTime ? new Date(session.startTime).getTime() : 0;
+  const expiresAt = startedAt + CHAT_REQUEST_TIMEOUT_SECONDS * 1000;
+  return Date.now() > expiresAt;
+}
+
+function getRequestExpiryIso(session) {
+  const startedAt = session.startTime ? new Date(session.startTime).getTime() : Date.now();
+  return new Date(startedAt + CHAT_REQUEST_TIMEOUT_SECONDS * 1000).toISOString();
+}
+
+async function completeChatSessionWithBilling(session, io) {
+  // Pending/unapproved requests should be closed without any billing.
+  if (session.requestStatus !== "approved") {
+    const endTime = new Date();
+    await session.update({
+      status: "cancelled",
+      endTime,
+    });
+
+    return {
+      endTime,
+      currentMinutes: 0,
+      currentCost: 0,
+      totalMinutes: session.totalMinutes || 0,
+      totalCost: parseFloat(session.totalCost || 0),
+      billedAmount: 0,
+    };
+  }
+
+  const endTime = new Date();
+  const startTime = new Date(session.startTime);
+  const durationMs = endTime - startTime;
+  const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
+  const currentCost = currentMinutes * parseFloat(session.pricePerMinute || 0);
+
+  const accumulatedMinutes = session.totalMinutes || 0;
+  const accumulatedCost = parseFloat(session.totalCost || 0);
+  const totalMinutes = accumulatedMinutes + currentMinutes;
+  const totalCost = accumulatedCost + currentCost;
+
+  await session.update({
+    endTime,
+    totalMinutes,
+    totalCost,
+    status: "completed",
+  });
+
+  let billedAmount = 0;
+  const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+
+  if (wallet && currentCost > 0) {
+    const currentBalance = parseFloat(wallet.balance || 0);
+    billedAmount = Math.min(currentBalance, currentCost);
+
+    if (billedAmount > 0) {
+      await wallet.update({
+        balance: currentBalance - billedAmount,
+        totalSpent: parseFloat(wallet.totalSpent || 0) + billedAmount,
+      });
+
+      await WalletTransaction.create({
+        userId: session.userId,
+        walletId: wallet.id,
+        amount: billedAmount,
+        type: "debit",
+        status: "completed",
+        description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
+        balanceBefore: currentBalance,
+        balanceAfter: currentBalance - billedAmount,
+        metadata: {
+          chatSessionId: session.id,
+          astrologerId: session.astrologerId,
+          durationMinutes: currentMinutes,
+          pricePerMinute: parseFloat(session.pricePerMinute || 0),
+        },
+      });
+
+      const platformCommission = billedAmount * (PLATFORM_COMMISSION_PERCENTAGE / 100);
+      const netEarning = billedAmount - platformCommission;
+
+      await AstrologerEarning.create({
+        astrologerId: session.astrologerId,
+        userId: session.userId,
+        sessionId: session.id,
+        sessionType: "chat",
+        consultationType: "chat",
+        durationMinutes: currentMinutes,
+        pricePerMinute: parseFloat(session.pricePerMinute || 0),
+        totalAmount: billedAmount,
+        platformCommission,
+        commissionPercentage: PLATFORM_COMMISSION_PERCENTAGE,
+        netEarning,
+        paymentStatus: "pending",
+        sessionStartTime: startTime,
+        sessionEndTime: endTime,
+      });
+
+      if (io) {
+        io.to(`user:${session.userId}`).emit("wallet:updated", {
+          balance: currentBalance - billedAmount,
+          deduction: billedAmount,
+          reason: "chat",
+          sessionId: session.id,
+        });
+      }
+    }
+  }
+
+  return {
+    endTime,
+    currentMinutes,
+    currentCost,
+    totalMinutes,
+    totalCost,
+    billedAmount,
+  };
+}
 
 // Start a chat session (user only)
 const startChatSession = async (req, res) => {
@@ -61,6 +185,8 @@ const startChatSession = async (req, res) => {
       await session.update({
         status: "active",
         startTime: new Date(),
+        endTime: null,
+        requestStatus: "pending",
       });
     }
 
@@ -69,9 +195,35 @@ const startChatSession = async (req, res) => {
       attributes: ["id", "fullName", "photo", "pricePerMinute", "rating"],
     });
 
+    // Notify astrologer immediately, regardless of current page.
+    const io = req.app.get("io");
+    if (io) {
+      const {
+        getAstrologerRoom,
+        getSessionRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      const payload = {
+        sessionId: session.id,
+        expiresAt: getRequestExpiryIso(session),
+        session: mapSession(session, "astrologer"),
+        user: {
+          id: req.user.id,
+          fullName: req.user.fullName || "User",
+          email: req.user.email || null,
+        },
+      };
+
+      io.to(getAstrologerRoom(astrologerId)).emit("chat:request:new", payload);
+      io.to(getSessionRoom(session.id)).emit("chat:request:new", payload);
+    }
+
     res.status(201).json({
       success: true,
-      message: "Chat session started successfully",
+      message: "Chat request sent. Waiting for astrologer approval.",
+      requestTimeoutSeconds: CHAT_REQUEST_TIMEOUT_SECONDS,
+      requestExpiresAt: getRequestExpiryIso(session),
       session: {
         ...session.toJSON(),
         astrologer: astrologerDetails,
@@ -94,69 +246,69 @@ const endChatSession = async (req, res) => {
     const userId = req.user.id;
 
     const session = await ChatSession.findOne({
-      where: { id: sessionId, userId, status: "active" },
+      where: { id: sessionId, userId },
     });
 
     if (!session) {
       return res.status(404).json({
         success: false,
-        message: "Active chat session not found",
+        message: "Chat session not found",
       });
     }
 
-    const endTime = new Date();
-    const startTime = new Date(session.startTime);
-    const durationMs = endTime - startTime;
-    const currentMinutes = Math.ceil(durationMs / (1000 * 60)); // Round up to nearest minute
-
-    const currentCost = currentMinutes * parseFloat(session.pricePerMinute);
-
-    const accumulatedMinutes = session.totalMinutes || 0;
-    const accumulatedCost = parseFloat(session.totalCost || 0);
-    const totalMinutes = accumulatedMinutes + currentMinutes;
-    const totalCost = accumulatedCost + currentCost;
-
-    // Update session
-    await session.update({
-      endTime,
-      totalMinutes,
-      totalCost,
-      status: "completed",
-    });
-
-    // Deduct from wallet
-    const wallet = await Wallet.findOne({ where: { userId } });
-    
-    if (wallet.balance < currentCost) {
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient balance to complete session",
-        totalCost: currentCost,
-        currentBalance: parseFloat(wallet.balance),
+    if (session.status !== "active") {
+      return res.status(200).json({
+        success: true,
+        message: "Chat session already ended",
+        session: {
+          id: session.id,
+          totalMinutes: session.totalMinutes || 0,
+          totalCost: parseFloat(session.totalCost || 0),
+          billedAmount: 0,
+          pricePerMinute: parseFloat(session.pricePerMinute),
+          startTime: session.startTime,
+          endTime: session.endTime,
+        },
       });
     }
 
-    await wallet.update({
-      balance: parseFloat(wallet.balance) - currentCost,
-    });
+    const io = req.app.get("io");
+    const billing = await completeChatSessionWithBilling(session, io);
 
-    // Create wallet transaction
-    await WalletTransaction.create({
-      userId,
-      walletId: wallet.id,
-      amount: currentCost,
-      type: "debit",
-      status: "completed",
-      description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
-    });
+    // Notify both sides that chat ended so UI can close/clean up instantly.
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      io.to(getSessionRoom(session.id)).emit("chat:ended", {
+        sessionId: session.id,
+        endedBy: "user",
+        reason: "user_ended_chat",
+      });
+
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId: session.id,
+        session: mapSession(session, "user"),
+      });
+
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId: session.id,
+        session: mapSession(session, "astrologer"),
+      });
+    }
 
     res.status(200).json({
       success: true,
       message: "Chat session ended successfully",
       session: {
         id: session.id,
-        totalMinutes,
-        totalCost,
+        totalMinutes: billing.totalMinutes,
+        totalCost: billing.totalCost,
+        billedAmount: billing.billedAmount,
         pricePerMinute: parseFloat(session.pricePerMinute),
         startTime: session.startTime,
         endTime: session.endTime,
@@ -353,8 +505,16 @@ const getSessionMessages = async (req, res) => {
       });
     }
 
+    const messageWhere = { sessionId };
+
+    // Astrologer sees only current conversation window (fresh start after each approval).
+    // User keeps full chat history for the same astrologer.
+    if (astrologerId && session.startTime) {
+      messageWhere.createdAt = { [Op.gte]: new Date(session.startTime) };
+    }
+
     const { rows: messages, count } = await ChatMessage.findAndCountAll({
-      where: { sessionId },
+      where: messageWhere,
       limit: parseInt(limit),
       offset: parseInt(offset),
       order: [["createdAt", "ASC"]],
@@ -467,7 +627,7 @@ const getAstrologerChatSessions = async (req, res) => {
     const { page = 1, limit = 20, status, requestStatus } = req.query;
     const offset = (page - 1) * limit;
 
-    const where = { astrologerId };
+    const where = { astrologerId, status: "active" };
     if (status) {
       where.status = status;
     }
@@ -616,6 +776,7 @@ const approveChatRequest = async (req, res) => {
   try {
     const astrologerId = req.user.id;
     const { sessionId } = req.params;
+    const { forceAccept = false } = req.body || {};
 
     const session = await ChatSession.findOne({
       where: { id: sessionId, astrologerId },
@@ -628,13 +789,101 @@ const approveChatRequest = async (req, res) => {
       });
     }
 
+    if (session.requestStatus === "approved") {
+      return res.status(200).json({
+        success: true,
+        message: "Chat request already approved",
+        session,
+      });
+    }
+
+    if (isPendingRequestExpired(session)) {
+      await session.update({
+        requestStatus: "rejected",
+        status: "cancelled",
+        endTime: new Date(),
+      });
+
+      return res.status(410).json({
+        success: false,
+        message: "Chat request expired. Ask user to start chat again.",
+        code: "CHAT_REQUEST_EXPIRED",
+      });
+    }
+
+    const activeSession = await ChatSession.findOne({
+      where: {
+        astrologerId,
+        id: { [Op.ne]: sessionId },
+        status: "active",
+        requestStatus: "approved",
+      },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "fullName", "email"],
+        },
+      ],
+    });
+
+    if (activeSession && !forceAccept) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "You already have an active chat. Accepting this request will end the current chat.",
+        code: "ACTIVE_CHAT_EXISTS",
+        requiresForce: true,
+        activeSession: {
+          id: activeSession.id,
+          userId: activeSession.userId,
+          userName: activeSession.user?.fullName || "Current user",
+        },
+      });
+    }
+
+    const io = req.app.get("io");
+    let chatSocketService = null;
+    if (io) {
+      chatSocketService = require("../../services/chatSocket");
+    }
+
+    if (activeSession) {
+      await activeSession.update({
+        status: "completed",
+        endTime: new Date(),
+      });
+
+      if (io && chatSocketService) {
+        const { getSessionRoom, getUserRoom, getAstrologerRoom, mapSession } =
+          chatSocketService;
+
+        io.to(getSessionRoom(activeSession.id)).emit("chat:ended", {
+          sessionId: activeSession.id,
+          endedBy: "astrologer",
+          reason: "astrologer_switched_chat",
+        });
+
+        io.to(getUserRoom(activeSession.userId)).emit("chat:updated", {
+          sessionId: activeSession.id,
+          session: mapSession(activeSession, "user"),
+        });
+
+        io.to(getAstrologerRoom(activeSession.astrologerId)).emit("chat:updated", {
+          sessionId: activeSession.id,
+          session: mapSession(activeSession, "astrologer"),
+        });
+      }
+    }
+
     await session.update({
       requestStatus: "approved",
+      status: "active",
       startTime: new Date(),
+      endTime: null,
     });
 
     // Notify both sides via Socket.IO if available
-    const io = req.app.get("io");
     if (io) {
       const {
         getSessionRoom,
@@ -691,7 +940,11 @@ const rejectChatRequest = async (req, res) => {
       });
     }
 
-    await session.update({ requestStatus: "rejected" });
+    await session.update({
+      requestStatus: "rejected",
+      status: "cancelled",
+      endTime: new Date(),
+    });
 
     const io = req.app.get("io");
     if (io) {
@@ -733,9 +986,89 @@ const rejectChatRequest = async (req, res) => {
   }
 };
 
+// End an active chat session from astrologer side
+const endAstrologerChatSession = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findOne({
+      where: {
+        id: sessionId,
+        astrologerId,
+      },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    if (session.status !== "active") {
+      return res.status(200).json({
+        success: true,
+        message: "Chat session already ended",
+        session: {
+          ...session.toJSON(),
+          billedAmount: 0,
+          billedMinutes: 0,
+        },
+      });
+    }
+
+    const io = req.app.get("io");
+    const billing = await completeChatSessionWithBilling(session, io);
+
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      io.to(getSessionRoom(session.id)).emit("chat:ended", {
+        sessionId: session.id,
+        endedBy: "astrologer",
+        reason: "astrologer_left_chat",
+      });
+
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId: session.id,
+        session: mapSession(session, "user"),
+      });
+
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId: session.id,
+        session: mapSession(session, "astrologer"),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Chat session ended",
+      session: {
+        ...session.toJSON(),
+        billedAmount: billing.billedAmount,
+        billedMinutes: billing.currentMinutes,
+      },
+    });
+  } catch (error) {
+    console.error("End astrologer chat session error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to end chat session",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   startChatSession,
   endChatSession,
+  endAstrologerChatSession,
   sendMessage,
   getSessionMessages,
   getUserChatSessions,

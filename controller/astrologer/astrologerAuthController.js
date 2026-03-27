@@ -1,8 +1,10 @@
 const Astrologer = require("../../model/astrologer/astrologer");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const redis = require("../../config/redis/redis");
 const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
+const { sendAstrologerPasswordResetOTPEmail } = require("../../emailService/authEmail");
 const { createToken, createMiddlewareToken } = require("../../services/authService");
 const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
 const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
@@ -12,6 +14,15 @@ const notificationService = require("../../services/notificationService");
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
+
+const PASSWORD_RESET_OTP_TTL_SECONDS = 600;
+const PASSWORD_RESET_TOKEN_TTL_SECONDS = 600;
+
+const normalizeForgotMethod = (value) => (value || "").toLowerCase().trim();
+
+const normalizePhoneNumber = (value) => (value || "").replace(/\D/g, "").trim();
+
+const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 
 const sendRegistrationOTP = async (req, res) => {
   try {
@@ -757,6 +768,236 @@ const getOnlineStatus = async (req, res) => {
   }
 };
 
+const sendForgotPasswordOTP = async (req, res) => {
+  try {
+    const method = normalizeForgotMethod(req.body.method);
+    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
+    const email = normalizeEmail(req.body.email);
+
+    if (!["mobile", "email"].includes(method)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid OTP method",
+      });
+    }
+
+    let astrologer;
+    let recipient;
+
+    if (method === "mobile") {
+      if (!/^\d{10}$/.test(phoneNumber)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid 10-digit mobile number",
+        });
+      }
+
+      astrologer = await Astrologer.findOne({ where: { phoneNumber } });
+      recipient = phoneNumber;
+    } else {
+      if (!/^\S+@\S+\.\S+$/.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide a valid email address",
+        });
+      }
+
+      astrologer = await Astrologer.findOne({ where: { email } });
+      recipient = email;
+    }
+
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer account not found",
+      });
+    }
+
+    if (!astrologer.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is deactivated. Please contact support.",
+      });
+    }
+
+    const otp = generateOTP();
+    const otpKey = `astrologer:forgot-password:otp:${method}:${recipient}`;
+    const verifiedKey = `astrologer:forgot-password:verified:${method}:${recipient}`;
+
+    await redis.del(verifiedKey);
+    await redis.setex(otpKey, PASSWORD_RESET_OTP_TTL_SECONDS, {
+      otp,
+      astrologerId: astrologer.id,
+      method,
+      recipient,
+      createdAt: Date.now(),
+    });
+
+    if (method === "mobile") {
+      await handleSendAuthOTP(phoneNumber, otp);
+    } else {
+      await sendAstrologerPasswordResetOTPEmail({
+        to: astrologer.email,
+        fullName: astrologer.fullName,
+        otp,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `OTP sent successfully to your ${method === "mobile" ? "mobile number" : "email"}`,
+    });
+  } catch (error) {
+    console.error("Send forgot password OTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send OTP",
+      error: error.message,
+    });
+  }
+};
+
+const verifyForgotPasswordOTP = async (req, res) => {
+  try {
+    const method = normalizeForgotMethod(req.body.method);
+    const otp = (req.body.otp || "").trim();
+    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
+    const email = normalizeEmail(req.body.email);
+
+    if (!["mobile", "email"].includes(method)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid OTP method",
+      });
+    }
+
+    if (!/^\d{6}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 6-digit OTP",
+      });
+    }
+
+    const recipient = method === "mobile" ? phoneNumber : email;
+
+    if (!recipient) {
+      return res.status(400).json({
+        success: false,
+        message: `Please provide your ${method === "mobile" ? "mobile number" : "email"}`,
+      });
+    }
+
+    const otpKey = `astrologer:forgot-password:otp:${method}:${recipient}`;
+    const storedData = await redis.get(otpKey);
+
+    if (!storedData) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found or expired. Please request a new OTP",
+      });
+    }
+
+    const otpData = typeof storedData === "string" ? JSON.parse(storedData) : storedData;
+
+    if (otpData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    await redis.del(otpKey);
+
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenKey = `astrologer:forgot-password:token:${resetToken}`;
+    await redis.setex(resetTokenKey, PASSWORD_RESET_TOKEN_TTL_SECONDS, {
+      astrologerId: otpData.astrologerId,
+      method,
+      recipient,
+      verifiedAt: Date.now(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "OTP verified successfully",
+      resetToken,
+    });
+  } catch (error) {
+    console.error("Verify forgot password OTP error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to verify OTP",
+      error: error.message,
+    });
+  }
+};
+
+const resetForgotPassword = async (req, res) => {
+  try {
+    const resetToken = (req.body.resetToken || "").trim();
+    const newPassword = (req.body.newPassword || "").trim();
+    const confirmPassword = (req.body.confirmPassword || "").trim();
+
+    if (!resetToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset token is required",
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Password and confirm password do not match",
+      });
+    }
+
+    const resetTokenKey = `astrologer:forgot-password:token:${resetToken}`;
+    const tokenData = await redis.get(resetTokenKey);
+
+    if (!tokenData) {
+      return res.status(400).json({
+        success: false,
+        message: "Reset session expired. Please verify OTP again",
+      });
+    }
+
+    const parsedTokenData = typeof tokenData === "string" ? JSON.parse(tokenData) : tokenData;
+
+    const astrologer = await Astrologer.findByPk(parsedTokenData.astrologerId);
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer account not found",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await astrologer.update({ password: hashedPassword });
+
+    await redis.del(resetTokenKey);
+
+    return res.status(200).json({
+      success: true,
+      message: "Password reset successful. Please login with your new password",
+    });
+  } catch (error) {
+    console.error("Reset forgot password error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reset password",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   sendRegistrationOTP,
   verifyOTP,
@@ -769,4 +1010,7 @@ module.exports = {
   goOnline,
   goOffline,
   getOnlineStatus,
+  sendForgotPasswordOTP,
+  verifyForgotPasswordOTP,
+  resetForgotPassword,
 };

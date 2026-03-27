@@ -11,6 +11,7 @@ const {
   getTotalMinutesWithAstrologer,
   approveChatRequest,
   rejectChatRequest,
+  endAstrologerChatSession,
 } = require("../../controller/chat/chatController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
@@ -44,6 +45,13 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["astrologer"]),
   rejectChatRequest
+);
+
+router.post(
+  "/astrologer/:sessionId/end",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  endAstrologerChatSession
 );
 
 // Shared routes (both user and astrologer)

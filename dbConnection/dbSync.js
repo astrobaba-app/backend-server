@@ -17,6 +17,7 @@ const AssistantPlan = require("../model/assistant/assistantPlan");
 // Astrologer models
 const Astrologer = require("../model/astrologer/astrologer");
 const AstrologerEarning = require("../model/astrologer/astrologerEarning");
+const AstrologerPayoutRequest = require("../model/astrologer/astrologerPayoutRequest");
 
 // Blog models
 const Blog = require("../model/blog/blog");
@@ -714,6 +715,33 @@ async function ensureForumCommentModerationColumns() {
   }
 }
 
+async function ensureAstrologerEarningColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("astrologer_earnings");
+    const operations = [];
+
+    if (!table.consultation_type) {
+      operations.push(
+        queryInterface.addColumn("astrologer_earnings", "consultation_type", {
+          type: DataTypes.ENUM("chat", "voice_call", "video_call", "live"),
+          allowNull: false,
+          defaultValue: "chat",
+          comment: "Detailed consultation type used for dashboard split",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured astrologer_earnings columns exist");
+    }
+  } catch (error) {
+    console.log("astrologer_earnings table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -731,6 +759,7 @@ const initDB = (callback) => {
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
+    .then(() => ensureAstrologerEarningColumns())
     .then(() => {
       console.log("All models synced");
       callback();

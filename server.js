@@ -23,7 +23,12 @@ let allowedOrigins = [
 ].filter(Boolean);
 
 if (allowedOrigins.length === 0 && process.env.NODE_ENV !== "production") {
-  allowedOrigins = ["http://localhost:3000"];
+  allowedOrigins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+  ];
 }
 console.log('[CORS] Allowed origins:', allowedOrigins);
 console.log('[CORS] Environment:', process.env.NODE_ENV || 'development');
@@ -140,6 +145,7 @@ const kundliReportRoute = require("./routes/horoscope/kundliReportRoute");
 const walletRoute = require("./routes/wallet/walletRoute");
 const astrologerAuthRoute = require("./routes/astrologer/astrologerAuthRoute");
 const astrologerRoute = require("./routes/astrologer/astrologerRoute");
+const astrologerEarningRoute = require("./routes/astrologer/earningRoute");
 const adminRoute = require("./routes/admin/adminRoute");
 const adminBlogRoute = require("./routes/admin/adminBlogRoute");
 const blogRoute = require("./routes/blog/blogRoute");
@@ -170,6 +176,7 @@ app.use("/api/kundli-report", kundliReportRoute);
 app.use("/api/wallet", walletRoute);
 app.use("/api/astrologer/auth", astrologerAuthRoute);
 app.use("/api/astrologers", astrologerRoute);
+app.use("/api/astrologer/earnings", astrologerEarningRoute);
 app.use("/api/admin", adminRoute);
 app.use("/api/admin/blogs", adminBlogRoute);
 app.use("/api/blogs", blogRoute);

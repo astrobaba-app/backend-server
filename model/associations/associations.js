@@ -31,6 +31,7 @@ const Cart = require("../store/cart");
 const Order = require("../store/order");
 const ProductReview = require("../store/productReview");
 const AstrologerEarning = require("../astrologer/astrologerEarning");
+const AstrologerPayoutRequest = require("../astrologer/astrologerPayoutRequest");
 const AIChatSession = require("../aiChat/aiChatSession");
 const AIChatMessage = require("../aiChat/aiChatMessage");
 const CachedHoroscope = require("../horoscope/cachedHoroscope");
@@ -674,6 +675,30 @@ const ForumPostAppeal = require("../forum/forumPostAppeal");
   AstrologerEarning.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
+  });
+
+  // Astrologer - AstrologerPayoutRequest
+  Astrologer.hasMany(AstrologerPayoutRequest, {
+    foreignKey: "astrologerId",
+    as: "payoutRequests",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerPayoutRequest.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
+  // Admin - AstrologerPayoutRequest (processed payouts)
+  Admin.hasMany(AstrologerPayoutRequest, {
+    foreignKey: "processedByAdminId",
+    as: "processedPayoutRequests",
+    onDelete: "SET NULL",
+  });
+
+  AstrologerPayoutRequest.belongsTo(Admin, {
+    foreignKey: "processedByAdminId",
+    as: "processedByAdmin",
   });
 
   // User - AI Chat Sessions
