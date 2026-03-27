@@ -2,10 +2,53 @@ const Follow = require("../../model/follow/follow");
 const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const { Op } = require("sequelize");
+const { sequelize } = require("../../dbConnection/dbConfig");
+
+const ensureUserRole = (req, res) => {
+  if (!req.user || !req.user.id) {
+    res.status(401).json({
+      success: false,
+      message: "Please login to continue",
+    });
+    return false;
+  }
+
+  if (req.user.role && req.user.role !== "user") {
+    res.status(403).json({
+      success: false,
+      message: "Only users can perform this action",
+    });
+    return false;
+  }
+
+  return true;
+};
+
+const ensureAstrologerRole = (req, res) => {
+  if (!req.user || !req.user.id) {
+    res.status(401).json({
+      success: false,
+      message: "Please login to continue",
+    });
+    return false;
+  }
+
+  if (req.user.role !== "astrologer") {
+    res.status(403).json({
+      success: false,
+      message: "Only astrologers can access this resource",
+    });
+    return false;
+  }
+
+  return true;
+};
 
 // Follow an astrologer (User)
 const followAstrologer = async (req, res) => {
   try {
+    if (!ensureUserRole(req, res)) return;
+
     const userId = req.user.id;
     const { astrologerId } = req.params;
 
@@ -72,6 +115,8 @@ const followAstrologer = async (req, res) => {
 // Unfollow an astrologer (User)
 const unfollowAstrologer = async (req, res) => {
   try {
+    if (!ensureUserRole(req, res)) return;
+
     const userId = req.user.id;
     const { astrologerId } = req.params;
 
@@ -113,6 +158,8 @@ const unfollowAstrologer = async (req, res) => {
 // Get all astrologers followed by user
 const getMyFollowing = async (req, res) => {
   try {
+    if (!ensureUserRole(req, res)) return;
+
     const userId = req.user.id;
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
@@ -173,6 +220,8 @@ const getMyFollowing = async (req, res) => {
 // Check if user is following an astrologer
 const checkIfFollowing = async (req, res) => {
   try {
+    if (!ensureUserRole(req, res)) return;
+
     const userId = req.user.id;
     const { astrologerId } = req.params;
 
@@ -198,7 +247,9 @@ const checkIfFollowing = async (req, res) => {
 // Get followers of an astrologer (Astrologer view)
 const getMyFollowers = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    if (!ensureAstrologerRole(req, res)) return;
+
+    const astrologerId = req.user.id;
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
@@ -271,6 +322,8 @@ const getFollowerCount = async (req, res) => {
 // Get multiple astrologers with follow status
 const getAstrologersWithFollowStatus = async (req, res) => {
   try {
+    if (!ensureUserRole(req, res)) return;
+
     const userId = req.user.id;
     const { page = 1, limit = 20, isOnline } = req.query;
     const offset = (page - 1) * limit;
@@ -362,7 +415,9 @@ const getAstrologersWithFollowStatus = async (req, res) => {
 // Get follower statistics for astrologer dashboard
 const getFollowerStats = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    if (!ensureAstrologerRole(req, res)) return;
+
+    const astrologerId = req.user.id;
 
     // Total followers
     const totalFollowers = await Follow.count({
