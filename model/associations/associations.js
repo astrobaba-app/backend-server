@@ -9,6 +9,7 @@ const DeviceToken = require("../user/deviceToken");
 const Wallet = require("../wallet/wallet");
 const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
+const AstrologerDeviceToken = require("../astrologer/astrologerDeviceToken");
 const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
@@ -19,6 +20,7 @@ const LiveSession = require("../live/liveSession");
 const LiveParticipant = require("../live/liveParticipant");
 const CallSession = require("../call/callSession");
 const Notification = require("../notification/notification");
+const AstrologerWebPushSubscription = require("../notification/astrologerWebPushSubscription");
 const Coupon = require("../coupon/coupon");
 const CouponUsage = require("../coupon/couponUsage");
 const Follow = require("../follow/follow");
@@ -123,6 +125,17 @@ const ForumPostAppeal = require("../forum/forumPostAppeal");
   DeviceToken.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
+  });
+
+  Astrologer.hasMany(AstrologerDeviceToken, {
+    foreignKey: "astrologerId",
+    as: "deviceTokens",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerDeviceToken.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
   });
 
   // Wallet associations
@@ -334,6 +347,17 @@ const ForumPostAppeal = require("../forum/forumPostAppeal");
   Notification.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
+  });
+
+  Astrologer.hasMany(AstrologerWebPushSubscription, {
+    foreignKey: "astrologerId",
+    as: "webPushSubscriptions",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerWebPushSubscription.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
   });
 
   // Coupon associations

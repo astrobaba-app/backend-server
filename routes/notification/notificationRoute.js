@@ -10,8 +10,14 @@ const {
   removeDeviceToken,
   getUserTokens,
   sendTestNotification,
+  getWebPushPublicKey,
+  subscribeWebPush,
+  unsubscribeWebPush,
 } = require("../../controller/notification/notificationController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
+const { authorizeRoles } = require("../../middleware/roleMiddleware");
+
+router.get("/push/public-key", getWebPushPublicKey);
 
 // All routes require user authentication
 router.get("/", checkForAuthenticationCookie(), getNotifications);
@@ -27,5 +33,19 @@ router.get("/device-tokens", checkForAuthenticationCookie(), getUserTokens);
 
 // Test notification route
 router.post("/test", checkForAuthenticationCookie(), sendTestNotification);
+
+router.post(
+  "/push/subscribe",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  subscribeWebPush
+);
+
+router.delete(
+  "/push/unsubscribe",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  unsubscribeWebPush
+);
 
 module.exports = router;

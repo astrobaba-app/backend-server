@@ -1,6 +1,19 @@
 const Notification = require("../../model/notification/notification");
 const notificationService = require("../../services/notificationService");
 const pushNotificationService = require("../../services/pushNotificationService");
+const webPushService = require("../../services/webPushService");
+const Astrologer = require("../../model/astrologer/astrologer");
+
+async function resolveActorType(req) {
+  if (req.user?.role === "astrologer") return "astrologer";
+
+  if (req.user?.id) {
+    const astrologer = await Astrologer.findByPk(req.user.id, { attributes: ["id"] });
+    if (astrologer) return "astrologer";
+  }
+
+  return "user";
+}
 
 // Get user notifications
 const getNotifications = async (req, res) => {
@@ -150,7 +163,8 @@ const getUnreadCount = async (req, res) => {
 const registerDeviceToken = async (req, res) => {
   try {
     const { token, deviceType, deviceId } = req.body;
-    const userId = req.user.id;
+    const actorId = req.user.id;
+    const actorType = await resolveActorType(req);
 
     if (!token) {
       return res.status(400).json({
@@ -159,12 +173,20 @@ const registerDeviceToken = async (req, res) => {
       });
     }
 
-    const savedToken = await pushNotificationService.saveDeviceToken(
-      userId,
-      token,
-      deviceType || "android",
-      deviceId
-    );
+    const savedToken =
+      actorType === "astrologer"
+        ? await pushNotificationService.saveAstrologerDeviceToken(
+            actorId,
+            token,
+            deviceType || "android",
+            deviceId
+          )
+        : await pushNotificationService.saveDeviceToken(
+            actorId,
+            token,
+            deviceType || "android",
+            deviceId
+          );
 
     res.status(200).json({
       success: true,
@@ -172,6 +194,7 @@ const registerDeviceToken = async (req, res) => {
       data: {
         id: savedToken.id,
         deviceType: savedToken.deviceType,
+        actorType,
       },
     });
   } catch (error) {
@@ -190,6 +213,7 @@ const registerDeviceToken = async (req, res) => {
 const removeDeviceToken = async (req, res) => {
   try {
     const { token } = req.body;
+    const actorType = await resolveActorType(req);
 
     if (!token) {
       return res.status(400).json({
@@ -198,7 +222,10 @@ const removeDeviceToken = async (req, res) => {
       });
     }
 
-    const removed = await pushNotificationService.removeDeviceToken(token);
+    const removed =
+      actorType === "astrologer"
+        ? await pushNotificationService.removeAstrologerDeviceToken(token)
+        : await pushNotificationService.removeDeviceToken(token);
 
     res.status(200).json({
       success: true,
@@ -221,12 +248,17 @@ const removeDeviceToken = async (req, res) => {
  */
 const getUserTokens = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const actorId = req.user.id;
+    const actorType = await resolveActorType(req);
 
-    const tokens = await pushNotificationService.getUserTokens(userId);
+    const tokens =
+      actorType === "astrologer"
+        ? await pushNotificationService.getAstrologerTokens(actorId)
+        : await pushNotificationService.getUserTokens(actorId);
 
     res.status(200).json({
       success: true,
+      actorType,
       data: tokens.map((t) => ({
         id: t.id,
         deviceType: t.deviceType,
@@ -274,6 +306,83 @@ const sendTestNotification = async (req, res) => {
   }
 };
 
+/**
+ * Get VAPID public key for web push subscription.
+ */
+const getWebPushPublicKey = async (req, res) => {
+  res.status(200).json({
+    success: true,
+    publicKey: process.env.WEB_PUSH_PUBLIC_KEY || null,
+  });
+};
+
+/**
+ * Save astrologer browser push subscription.
+ */
+const subscribeWebPush = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { subscription } = req.body;
+
+    if (!subscription) {
+      return res.status(400).json({
+        success: false,
+        message: "Subscription payload is required",
+      });
+    }
+
+    const saved = await webPushService.upsertAstrologerSubscription({
+      astrologerId,
+      subscription,
+      userAgent: req.headers["user-agent"] || null,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Web push subscription saved",
+      data: { id: saved.id, endpoint: saved.endpoint },
+    });
+  } catch (error) {
+    console.error("Subscribe web push error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to save web push subscription",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Deactivate astrologer browser push subscription.
+ */
+const unsubscribeWebPush = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { endpoint } = req.body;
+
+    if (!endpoint) {
+      return res.status(400).json({
+        success: false,
+        message: "Endpoint is required",
+      });
+    }
+
+    await webPushService.removeAstrologerSubscription({ astrologerId, endpoint });
+
+    res.status(200).json({
+      success: true,
+      message: "Web push subscription removed",
+    });
+  } catch (error) {
+    console.error("Unsubscribe web push error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove web push subscription",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getNotifications,
   markAsRead,
@@ -284,4 +393,7 @@ module.exports = {
   removeDeviceToken,
   getUserTokens,
   sendTestNotification,
+  getWebPushPublicKey,
+  subscribeWebPush,
+  unsubscribeWebPush,
 };

@@ -1,87 +1,114 @@
 const admin = require("../config/firebaseConfig");
 const DeviceToken = require("../model/user/deviceToken");
+const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken");
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
 class PushNotificationService {
 
-  async sendToUser(userId, { title, body, data = {}, imageUrl = null }) {
-    try {
-     
-      const tokens = await DeviceToken.findAll({
-        where: {
-          userId,
-          isActive: true,
+  async sendToTokenModel(TokenModel, ownerKey, ownerId, { title, body, data = {}, imageUrl = null }) {
+    const tokens = await TokenModel.findAll({
+      where: {
+        [ownerKey]: ownerId,
+        isActive: true,
+      },
+      attributes: ["id", "token", "deviceType"],
+    });
+
+    if (!tokens || tokens.length === 0) {
+      console.log(`[FCM] No active device tokens found for ${ownerKey}=${ownerId}`);
+      return { success: false, message: "No device tokens found" };
+    }
+
+    const fcmTokens = tokens.map((t) => t.token);
+
+    const message = {
+      notification: {
+        title,
+        body,
+        ...(imageUrl && { imageUrl }),
+      },
+      data: {
+        ...data,
+        ownerId: String(ownerId),
+        timestamp: new Date().toISOString(),
+      },
+      android: {
+        priority: "high",
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
         },
-        attributes: ["id", "token", "deviceType"],
+      },
+      tokens: fcmTokens,
+    };
+
+    const response = await admin.messaging().sendEachForMulticast(message);
+
+    console.log(
+      `[FCM] Sent to ${ownerKey}=${ownerId}: ${response.successCount} success, ${response.failureCount} failures`
+    );
+
+    if (response.failureCount > 0) {
+      const failedTokens = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          const errorCode = resp.error?.code;
+          if (
+            errorCode === "messaging/invalid-registration-token" ||
+            errorCode === "messaging/registration-token-not-registered"
+          ) {
+            failedTokens.push(tokens[idx].id);
+          }
+        }
       });
 
-      if (!tokens || tokens.length === 0) {
-        console.log(`[FCM] No active device tokens found for user ${userId}`);
-        return { success: false, message: "No device tokens found" };
+      if (failedTokens.length > 0) {
+        await TokenModel.update(
+          { isActive: false },
+          { where: { id: failedTokens } }
+        );
+        console.log(`[FCM] Marked ${failedTokens.length} invalid tokens as inactive`);
       }
+    }
 
-      const fcmTokens = tokens.map((t) => t.token);
-      
-      const message = {
-        notification: {
-          title,
-          body,
-          ...(imageUrl && { imageUrl }),
-        },
-        data: {
-          ...data,
-          userId: userId.toString(),
-          timestamp: new Date().toISOString(),
-        },
-        android: {
-          priority: 'high',
-        },
-        apns: {
-          headers: {
-            'apns-priority': '10',
-          },
-        },
-        tokens: fcmTokens,
-      };
+    return {
+      success: true,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+    };
+  }
 
-      // Send multicast message
-      const response = await admin.messaging().sendEachForMulticast(message);
-
-      console.log(`[FCM] Sent to user ${userId}: ${response.successCount} success, ${response.failureCount} failures`);
-
-      // Handle invalid tokens
-      if (response.failureCount > 0) {
-        const failedTokens = [];
-        response.responses.forEach((resp, idx) => {
-          if (!resp.success) {
-            const errorCode = resp.error?.code;
-            if (
-              errorCode === "messaging/invalid-registration-token" ||
-              errorCode === "messaging/registration-token-not-registered"
-            ) {
-              failedTokens.push(tokens[idx].id);
-            }
-          }
-        });
-
-        // Mark invalid tokens as inactive
-        if (failedTokens.length > 0) {
-          await DeviceToken.update(
-            { isActive: false },
-            { where: { id: failedTokens } }
-          );
-          console.log(`[FCM] Marked ${failedTokens.length} invalid tokens as inactive`);
-        }
-      }
-
-      return {
-        success: true,
-        successCount: response.successCount,
-        failureCount: response.failureCount,
-      };
+  async sendToUser(userId, { title, body, data = {}, imageUrl = null }) {
+    try {
+      return await this.sendToTokenModel(DeviceToken, "userId", userId, {
+        title,
+        body,
+        data,
+        imageUrl,
+      });
     } catch (error) {
       console.error("[FCM] Error sending to user:", error);
+      throw error;
+    }
+  }
+
+  async sendToAstrologer(astrologerId, { title, body, data = {}, imageUrl = null }) {
+    try {
+      return await this.sendToTokenModel(
+        AstrologerDeviceToken,
+        "astrologerId",
+        astrologerId,
+        {
+          title,
+          body,
+          data,
+          imageUrl,
+        }
+      );
+    } catch (error) {
+      console.error("[FCM] Error sending to astrologer:", error);
       throw error;
     }
   }
@@ -265,6 +292,63 @@ class PushNotificationService {
       return result > 0;
     } catch (error) {
       console.error("[FCM] Error removing device token:", error);
+      throw error;
+    }
+  }
+
+  async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null) {
+    try {
+      const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
+
+      if (existingToken) {
+        await existingToken.update({
+          astrologerId,
+          deviceType,
+          deviceId,
+          isActive: true,
+          lastUsedAt: new Date(),
+        });
+        console.log(`[FCM] Updated existing token for astrologer ${astrologerId}`);
+        return existingToken;
+      }
+
+      const newToken = await AstrologerDeviceToken.create({
+        astrologerId,
+        token,
+        deviceType,
+        deviceId,
+        isActive: true,
+        lastUsedAt: new Date(),
+      });
+      console.log(`[FCM] Created new token for astrologer ${astrologerId}`);
+      return newToken;
+    } catch (error) {
+      console.error("[FCM] Error saving astrologer device token:", error);
+      throw error;
+    }
+  }
+
+  async removeAstrologerDeviceToken(token) {
+    try {
+      const result = await AstrologerDeviceToken.destroy({ where: { token } });
+      console.log(`[FCM] Removed astrologer token: ${result > 0 ? "success" : "not found"}`);
+      return result > 0;
+    } catch (error) {
+      console.error("[FCM] Error removing astrologer token:", error);
+      throw error;
+    }
+  }
+
+  async getAstrologerTokens(astrologerId) {
+    try {
+      return await AstrologerDeviceToken.findAll({
+        where: {
+          astrologerId,
+          isActive: true,
+        },
+      });
+    } catch (error) {
+      console.error("[FCM] Error getting astrologer tokens:", error);
       throw error;
     }
   }

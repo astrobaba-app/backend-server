@@ -6,6 +6,8 @@ const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const { Op } = require("sequelize");
+const webPushService = require("../../services/webPushService");
+const pushNotificationService = require("../../services/pushNotificationService");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
@@ -217,6 +219,34 @@ const startChatSession = async (req, res) => {
 
       io.to(getAstrologerRoom(astrologerId)).emit("chat:request:new", payload);
       io.to(getSessionRoom(session.id)).emit("chat:request:new", payload);
+    }
+
+    try {
+      await webPushService.sendChatRequestPush(astrologerId, {
+        sessionId: session.id,
+        userName: req.user.fullName || "User",
+      });
+    } catch (pushError) {
+      // Push delivery should not fail chat request creation.
+      console.error("Failed to send web push for chat request:", pushError);
+    }
+
+    try {
+      await pushNotificationService.sendToAstrologer(astrologerId, {
+        title: "New Chat Invitation",
+        body: `${req.user.fullName || "User"} wants to start a chat with you.`,
+        data: {
+          type: "chat_request",
+          sessionId: String(session.id),
+          astrologerId: String(astrologerId),
+          userId: String(req.user.id),
+          clickAction: "/astrologer/live-chats",
+          url: `https://graho.in/astrologer/live-chats?sessionId=${session.id}`,
+        },
+      });
+    } catch (mobilePushError) {
+      // Mobile push failure should not break chat request creation.
+      console.error("Failed to send astrologer mobile push:", mobilePushError);
     }
 
     res.status(201).json({
