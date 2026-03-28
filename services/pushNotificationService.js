@@ -4,6 +4,8 @@ const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
+const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+
 class PushNotificationService {
 
   async sendToTokenModel(TokenModel, ownerKey, ownerId, { title, body, data = {}, imageUrl = null }) {
@@ -35,6 +37,11 @@ class PushNotificationService {
       },
       android: {
         priority: "high",
+        notification: {
+          channelId: CHAT_ALERTS_CHANNEL_ID,
+          priority: "high",
+          defaultSound: true,
+        },
       },
       apns: {
         headers: {
@@ -193,6 +200,11 @@ class PushNotificationService {
         },
         android: {
           priority: 'high',
+          notification: {
+            channelId: CHAT_ALERTS_CHANNEL_ID,
+            priority: "high",
+            defaultSound: true,
+          },
         },
         apns: {
           headers: {
