@@ -1,5 +1,6 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
+const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
 const {
   getBasicDetails,
   getAstroDetails,
@@ -342,6 +343,51 @@ const getAllKundlis = async (req, res) => {
   }
 };
 
+const deleteKundli = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId } = req.params;
+
+    const userRequest = await UserRequest.findOne({
+      where: { id: userRequestId, userId },
+    });
+
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found",
+      });
+    }
+
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+      attributes: ["id", "isPublic"],
+    });
+
+    if (kundli?.isPublic) {
+      await SharedKundliDeletion.upsert({
+        requestId: userRequestId,
+        deletedByUser: true,
+        deletedAt: new Date(),
+      });
+    }
+
+    await userRequest.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: "Kundli deleted successfully",
+    });
+  } catch (error) {
+    console.error("Delete Kundli error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete kundli",
+      error: error.message,
+    });
+  }
+};
+
 // Check if AI Free Report is ready (for polling)
 const checkAiReportStatus = async (req, res) => {
   try {
@@ -459,11 +505,121 @@ const refreshAshtakvarga = async (req, res) => {
   }
 };
 
+const generateKundliShareLink = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId } = req.params;
+
+    if (!userRequestId) {
+      return res.status(400).json({
+        success: false,
+        message: "userRequestId is required",
+      });
+    }
+
+    const userRequest = await UserRequest.findOne({
+      where: { id: userRequestId, userId },
+    });
+
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "User request not found",
+      });
+    }
+
+    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
+    if (!kundli) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found",
+      });
+    }
+
+    if (!kundli.isPublic) {
+      await kundli.update({ isPublic: true });
+    }
+
+    const frontendBaseUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const shareUrl = `${frontendBaseUrl}/kundliReport?id=${encodeURIComponent(userRequestId)}`;
+
+    return res.status(200).json({
+      success: true,
+      message: "Kundli share link generated successfully",
+      shareUrl,
+    });
+  } catch (error) {
+    console.error("Generate Kundli Share Link error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate share link",
+      error: error.message,
+    });
+  }
+};
+
+const getSharedKundli = async (req, res) => {
+  try {
+    const { userRequestId } = req.params;
+
+    if (!userRequestId) {
+      return res.status(400).json({
+        success: false,
+        message: "userRequestId is required",
+      });
+    }
+
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId, isPublic: true },
+      include: [{ model: UserRequest, as: "userRequest" }],
+    });
+
+    if (!kundli) {
+      const deletedSharedKundli = await SharedKundliDeletion.findOne({
+        where: { requestId: userRequestId, deletedByUser: true },
+      });
+
+      if (deletedSharedKundli) {
+        return res.status(410).json({
+          success: false,
+          message: "This kundli was deleted by user",
+        });
+      }
+
+      return res.status(404).json({
+        success: false,
+        message: "Shared kundli not found",
+      });
+    }
+
+    const kundliJson = kundli.toJSON();
+    if (kundliJson.userRequest) {
+      delete kundliJson.userRequest.userId;
+    }
+
+    return res.status(200).json({
+      success: true,
+      shared: true,
+      kundli: kundliJson,
+    });
+  } catch (error) {
+    console.error("Get Shared Kundli error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch shared kundli",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createKundli,
   getKundli,
   getAllKundlis,
+  deleteKundli,
   getAllUserRequests,
   checkAiReportStatus,
   refreshAshtakvarga,
+  generateKundliShareLink,
+  getSharedKundli,
 };

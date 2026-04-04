@@ -79,6 +79,11 @@ const Kundli = sequelize.define(
       type: DataTypes.JSON,
       allowNull: true,
     },
+    isPublic: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     tableName: "kundlis",

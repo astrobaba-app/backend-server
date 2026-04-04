@@ -1,6 +1,8 @@
 const Kundli = require("../../model/horoscope/kundli");
 const UserRequest = require("../../model/user/userRequest");
 const CallSession = require("../../model/call/callSession");
+const ChatSession = require("../../model/chat/chatSession");
+const { Op } = require("sequelize");
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
 /**
@@ -17,7 +19,7 @@ const getUserKundlisForCall = async (req, res) => {
       where: {
         id: callId,
         astrologerId: astrologerId,
-        status: { [require("sequelize").Op.in]: ["accepted", "ongoing"] },
+        status: { [Op.in]: ["accepted", "ongoing"] },
       },
     });
 
@@ -73,7 +75,7 @@ const getKundliForCall = async (req, res) => {
       where: {
         id: callId,
         astrologerId: astrologerId,
-        status: { [require("sequelize").Op.in]: ["accepted", "ongoing"] },
+        status: { [Op.in]: ["accepted", "ongoing"] },
       },
     });
 
@@ -145,7 +147,133 @@ const getKundliForCall = async (req, res) => {
   }
 };
 
+/**
+ * Get user's generated Kundli list for astrologer during chat session.
+ */
+const getUserKundlisForChat = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const chatSession = await ChatSession.findOne({
+      where: {
+        id: sessionId,
+        astrologerId,
+        status: "active",
+        requestStatus: "approved",
+      },
+    });
+
+    if (!chatSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found or not active",
+      });
+    }
+
+    const userRequests = await UserRequest.findAll({
+      where: { userId: chatSession.userId },
+      attributes: [
+        "id",
+        "fullName",
+        "dateOfbirth",
+        "timeOfbirth",
+        "placeOfBirth",
+        "gender",
+        "createdAt",
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      success: true,
+      userRequests,
+      userName: userRequests[0]?.fullName || "User",
+    });
+  } catch (error) {
+    console.error("Get user kundlis for chat error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch user kundlis",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Generate share-view URL for a specific user kundli in an active chat.
+ * This reuses the existing Kundli report page in embedded modal view.
+ */
+const getKundliShareViewForChat = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId, userRequestId } = req.params;
+
+    const chatSession = await ChatSession.findOne({
+      where: {
+        id: sessionId,
+        astrologerId,
+        status: "active",
+        requestStatus: "approved",
+      },
+    });
+
+    if (!chatSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found or not active",
+      });
+    }
+
+    const userRequest = await UserRequest.findOne({
+      where: {
+        id: userRequestId,
+        userId: chatSession.userId,
+      },
+    });
+
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "User request not found",
+      });
+    }
+
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+    });
+
+    if (!kundli) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found",
+      });
+    }
+
+    if (!kundli.isPublic) {
+      await kundli.update({ isPublic: true });
+    }
+
+    const frontendBaseUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const shareUrl = `${frontendBaseUrl}/kundliReport?id=${encodeURIComponent(userRequestId)}`;
+
+    res.status(200).json({
+      success: true,
+      shareUrl,
+    });
+  } catch (error) {
+    console.error("Get kundli share view for chat error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to prepare kundli view",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getUserKundlisForCall,
   getKundliForCall,
+  getUserKundlisForChat,
+  getKundliShareViewForChat,
 };

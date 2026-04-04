@@ -49,6 +49,7 @@ const Horoscope = require("../model/horoscope/horoscope");
 const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
 const Kundli = require("../model/horoscope/kundli");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
+const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
 
 // Live models
 const LiveChatMessage = require("../model/live/liveChatMessage");
@@ -320,6 +321,32 @@ async function ensureAIChatSessionColumns() {
   } catch (error) {
     // Table doesn't exist yet — will be created by sync
     console.log("ai_chat_sessions table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureKundliShareColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("kundlis");
+    const operations = [];
+
+    if (!table.isPublic && !table.is_public) {
+      operations.push(
+        queryInterface.addColumn("kundlis", "isPublic", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+          comment: "Whether this kundli can be viewed publicly via shared link",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured kundlis share columns exist");
+    }
+  } catch (error) {
+    console.log("kundlis table will be created by sequelize.sync()");
   }
 }
 
@@ -756,6 +783,7 @@ const initDB = (callback) => {
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
+    .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())

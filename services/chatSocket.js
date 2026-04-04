@@ -4,6 +4,13 @@ const ChatSession = require("../model/chat/chatSession");
 const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
+const {
+  completeChatSessionWithBilling,
+} = require("./chatSessionLifecycle");
+
+const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
+const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
+const userInactivityTimers = new Map();
 
 /**
  * Extract and validate JWT token from Socket.IO handshake
@@ -55,6 +62,137 @@ function getAstrologerRoom(astrologerId) {
 
 function getLiveSessionRoom(sessionId) {
   return `live:${sessionId}`;
+}
+
+function toSessionAccessSnapshot(session) {
+  const json = session.toJSON ? session.toJSON() : session;
+  return {
+    id: json.id,
+    userId: json.userId,
+    astrologerId: json.astrologerId,
+    requestStatus: json.requestStatus,
+    status: json.status,
+  };
+}
+
+function canAccessSession({ session, authId, isAstrologer }) {
+  if (!session) return false;
+
+  if (isAstrologer) {
+    return session.astrologerId === authId;
+  }
+
+  return session.userId === authId;
+}
+
+function getSocketSessionCache(socket) {
+  if (!socket.data.sessionAccessCache) {
+    socket.data.sessionAccessCache = new Map();
+  }
+
+  return socket.data.sessionAccessCache;
+}
+
+function getCachedSessionAccess(socket, sessionId) {
+  const cache = getSocketSessionCache(socket);
+  const cached = cache.get(sessionId);
+  if (!cached) return null;
+
+  if (Date.now() - cached.cachedAt > SESSION_ACCESS_CACHE_TTL_MS) {
+    cache.delete(sessionId);
+    return null;
+  }
+
+  return cached;
+}
+
+function cacheSessionAccess(socket, sessionSnapshot) {
+  const cache = getSocketSessionCache(socket);
+  cache.set(sessionSnapshot.id, {
+    ...sessionSnapshot,
+    cachedAt: Date.now(),
+  });
+}
+
+async function getAuthorizedSessionAccess({ socket, sessionId, authId, isAstrologer }) {
+  const cached = getCachedSessionAccess(socket, sessionId);
+  if (cached) {
+    return canAccessSession({ session: cached, authId, isAstrologer }) ? cached : null;
+  }
+
+  const session = await ChatSession.findByPk(sessionId, {
+    attributes: ["id", "userId", "astrologerId", "requestStatus", "status"],
+  });
+
+  if (!session) {
+    return null;
+  }
+
+  const snapshot = toSessionAccessSnapshot(session);
+  if (!canAccessSession({ session: snapshot, authId, isAstrologer })) {
+    return null;
+  }
+
+  cacheSessionAccess(socket, snapshot);
+  return snapshot;
+}
+
+function clearUserInactivityAutoEnd(sessionId) {
+  const timer = userInactivityTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    userInactivityTimers.delete(sessionId);
+  }
+}
+
+async function autoEndSessionForUserInactivity(io, sessionId) {
+  clearUserInactivityAutoEnd(sessionId);
+
+  try {
+    const session = await ChatSession.findByPk(sessionId);
+    if (!session) return;
+
+    if (session.status !== "active" || session.requestStatus !== "approved") {
+      return;
+    }
+
+    await completeChatSessionWithBilling(session, io);
+
+    io.to(getSessionRoom(session.id)).emit("chat:ended", {
+      sessionId: session.id,
+      endedBy: "system",
+      reason: "user_inactive_timeout",
+    });
+
+    io.to(getUserRoom(session.userId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "user"),
+    });
+
+    io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "astrologer"),
+    });
+  } catch (error) {
+    console.error("auto end chat inactivity error:", error);
+  }
+}
+
+function scheduleUserInactivityAutoEnd(io, sessionLike) {
+  if (!io || !sessionLike?.id) return;
+
+  if (sessionLike.status !== "active" || sessionLike.requestStatus !== "approved") {
+    clearUserInactivityAutoEnd(sessionLike.id);
+    return;
+  }
+
+  clearUserInactivityAutoEnd(sessionLike.id);
+
+  const timeout = setTimeout(() => {
+    autoEndSessionForUserInactivity(io, sessionLike.id);
+  }, USER_MESSAGE_INACTIVITY_TIMEOUT_MS);
+
+  userInactivityTimers.set(sessionLike.id, timeout);
 }
 
 /**
@@ -219,6 +357,7 @@ function initializeChatSocket(io) {
   io.on("connection", (socket) => {
     const { id: authId, role } = socket.user;
     const isAstrologer = role === "astrologer";
+    socket.data.sessionAccessCache = new Map();
 
     console.log(`[Socket.IO] User connected: ${authId}, Role: ${role}`);
 
@@ -235,17 +374,23 @@ function initializeChatSocket(io) {
     socket.on("join_chat", async ({ sessionId }) => {
       try {
         if (!sessionId) return;
-        const session = await ChatSession.findByPk(sessionId);
-        if (!session) return;
+        const sessionAccess = await getAuthorizedSessionAccess({
+          socket,
+          sessionId,
+          authId,
+          isAstrologer,
+        });
 
-        if (
-          (!isAstrologer && session.userId !== authId) ||
-          (isAstrologer && session.astrologerId !== authId)
-        ) {
+        if (!sessionAccess) {
           return;
         }
 
         socket.join(getSessionRoom(sessionId));
+
+        // Start/refresh inactivity timer when user joins an approved active session.
+        if (!isAstrologer && sessionAccess.status === "active" && sessionAccess.requestStatus === "approved") {
+          scheduleUserInactivityAutoEnd(io, sessionAccess);
+        }
       } catch (error) {
         console.error("join_chat error:", error);
       }
@@ -259,17 +404,24 @@ function initializeChatSocket(io) {
     socket.on("typing", async ({ sessionId, isTyping }) => {
       try {
         if (!sessionId) return;
-        const session = await ChatSession.findByPk(sessionId);
-        if (!session) return;
 
-        if (
-          (!isAstrologer && session.userId !== authId) ||
-          (isAstrologer && session.astrologerId !== authId)
-        ) {
+        const roomName = getSessionRoom(sessionId);
+        if (!socket.rooms.has(roomName)) {
           return;
         }
 
-        io.to(getSessionRoom(sessionId)).emit("typing", {
+        const sessionAccess = await getAuthorizedSessionAccess({
+          socket,
+          sessionId,
+          authId,
+          isAstrologer,
+        });
+
+        if (!sessionAccess) {
+          return;
+        }
+
+        io.to(roomName).emit("typing", {
           sessionId,
           from: isAstrologer ? "astrologer" : "user",
           isTyping: !!isTyping,
@@ -307,6 +459,8 @@ function initializeChatSocket(io) {
             return;
           }
 
+          cacheSessionAccess(socket, toSessionAccessSnapshot(session));
+
           // If astrologer, ensure request approved before sending
           if (isAstrologer && session.requestStatus !== "approved") {
             if (callback)
@@ -327,6 +481,11 @@ function initializeChatSocket(io) {
             fileUrl,
             replyToMessageId,
           });
+
+          // Only user messages count as activity for inactivity auto-end logic.
+          if (!isAstrologer) {
+            scheduleUserInactivityAutoEnd(io, session);
+          }
 
           if (callback) callback({ success: true, message: messagePayload });
         } catch (error) {
@@ -350,6 +509,8 @@ function initializeChatSocket(io) {
           return;
         }
 
+        cacheSessionAccess(socket, toSessionAccessSnapshot(session));
+
         await markMessagesRead({ io, session, readerRole: isAstrologer ? "astrologer" : "user" });
       } catch (error) {
         console.error("mark_read error:", error);
@@ -366,6 +527,8 @@ function initializeChatSocket(io) {
           requestStatus: "approved",
           startTime: new Date(),
         });
+
+        scheduleUserInactivityAutoEnd(io, session);
 
         const sessionPayloadForUser = mapSession(session, "user");
         const sessionPayloadForAstrologer = mapSession(session, "astrologer");
@@ -395,6 +558,7 @@ function initializeChatSocket(io) {
         if (!session || session.astrologerId !== authId) return;
 
         await session.update({ requestStatus: "rejected" });
+        clearUserInactivityAutoEnd(session.id);
 
         const sessionPayloadForUser = mapSession(session, "user");
         const sessionPayloadForAstrologer = mapSession(session, "astrologer");
@@ -444,6 +608,11 @@ function initializeChatSocket(io) {
         console.error("delete_message error:", error);
       }
     });
+
+    socket.on("disconnect", () => {
+      // Do not clear inactivity timers globally here; they are session-level
+      // and should continue even if one client disconnects temporarily.
+    });
   });
 }
 
@@ -455,4 +624,6 @@ module.exports = {
   getUserRoom,
   getAstrologerRoom,
   getLiveSessionRoom,
+  scheduleUserInactivityAutoEnd,
+  clearUserInactivityAutoEnd,
 };

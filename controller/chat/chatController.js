@@ -2,15 +2,27 @@ const ChatSession = require("../../model/chat/chatSession");
 const ChatMessage = require("../../model/chat/chatMessage");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
-const Wallet = require("../../model/wallet/wallet");
-const WalletTransaction = require("../../model/wallet/walletTransaction");
-const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const { Op } = require("sequelize");
 const webPushService = require("../../services/webPushService");
 const pushNotificationService = require("../../services/pushNotificationService");
+const {
+  completeChatSessionWithBilling,
+} = require("../../services/chatSessionLifecycle");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
-const PLATFORM_COMMISSION_PERCENTAGE = 10;
+const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
+  "id",
+  "fullName",
+  "email",
+  "mobile",
+  "gender",
+  "dateOfbirth",
+  "timeOfbirth",
+  "placeOfBirth",
+  "city",
+  "state",
+  "country",
+];
 
 function isPendingRequestExpired(session) {
   if (!session || session.requestStatus !== "pending") return false;
@@ -22,114 +34,6 @@ function isPendingRequestExpired(session) {
 function getRequestExpiryIso(session) {
   const startedAt = session.startTime ? new Date(session.startTime).getTime() : Date.now();
   return new Date(startedAt + CHAT_REQUEST_TIMEOUT_SECONDS * 1000).toISOString();
-}
-
-async function completeChatSessionWithBilling(session, io) {
-  // Pending/unapproved requests should be closed without any billing.
-  if (session.requestStatus !== "approved") {
-    const endTime = new Date();
-    await session.update({
-      status: "cancelled",
-      endTime,
-    });
-
-    return {
-      endTime,
-      currentMinutes: 0,
-      currentCost: 0,
-      totalMinutes: session.totalMinutes || 0,
-      totalCost: parseFloat(session.totalCost || 0),
-      billedAmount: 0,
-    };
-  }
-
-  const endTime = new Date();
-  const startTime = new Date(session.startTime);
-  const durationMs = endTime - startTime;
-  const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
-  const currentCost = currentMinutes * parseFloat(session.pricePerMinute || 0);
-
-  const accumulatedMinutes = session.totalMinutes || 0;
-  const accumulatedCost = parseFloat(session.totalCost || 0);
-  const totalMinutes = accumulatedMinutes + currentMinutes;
-  const totalCost = accumulatedCost + currentCost;
-
-  await session.update({
-    endTime,
-    totalMinutes,
-    totalCost,
-    status: "completed",
-  });
-
-  let billedAmount = 0;
-  const wallet = await Wallet.findOne({ where: { userId: session.userId } });
-
-  if (wallet && currentCost > 0) {
-    const currentBalance = parseFloat(wallet.balance || 0);
-    billedAmount = Math.min(currentBalance, currentCost);
-
-    if (billedAmount > 0) {
-      await wallet.update({
-        balance: currentBalance - billedAmount,
-        totalSpent: parseFloat(wallet.totalSpent || 0) + billedAmount,
-      });
-
-      await WalletTransaction.create({
-        userId: session.userId,
-        walletId: wallet.id,
-        amount: billedAmount,
-        type: "debit",
-        status: "completed",
-        description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
-        balanceBefore: currentBalance,
-        balanceAfter: currentBalance - billedAmount,
-        metadata: {
-          chatSessionId: session.id,
-          astrologerId: session.astrologerId,
-          durationMinutes: currentMinutes,
-          pricePerMinute: parseFloat(session.pricePerMinute || 0),
-        },
-      });
-
-      const platformCommission = billedAmount * (PLATFORM_COMMISSION_PERCENTAGE / 100);
-      const netEarning = billedAmount - platformCommission;
-
-      await AstrologerEarning.create({
-        astrologerId: session.astrologerId,
-        userId: session.userId,
-        sessionId: session.id,
-        sessionType: "chat",
-        consultationType: "chat",
-        durationMinutes: currentMinutes,
-        pricePerMinute: parseFloat(session.pricePerMinute || 0),
-        totalAmount: billedAmount,
-        platformCommission,
-        commissionPercentage: PLATFORM_COMMISSION_PERCENTAGE,
-        netEarning,
-        paymentStatus: "pending",
-        sessionStartTime: startTime,
-        sessionEndTime: endTime,
-      });
-
-      if (io) {
-        io.to(`user:${session.userId}`).emit("wallet:updated", {
-          balance: currentBalance - billedAmount,
-          deduction: billedAmount,
-          reason: "chat",
-          sessionId: session.id,
-        });
-      }
-    }
-  }
-
-  return {
-    endTime,
-    currentMinutes,
-    currentCost,
-    totalMinutes,
-    totalCost,
-    billedAmount,
-  };
 }
 
 // Start a chat session (user only)
@@ -204,7 +108,11 @@ const startChatSession = async (req, res) => {
         getAstrologerRoom,
         getSessionRoom,
         mapSession,
+        clearUserInactivityAutoEnd,
       } = require("../../services/chatSocket");
+
+      // Pending session should never keep an inactivity timer from a previous run.
+      clearUserInactivityAutoEnd(session.id);
 
       const payload = {
         sessionId: session.id,
@@ -304,6 +212,11 @@ const endChatSession = async (req, res) => {
 
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
+
+    if (io) {
+      const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");
+      clearUserInactivityAutoEnd(session.id);
+    }
 
     // Notify both sides that chat ended so UI can close/clean up instantly.
     if (io) {
@@ -455,6 +368,7 @@ const sendMessage = async (req, res) => {
         getAstrologerRoom,
         mapMessage,
         mapSession,
+        scheduleUserInactivityAutoEnd,
       } = require("../../services/chatSocket");
 
       const messagePayload = mapMessage(chatMessage);
@@ -475,6 +389,10 @@ const sendMessage = async (req, res) => {
         sessionId,
         session: sessionForAstrologer,
       });
+
+      if (senderType === "user") {
+        scheduleUserInactivityAutoEnd(io, session);
+      }
     }
 
     res.status(201).json({
@@ -674,7 +592,7 @@ const getAstrologerChatSessions = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "email"],
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
         },
       ],
     });
@@ -820,6 +738,12 @@ const approveChatRequest = async (req, res) => {
     }
 
     if (session.requestStatus === "approved") {
+      const io = req.app.get("io");
+      if (io) {
+        const { scheduleUserInactivityAutoEnd } = require("../../services/chatSocket");
+        scheduleUserInactivityAutoEnd(io, session);
+      }
+
       return res.status(200).json({
         success: true,
         message: "Chat request already approved",
@@ -852,7 +776,7 @@ const approveChatRequest = async (req, res) => {
         {
           model: User,
           as: "user",
-          attributes: ["id", "fullName", "email"],
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
         },
       ],
     });
@@ -885,8 +809,16 @@ const approveChatRequest = async (req, res) => {
       });
 
       if (io && chatSocketService) {
-        const { getSessionRoom, getUserRoom, getAstrologerRoom, mapSession } =
+        const {
+          getSessionRoom,
+          getUserRoom,
+          getAstrologerRoom,
+          mapSession,
+          clearUserInactivityAutoEnd,
+        } =
           chatSocketService;
+
+        clearUserInactivityAutoEnd(activeSession.id);
 
         io.to(getSessionRoom(activeSession.id)).emit("chat:ended", {
           sessionId: activeSession.id,
@@ -912,6 +844,10 @@ const approveChatRequest = async (req, res) => {
       startTime: new Date(),
       endTime: null,
     });
+
+    if (io && chatSocketService) {
+      chatSocketService.scheduleUserInactivityAutoEnd(io, session);
+    }
 
     // Notify both sides via Socket.IO if available
     if (io) {
@@ -983,7 +919,10 @@ const rejectChatRequest = async (req, res) => {
         getUserRoom,
         getAstrologerRoom,
         mapSession,
+        clearUserInactivityAutoEnd,
       } = require("../../services/chatSocket");
+
+      clearUserInactivityAutoEnd(session.id);
 
       const sessionForUser = mapSession(session, "user");
       const sessionForAstrologer = mapSession(session, "astrologer");
@@ -1050,6 +989,11 @@ const endAstrologerChatSession = async (req, res) => {
 
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
+
+    if (io) {
+      const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");
+      clearUserInactivityAutoEnd(session.id);
+    }
 
     if (io) {
       const {
