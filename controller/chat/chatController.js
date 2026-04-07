@@ -212,6 +212,7 @@ const endChatSession = async (req, res) => {
 
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
+    await session.reload();
 
     if (io) {
       const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");
@@ -803,10 +804,8 @@ const approveChatRequest = async (req, res) => {
     }
 
     if (activeSession) {
-      await activeSession.update({
-        status: "completed",
-        endTime: new Date(),
-      });
+      await completeChatSessionWithBilling(activeSession, io);
+      await activeSession.reload();
 
       if (io && chatSocketService) {
         const {
@@ -989,6 +988,7 @@ const endAstrologerChatSession = async (req, res) => {
 
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
+    await session.reload();
 
     if (io) {
       const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");

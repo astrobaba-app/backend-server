@@ -157,6 +157,7 @@ async function autoEndSessionForUserInactivity(io, sessionId) {
     }
 
     await completeChatSessionWithBilling(session, io);
+    await session.reload();
 
     io.to(getSessionRoom(session.id)).emit("chat:ended", {
       sessionId: session.id,
