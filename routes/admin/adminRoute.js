@@ -33,6 +33,10 @@ const {
   rejectPayoutRequest,
 } = require("../../controller/admin/astrologerPayoutController");
 const {
+  getWhatsappAuthSettings,
+  updateWhatsappAuthSettings,
+} = require("../../controller/admin/whatsappAuthController");
+const {
   getForumAppealsForAdmin,
   getForumPostsForAdmin,
   getForumReportsForAdmin,
@@ -172,6 +176,20 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   toggleSignupBonus
+);
+
+// WhatsApp auth settings routes
+router.get(
+  "/whatsapp-auth/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getWhatsappAuthSettings
+);
+router.put(
+  "/whatsapp-auth/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateWhatsappAuthSettings
 );
 
 // Forum moderation routes

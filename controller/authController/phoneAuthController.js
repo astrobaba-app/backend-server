@@ -5,11 +5,38 @@ const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const redis = require("../../config/redis/redis");
 const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  validateWhatsappApiKey,
+} = require("../../services/whatsappAuthSettingsService");
 
 
 // Demo credentials – no real SMS is sent for this number
 const DEMO_MOBILE = "8112590070";
 const DEMO_OTP = "000000";
+
+const normalizeMobileNumber = (rawMobile) => {
+  const digits = String(rawMobile || "").replace(/\D/g, "");
+  if (!digits) return null;
+
+  const normalized =
+    digits.length === 12 && digits.startsWith("91")
+      ? digits.slice(2)
+      : digits;
+
+  return /^[6-9]\d{9}$/.test(normalized) ? normalized : null;
+};
+
+const buildFullName = ({ name, firstName, lastName }) => {
+  const normalizedName = typeof name === "string" ? name.trim() : "";
+  if (normalizedName) return normalizedName;
+
+  const normalizedFirstName =
+    typeof firstName === "string" ? firstName.trim() : "";
+  const normalizedLastName =
+    typeof lastName === "string" ? lastName.trim() : "";
+
+  return [normalizedFirstName, normalizedLastName].filter(Boolean).join(" ");
+};
 
 const generateOtp = async (req, res) => {
   try {
@@ -189,6 +216,139 @@ const verifyOtp = async (req, res) => {
 };
 
 
+const whatsappRegisterOrCheck = async (req, res) => {
+  try {
+    const authorizationHeader =
+      typeof req.headers.authorization === "string"
+        ? req.headers.authorization.trim()
+        : "";
+    const authorizationApiKey = authorizationHeader.toLowerCase().startsWith("bearer ")
+      ? authorizationHeader.slice(7).trim()
+      : authorizationHeader;
+
+    const providedApiKey =
+      req.headers["x-api-key"] ||
+      req.headers["x-whatsapp-api-key"] ||
+      authorizationApiKey ||
+      req.body.apiKey;
+
+    const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
+    if (!apiKeyValidation.isValid) {
+      const statusCode =
+        apiKeyValidation.reason === "disabled" ||
+        apiKeyValidation.reason === "not_configured"
+          ? 503
+          : 401;
+
+      return res.status(statusCode).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
+    }
+
+    const destination =
+      typeof req.body.destination === "string"
+        ? req.body.destination.trim()
+        : "";
+    const userName =
+      typeof req.body.userName === "string" ? req.body.userName.trim() : "";
+
+    if (!userName) {
+      return res.status(400).json({
+        success: false,
+        message: "userName is required (user name).",
+      });
+    }
+
+    if (!destination) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "destination is required (phone number with country code, like +917428526285).",
+      });
+    }
+
+    const mobile = normalizeMobileNumber(destination);
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: "destination must be a valid phone number",
+      });
+    }
+
+    const fullName = buildFullName({
+      name: req.body.name || userName,
+      firstName: req.body.firstName || req.body.firstname,
+      lastName: req.body.lastName || req.body.lastname,
+    });
+
+    const existingUser = await User.findOne({
+      where: { mobile },
+      attributes: ["id", "mobile"],
+    });
+
+    if (existingUser) {
+      return res.status(200).json({
+        success: true,
+        exists: true,
+        userCreated: false,
+        userId: existingUser.id,
+      });
+    }
+
+    let createdUser;
+    try {
+      createdUser = await User.create({
+        mobile,
+        fullName: fullName || null,
+        isUserRequested: false,
+      });
+    } catch (createError) {
+      if (createError.name === "SequelizeUniqueConstraintError") {
+        // Concurrent requests can race on the same mobile number.
+        const racedUser = await User.findOne({
+          where: { mobile },
+          attributes: ["id"],
+        });
+
+        return res.status(200).json({
+          success: true,
+          exists: true,
+          userCreated: false,
+          userId: racedUser ? racedUser.id : null,
+        });
+      }
+
+      throw createError;
+    }
+
+    // Keep response path fast; bonus credit is best-effort in background.
+    setImmediate(async () => {
+      try {
+        await applySignupBonus(createdUser.id, "whatsapp");
+      } catch (bonusError) {
+        console.error("Failed to apply WhatsApp signup bonus:", bonusError);
+      }
+    });
+
+    return res.status(201).json({
+      success: true,
+      exists: false,
+      userCreated: true,
+      userId: createdUser.id,
+    });
+  } catch (error) {
+    console.error("WhatsApp register/check error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to process WhatsApp registration",
+      error: error.message,
+    });
+  }
+};
+
+
 const logout = async (req, res) => {
   try {
     clearTokenCookie(res);
@@ -210,5 +370,6 @@ const logout = async (req, res) => {
 module.exports = {
   generateOtp,
   verifyOtp,
+  whatsappRegisterOrCheck,
   logout,
 };
