@@ -18,12 +18,21 @@ const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
   if (!digits) return null;
 
-  const normalized =
-    digits.length === 12 && digits.startsWith("91")
-      ? digits.slice(2)
-      : digits;
+  const withoutLeadingZeros = digits.replace(/^0+/, "");
+  const candidates = [
+    digits,
+    withoutLeadingZeros,
+    digits.slice(-10),
+    withoutLeadingZeros.slice(-10),
+  ];
 
-  return /^[6-9]\d{9}$/.test(normalized) ? normalized : null;
+  for (const candidate of candidates) {
+    if (/^[6-9]\d{9}$/.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
 };
 
 const buildFullName = ({ name, firstName, lastName }) => {
