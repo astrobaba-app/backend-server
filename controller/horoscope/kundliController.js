@@ -400,21 +400,41 @@ const createKundliFromWhatsapp = async (req, res) => {
       });
     }
 
-    const name = normalizeText(requestBody.name || requestBody.fullName || requestBody.userName);
-    const gender = normalizeText(requestBody.gender);
-    const rawDob = requestBody.dob || requestBody.dateOfbirth || requestBody.dateOfBirth;
-    const rawTob = requestBody.tob || requestBody.timeOfbirth || requestBody.timeOfBirth;
+    const name = normalizeText(
+      requestBody.name ||
+        requestBody.fullName ||
+        requestBody.userName ||
+        requestBody.user_name
+    );
+    const gender = normalizeText(requestBody.gender || requestBody.user_gender);
+    const rawDob =
+      requestBody.dob ||
+      requestBody.dateOfbirth ||
+      requestBody.dateOfBirth ||
+      requestBody.user_dob;
+    const rawTob =
+      requestBody.tob ||
+      requestBody.timeOfbirth ||
+      requestBody.timeOfBirth ||
+      requestBody.user_tob;
     const rawPlaceOfBirth =
-      requestBody.place_of_birth || requestBody.placeOfBirth || requestBody.pob;
+      requestBody.place_of_birth ||
+      requestBody.placeOfBirth ||
+      requestBody.pob ||
+      requestBody.user_pob;
     const rawState = requestBody.state;
     const rawMobile =
-      requestBody.mobileNumber || requestBody.mobile || requestBody.destination;
+      requestBody.mobileNumber ||
+      requestBody.mobile ||
+      requestBody.destination ||
+      requestBody.user_mobile ||
+      requestBody.user_phone;
 
     if (!gender || !rawDob || !rawTob || !rawPlaceOfBirth || !rawMobile) {
       return res.status(400).json({
         success: false,
         message:
-          "Required fields are missing. Expected: gender, dob, tob, place_of_birth and mobileNumber/mobile/destination.",
+          "Required fields are missing. Expected gender, dob, tob, place_of_birth and mobileNumber/mobile/destination (also supports user_gender, user_dob, user_tob, user_pob, user_mobile).",
       });
     }
 
