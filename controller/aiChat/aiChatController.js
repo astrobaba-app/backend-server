@@ -464,11 +464,26 @@ const enforceTwoToThreeLines = (text) => {
   return singleLine;
 };
 
-const buildCompletionRepairMessages = (userMessage, draftResponse) => [
+const hasCompleteSentenceEnding = (text) =>
+  /[.!?\u0964](?:["')\]]|\s)*$/.test(String(text || "").trim());
+
+const ensureCompleteSentenceEnding = (text) => {
+  const normalized = String(text || "").trim();
+  if (!normalized) return "";
+  if (hasCompleteSentenceEnding(normalized)) return normalized;
+  return `${normalized}.`;
+};
+
+const buildCompletionRepairMessages = (
+  userMessage,
+  draftResponse,
+  { concise = false } = {}
+) => [
   {
     role: "system",
-    content:
-      "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it to 2-3 short lines, include direct answer plus one practical astrology guidance, avoid markdown, and ensure the final sentence is complete.",
+    content: concise
+      ? "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it to 2-3 short lines, include direct answer plus one practical astrology guidance, avoid markdown, and ensure the final sentence is complete."
+      : "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it concise (2-5 lines), avoid markdown, and ensure the final sentence is complete.",
   },
   {
     role: "user",
@@ -647,28 +662,38 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
         : CHAT_MODEL,
       messages: messages,
-      max_tokens: fastMode ? 70 : 100,
+      max_tokens: fastMode ? 110 : 100,
       temperature: fastMode ? 0.6 : 0.7,
     });
 
     let aiRawResponse = completion.choices[0].message.content || "";
+    const completionFinishReason = completion.choices[0].finish_reason;
     let tokensUsed = completion.usage?.total_tokens || 0;
 
-    if (!fastMode && completion.choices[0].finish_reason === "length") {
+    const shouldRepair =
+      completionFinishReason === "length" ||
+      (fastMode && !hasCompleteSentenceEnding(aiRawResponse));
+
+    if (shouldRepair) {
       const repairCompletion = await openai.chat.completions.create({
-        model: CHAT_MODEL,
-        messages: buildCompletionRepairMessages(message.trim(), aiRawResponse),
-        max_tokens: 100,
-        temperature: 0.5,
+        model: fastMode
+          ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
+          : CHAT_MODEL,
+        messages: buildCompletionRepairMessages(message.trim(), aiRawResponse, {
+          concise: fastMode,
+        }),
+        max_tokens: fastMode ? 90 : 100,
+        temperature: fastMode ? 0.4 : 0.5,
       });
 
       aiRawResponse = repairCompletion.choices[0].message.content || aiRawResponse;
       tokensUsed += repairCompletion.usage?.total_tokens || 0;
     }
 
+    const sanitizedResponse = sanitizeAssistantResponse(aiRawResponse);
     const aiResponse = fastMode
-      ? enforceTwoToThreeLines(sanitizeAssistantResponse(aiRawResponse))
-      : sanitizeAssistantResponse(aiRawResponse);
+      ? ensureCompleteSentenceEnding(enforceTwoToThreeLines(sanitizedResponse))
+      : sanitizedResponse;
 
     // Save AI response
     const aiMessage = await AIChatMessage.create({
