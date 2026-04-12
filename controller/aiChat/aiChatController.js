@@ -54,7 +54,8 @@ Rules:
 - Stay strictly within astrology guidance.
 - Never fabricate user details.
 - Use available kundli/session context directly.
-- Keep answers concise (2-5 lines), practical, and warm.
+- Respond in exactly 2-3 short lines.
+- In these 2-3 lines, cover the direct answer and one practical astrology guidance.
 - Avoid fear-based or absolute claims.
 - If exact timing needs more details, ask briefly.
 - Output plain text only.`;
@@ -431,11 +432,43 @@ const sanitizeAssistantResponse = (text) => {
     .trim();
 };
 
+const enforceTwoToThreeLines = (text) => {
+  const normalized = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (normalized.length === 0) return "";
+
+  if (normalized.length > 3) {
+    return [normalized[0], normalized[1], normalized.slice(2).join(" ")].join("\n");
+  }
+
+  if (normalized.length >= 2) {
+    return normalized.join("\n");
+  }
+
+  // Single-line fallback: split into two lines for WhatsApp-friendly readability.
+  const singleLine = normalized[0];
+  const sentenceSplit = singleLine.match(/^(.{20,}?[.!?])\s+(.+)$/);
+  if (sentenceSplit) {
+    return `${sentenceSplit[1].trim()}\n${sentenceSplit[2].trim()}`;
+  }
+
+  const words = singleLine.split(/\s+/).filter(Boolean);
+  if (words.length >= 8) {
+    const midpoint = Math.ceil(words.length / 2);
+    return `${words.slice(0, midpoint).join(" ")}\n${words.slice(midpoint).join(" ")}`;
+  }
+
+  return singleLine;
+};
+
 const buildCompletionRepairMessages = (userMessage, draftResponse) => [
   {
     role: "system",
     content:
-      "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it concise (2-5 lines), avoid markdown, and ensure the final sentence is complete.",
+      "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it to 2-3 short lines, include direct answer plus one practical astrology guidance, avoid markdown, and ensure the final sentence is complete.",
   },
   {
     role: "user",
@@ -614,7 +647,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
         : CHAT_MODEL,
       messages: messages,
-      max_tokens: fastMode ? 80 : 100,
+      max_tokens: fastMode ? 70 : 100,
       temperature: fastMode ? 0.6 : 0.7,
     });
 
@@ -633,7 +666,9 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
       tokensUsed += repairCompletion.usage?.total_tokens || 0;
     }
 
-    const aiResponse = sanitizeAssistantResponse(aiRawResponse);
+    const aiResponse = fastMode
+      ? enforceTwoToThreeLines(sanitizeAssistantResponse(aiRawResponse))
+      : sanitizeAssistantResponse(aiRawResponse);
 
     // Save AI response
     const aiMessage = await AIChatMessage.create({
