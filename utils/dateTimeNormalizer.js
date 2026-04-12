@@ -46,6 +46,22 @@ class DateTimeNormalizationError extends Error {
 const normalizeInputString = (value) =>
   typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
+const titleCaseWords = (value) =>
+  String(value || "").replace(/\b([a-zA-Z]{3,})\b/g, (word) => {
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  });
+
+const buildDobCandidates = (dobString) => {
+  const normalized = normalizeInputString(dobString);
+  const titleCased = titleCaseWords(normalized);
+
+  if (titleCased !== normalized) {
+    return [normalized, titleCased];
+  }
+
+  return [normalized];
+};
+
 const parseWithFormats = (rawValue, formats) => {
   for (const format of formats) {
     const parsed = dayjs(rawValue, format, true);
@@ -63,7 +79,15 @@ const normalizeDob = (rawDob) => {
     throw new DateTimeNormalizationError("dob is required", "dob");
   }
 
-  let parsed = parseWithFormats(dobString, DOB_INPUT_FORMATS);
+  let parsed = null;
+  const dobCandidates = buildDobCandidates(dobString);
+
+  for (const candidate of dobCandidates) {
+    parsed = parseWithFormats(candidate, DOB_INPUT_FORMATS);
+    if (parsed && parsed.isValid()) {
+      break;
+    }
+  }
 
   if (!parsed && /^\d{4}-\d{2}-\d{2}T/.test(dobString)) {
     parsed = dayjs(dobString);
