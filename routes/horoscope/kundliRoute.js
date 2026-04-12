@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createKundli,
   createKundliFromWhatsapp,
+  formatWhatsappKundliInputFast,
   askQuestionInWhatsappSession,
   getKundli,
   getAllKundlis,
@@ -25,6 +26,7 @@ const checkForAstrologerRole = require("../../middleware/roleMiddleware");
 
 router.post("/create", checkForAuthenticationCookie(), createKundli);
 router.post("/whatsapp/create", createKundliFromWhatsapp);
+router.post("/whatsapp/format", formatWhatsappKundliInputFast);
 router.post("/whatsapp/session/ask", askQuestionInWhatsappSession);
 
 router.get("/shared/:userRequestId", getSharedKundli);

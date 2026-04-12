@@ -1,6 +1,7 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
+const OpenAI = require("openai");
 const { Op, literal } = require("sequelize");
 const { randomUUID } = require("crypto");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
@@ -75,6 +76,13 @@ const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
 const DEFAULT_WHATSAPP_AI_ASTROLOGER_ID =
   process.env.WHATSAPP_AI_ASTROLOGER_ID || "ai-astrologer-devansh";
+const WHATSAPP_FAST_FORMAT_MODEL =
+  process.env.OPENAI_CHAT_MODEL_FAST || process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const WHATSAPP_FAST_FORMAT_TIMEOUT_MS = 1800;
+
+const openAiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -140,28 +148,136 @@ const extractWhatsappApiKey = (req) => {
 const normalizeText = (value) =>
   typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
-const getWhatsappTraceId = (req) => {
-  const fromHeaders = normalizeText(
-    req.headers["x-request-id"] ||
-      req.headers["x-correlation-id"] ||
-      req.headers["x-trace-id"]
+const parseAiJsonContent = (content) => {
+  const text = String(content || "").trim();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    const fencedMatch = text.match(/\{[\s\S]*\}/);
+    if (!fencedMatch) return null;
+
+    try {
+      return JSON.parse(fencedMatch[0]);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const withTimeout = (promise, timeoutMs, timeoutMessage) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+
+const normalizeGenderForKundli = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return "";
+
+  if (["m", "male", "man", "boy"].includes(normalized)) return "male";
+  if (["f", "female", "woman", "girl"].includes(normalized)) return "female";
+  if (["other", "others", "non-binary", "nonbinary", "nb", "transgender"].includes(normalized)) {
+    return "other";
+  }
+
+  return normalized;
+};
+
+const formatWhatsappKundliInputWithOpenAI = async ({
+  user_gender,
+  user_dob,
+  user_tob,
+  user_pob,
+}) => {
+  if (!openAiClient) {
+    return null;
+  }
+
+  const completion = await withTimeout(
+    openAiClient.chat.completions.create({
+      model: WHATSAPP_FAST_FORMAT_MODEL,
+      response_format: { type: "json_object" },
+      temperature: 0,
+      max_tokens: 90,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You normalize WhatsApp kundli fields. Return ONLY JSON with keys: gender, dob, tob, place_of_birth. Rules: gender must be male/female/other. dob must be YYYY-MM-DD. tob must be HH:mm:ss in 24-hour format. place_of_birth should be 'City, State' when possible, otherwise city. No extra keys.",
+        },
+        {
+          role: "user",
+          content: JSON.stringify({ user_gender, user_dob, user_tob, user_pob }),
+        },
+      ],
+    }),
+    WHATSAPP_FAST_FORMAT_TIMEOUT_MS,
+    "OpenAI formatter timeout"
   );
 
-  return fromHeaders || randomUUID();
+  const parsed = parseAiJsonContent(completion?.choices?.[0]?.message?.content);
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  return {
+    gender: normalizeText(parsed.gender),
+    dob: normalizeText(parsed.dob),
+    tob: normalizeText(parsed.tob),
+    place_of_birth: normalizeText(parsed.place_of_birth),
+  };
 };
 
-const maskMobileForLog = (mobile) => {
-  const digits = String(mobile || "").replace(/\D/g, "");
-  if (!digits) return null;
-  if (digits.length <= 4) return `***${digits}`;
-  return `${"*".repeat(digits.length - 4)}${digits.slice(-4)}`;
-};
+const getFormattedWhatsappKundliInput = async ({
+  user_gender,
+  user_dob,
+  user_tob,
+  user_pob,
+}) => {
+  const rawGender = normalizeText(user_gender);
+  const rawDob = normalizeText(user_dob);
+  const rawTob = normalizeText(user_tob);
+  const rawPob = normalizeText(user_pob);
 
-const logWhatsappApi = (apiName, traceId, stage, details = {}) => {
-  console.log(`[WhatsAppAPI][${apiName}][${stage}]`, {
-    traceId,
-    ...details,
-  });
+  let aiFormatted = null;
+  try {
+    aiFormatted = await formatWhatsappKundliInputWithOpenAI({
+      user_gender: rawGender,
+      user_dob: rawDob,
+      user_tob: rawTob,
+      user_pob: rawPob,
+    });
+  } catch (_) {
+    aiFormatted = null;
+  }
+
+  const mergedGender = normalizeGenderForKundli(aiFormatted?.gender || rawGender);
+  const mergedDob = normalizeText(aiFormatted?.dob || rawDob);
+  const mergedTob = normalizeText(aiFormatted?.tob || rawTob);
+  const mergedPlace = normalizeText(aiFormatted?.place_of_birth || rawPob);
+
+  const normalized = normalizeDobAndTob({ dob: mergedDob, tob: mergedTob });
+
+  return {
+    gender: mergedGender,
+    dob: normalized.dob,
+    tob: normalized.tob,
+    place_of_birth: mergedPlace,
+    source: aiFormatted ? "openai" : "fallback",
+  };
 };
 
 const getFirstProvidedBodyValue = (body, keys = []) => {
@@ -261,15 +377,7 @@ const runWhatsappSessionQuestionInBackground = async ({
   userId,
   sessionId,
   question,
-  traceId,
 }) => {
-  const effectiveTraceId = traceId || randomUUID();
-  const startedAt = Date.now();
-  logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_started", {
-    sessionId,
-    questionLength: String(question || "").length,
-  });
-
   const delegatedRequest = {
     user: { id: userId },
     params: { sessionId },
@@ -281,27 +389,10 @@ const runWhatsappSessionQuestionInBackground = async ({
   };
 
   const delegatedResponse = {
-    statusCode: 200,
-    status(code) {
-      this.statusCode = code;
+    status() {
       return this;
     },
     json(payload) {
-      const durationMs = Date.now() - startedAt;
-      if (this.statusCode >= 400) {
-        logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_failed", {
-          statusCode: this.statusCode,
-          durationMs,
-          errorMessage: payload?.message || null,
-        });
-      } else {
-        logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_completed", {
-          statusCode: this.statusCode,
-          durationMs,
-          aiMessageId: payload?.aiMessage?.id || null,
-          tokensUsed: payload?.tokensUsed ?? null,
-        });
-      }
       return payload;
     },
   };
@@ -522,50 +613,13 @@ const createKundli = async (req, res) => {
 };
 
 const createKundliFromWhatsapp = async (req, res) => {
-  const traceId = getWhatsappTraceId(req);
-  const startedAt = Date.now();
-  let responseStatusCode = 200;
-  let responseLogged = false;
-  const originalStatus = res.status.bind(res);
-  const originalJson = res.json.bind(res);
-
-  res.status = (statusCode) => {
-    responseStatusCode = statusCode;
-    return originalStatus(statusCode);
-  };
-
-  res.json = (payload) => {
-    if (!responseLogged) {
-      responseLogged = true;
-      logWhatsappApi("whatsapp/create", traceId, "request_completed", {
-        statusCode: responseStatusCode,
-        durationMs: Date.now() - startedAt,
-        success: payload?.success ?? responseStatusCode < 400,
-        reason: payload?.reason || null,
-        errorMessage: payload?.message || null,
-        userRequestId: payload?.userRequestId || null,
-        sessionId: payload?.sessionId || null,
-      });
-    }
-
-    return originalJson(payload);
-  };
-
   try {
     const requestBody = req.body || {};
     const providedApiKey = extractWhatsappApiKey(req);
 
-    logWhatsappApi("whatsapp/create", traceId, "request_received", {
-      hasApiKey: Boolean(providedApiKey),
-      bodyKeys: Object.keys(requestBody),
-    });
-
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      logWhatsappApi("whatsapp/create", traceId, "auth_failed", {
-        reason: apiKeyValidation.reason,
-      });
       return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
         success: false,
         message: "WhatsApp API key validation failed",
@@ -579,7 +633,7 @@ const createKundliFromWhatsapp = async (req, res) => {
         requestBody.userName ||
         requestBody.user_name
     );
-    const gender = normalizeText(requestBody.gender || requestBody.user_gender);
+    const rawGender = normalizeText(requestBody.gender || requestBody.user_gender);
     const rawDob =
       requestBody.dob ||
       requestBody.dateOfbirth ||
@@ -604,16 +658,13 @@ const createKundliFromWhatsapp = async (req, res) => {
       requestBody.user_phone;
 
     const missingFields = [];
-    if (!gender) missingFields.push("gender");
+    if (!rawGender) missingFields.push("gender");
     if (!rawDob) missingFields.push("dob");
     if (!rawTob) missingFields.push("tob");
     if (!rawPlaceOfBirth) missingFields.push("place_of_birth");
     if (!rawMobile) missingFields.push("mobileNumber/mobile/destination");
 
     if (missingFields.length > 0) {
-      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
-        missingFields,
-      });
       return res.status(400).json({
         success: false,
         message:
@@ -623,74 +674,60 @@ const createKundliFromWhatsapp = async (req, res) => {
 
     const normalizedMobile = normalizeMobileNumber(rawMobile);
     if (!normalizedMobile) {
-      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
-        invalidField: "mobile",
-        maskedMobile: maskMobileForLog(rawMobile),
-      });
       return res.status(400).json({
         success: false,
         message: "Invalid mobile number format",
       });
     }
 
+    let formattedInput;
+    try {
+      formattedInput = await getFormattedWhatsappKundliInput({
+        user_gender: rawGender,
+        user_dob: rawDob,
+        user_tob: rawTob,
+        user_pob: rawPlaceOfBirth,
+      });
+    } catch (formatError) {
+      return res.status(mapErrorStatus(formatError, 400)).json({
+        success: false,
+        message: formatError?.message || "Invalid dob/tob format",
+        field: formatError?.field || null,
+      });
+    }
+
+    const gender = formattedInput.gender || normalizeGenderForKundli(rawGender);
+    const normalizedDob = formattedInput.dob;
+    const normalizedTob = formattedInput.tob;
+    const aiFormattedPlaceOfBirth =
+      formattedInput.place_of_birth || normalizeText(rawPlaceOfBirth);
+
     const { city, state, placeOfBirth } = derivePlaceCityAndState({
-      place: rawPlaceOfBirth,
+      place: aiFormattedPlaceOfBirth,
       state: rawState,
     });
 
     if (!city) {
-      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
-        invalidField: "place_of_birth",
-      });
       return res.status(400).json({
         success: false,
         message: "place_of_birth must include at least a city name",
       });
     }
 
-    logWhatsappApi("whatsapp/create", traceId, "preprocessing_started", {
-      maskedMobile: maskMobileForLog(normalizedMobile),
-      city,
-      state: state || null,
-    });
-
-    // Critical path optimization: execute DB lookup, geocoding, and DOB/TOB normalization in parallel.
-    const [userResult, locationResult, normalizeResult] = await Promise.allSettled([
+    // Critical path optimization: execute DB lookup and geocoding in parallel.
+    const [userResult, locationResult] = await Promise.allSettled([
       User.findOne({
         where: { mobile: normalizedMobile },
         attributes: ["id", "fullName", "mobile"],
       }),
       resolveIndianCityCoordinates({ city, state }),
-      Promise.resolve().then(() => normalizeDobAndTob({ dob: rawDob, tob: rawTob })),
     ]);
 
     if (userResult.status === "rejected") {
-      logWhatsappApi("whatsapp/create", traceId, "user_lookup_failed", {
-        errorMessage: userResult.reason?.message || "Unknown user lookup error",
-      });
       throw userResult.reason;
     }
 
-    if (normalizeResult.status === "rejected") {
-      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
-        invalidField: normalizeResult.reason?.field || "dob/tob",
-        errorMessage: normalizeResult.reason?.message || "Invalid dob/tob format",
-      });
-      return res.status(mapErrorStatus(normalizeResult.reason, 400)).json({
-        success: false,
-        message: normalizeResult.reason?.message || "Invalid dob/tob format",
-        field: normalizeResult.reason?.field || null,
-      });
-    }
-
     if (locationResult.status === "rejected") {
-      logWhatsappApi("whatsapp/create", traceId, "geocoding_failed", {
-        city,
-        state: state || null,
-        errorMessage:
-          locationResult.reason?.message ||
-          "Unable to resolve latitude and longitude for place_of_birth",
-      });
       return res.status(mapErrorStatus(locationResult.reason, 422)).json({
         success: false,
         message:
@@ -701,17 +738,12 @@ const createKundliFromWhatsapp = async (req, res) => {
 
     const existingUser = userResult.value;
     if (!existingUser) {
-      logWhatsappApi("whatsapp/create", traceId, "user_not_found", {
-        maskedMobile: maskMobileForLog(normalizedMobile),
-      });
       return res.status(404).json({
         success: false,
         message: "User not found for provided mobile number",
       });
     }
 
-    const normalizedDob = normalizeResult.value.dob;
-    const normalizedTob = normalizeResult.value.tob;
     const latitude = locationResult.value.latitude;
     const longitude = locationResult.value.longitude;
 
@@ -724,9 +756,6 @@ const createKundliFromWhatsapp = async (req, res) => {
     });
 
     if (validationError) {
-      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
-        errorMessage: validationError,
-      });
       return res.status(400).json({
         success: false,
         message: validationError,
@@ -762,19 +791,9 @@ const createKundliFromWhatsapp = async (req, res) => {
       },
     };
 
-    logWhatsappApi("whatsapp/create", traceId, "delegating_to_create_kundli", {
-      userId: existingUser.id,
-      maskedMobile: maskMobileForLog(normalizedMobile),
-      placeOfBirth: preparedKundliPayload.place_of_birth,
-      aiAstrologerId: delegatedRequest.aiAstrologerId || null,
-    });
-
     // Reuse the existing Kundli creation route handler to avoid duplicating generation logic.
     return createKundli(delegatedRequest, res);
   } catch (error) {
-    logWhatsappApi("whatsapp/create", traceId, "exception", {
-      errorMessage: error?.message || "Unknown error",
-    });
     console.error("WhatsApp Kundli creation error:", error);
     return res.status(mapErrorStatus(error)).json({
       success: false,
@@ -784,13 +803,86 @@ const createKundliFromWhatsapp = async (req, res) => {
   }
 };
 
+const formatWhatsappKundliInputFast = async (req, res) => {
+  try {
+    const requestBody = req.body || {};
+    const providedApiKey = extractWhatsappApiKey(req);
+
+    const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
+
+    if (!apiKeyValidation.isValid) {
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
+    }
+
+    const rawGender = normalizeText(requestBody.user_gender || requestBody.gender);
+    const rawDob = normalizeText(requestBody.user_dob || requestBody.dob);
+    const rawTob = normalizeText(requestBody.user_tob || requestBody.tob);
+    const rawPob = normalizeText(
+      requestBody.user_pob || requestBody.place_of_birth || requestBody.placeOfBirth
+    );
+    const rawState = normalizeText(requestBody.state);
+
+    const missingFields = [];
+    if (!rawGender) missingFields.push("user_gender");
+    if (!rawDob) missingFields.push("user_dob");
+    if (!rawTob) missingFields.push("user_tob");
+    if (!rawPob) missingFields.push("user_pob");
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Required fields are missing: ${missingFields.join(", ")}`,
+      });
+    }
+
+    const formattedInput = await getFormattedWhatsappKundliInput({
+      user_gender: rawGender,
+      user_dob: rawDob,
+      user_tob: rawTob,
+      user_pob: rawPob,
+    });
+
+    const { city, state, placeOfBirth } = derivePlaceCityAndState({
+      place: formattedInput.place_of_birth,
+      state: rawState,
+    });
+
+    if (!city) {
+      return res.status(400).json({
+        success: false,
+        message: "user_pob must include at least a city name",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      statusCode: 200,
+      source: formattedInput.source,
+      formatted: {
+        gender: formattedInput.gender,
+        dateOfbirth: formattedInput.dob,
+        timeOfbirth: formattedInput.tob,
+        placeOfBirth,
+        state: state || null,
+      },
+    });
+  } catch (error) {
+    return res.status(mapErrorStatus(error, 400)).json({
+      success: false,
+      message: error?.message || "Failed to format WhatsApp kundli input",
+      field: error?.field || null,
+    });
+  }
+};
+
 const askQuestionInWhatsappSession = async (req, res) => {
-  const traceId = getWhatsappTraceId(req);
-  const startedAt = Date.now();
   let responseStatusCode = 200;
   let resolvedSessionId = null;
   let remainingWhatsappChatLimit = null;
-  let responseLogged = false;
   const originalStatus = res.status.bind(res);
   const originalJson = res.json.bind(res);
 
@@ -817,19 +909,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
           }
         : payload;
 
-    if (!responseLogged) {
-      responseLogged = true;
-      logWhatsappApi("whatsapp/session/ask", traceId, "request_completed", {
-        statusCode: responseStatusCode,
-        durationMs: Date.now() - startedAt,
-        success: payloadWithData?.success ?? responseStatusCode < 400,
-        errorMessage: payloadWithData?.message || null,
-        sessionId: payloadWithData?.sessionId || resolvedSessionId || null,
-        aiMessageId: payloadWithData?.aiMessage?.id || null,
-        tokensUsed: payloadWithData?.tokensUsed ?? null,
-      });
-    }
-
     return originalJson(payloadWithData);
   };
 
@@ -837,17 +916,9 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const requestBody = req.body || {};
     const providedApiKey = extractWhatsappApiKey(req);
 
-    logWhatsappApi("whatsapp/session/ask", traceId, "request_received", {
-      hasApiKey: Boolean(providedApiKey),
-      bodyKeys: Object.keys(requestBody),
-    });
-
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      logWhatsappApi("whatsapp/session/ask", traceId, "auth_failed", {
-        reason: apiKeyValidation.reason,
-      });
       return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
         success: false,
         message: "WhatsApp API key validation failed",
@@ -879,24 +950,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const processInBackground = runAsync && !waitForReply;
 
     if (!sessionId || !question) {
-      const missingFields = [
-        ...(!sessionIdRaw ? ["sessionId"] : []),
-        ...(!questionRaw ? ["question"] : []),
-      ];
-
-      const emptyProvidedFields = [
-        ...(sessionIdRaw !== undefined && !sessionId ? ["sessionId"] : []),
-        ...(questionRaw !== undefined && !question ? ["question"] : []),
-      ];
-
-      logWhatsappApi("whatsapp/session/ask", traceId, "validation_failed", {
-        missingFields,
-        emptyProvidedFields,
-        sessionIdRawType: typeof sessionIdRaw,
-        questionRawType: typeof questionRaw,
-        sessionIdRawLength: typeof sessionIdRaw === "string" ? sessionIdRaw.length : null,
-        questionRawLength: typeof questionRaw === "string" ? questionRaw.length : null,
-      });
       return res.status(400).json({
         success: false,
         message:
@@ -905,9 +958,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
     }
 
     if (hasTemplatePlaceholder(sessionId) || hasTemplatePlaceholder(question)) {
-      logWhatsappApi("whatsapp/session/ask", traceId, "validation_failed", {
-        reason: "template_placeholder_detected",
-      });
       return res.status(400).json({
         success: false,
         message:
@@ -921,9 +971,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
     });
 
     if (!session) {
-      logWhatsappApi("whatsapp/session/ask", traceId, "session_not_found", {
-        sessionId,
-      });
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -946,10 +993,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
     );
 
     if (!updatedCount) {
-      logWhatsappApi("whatsapp/session/ask", traceId, "chat_limit_exhausted", {
-        sessionId: session.id,
-        userId: session.userId,
-      });
       return res.status(400).json({
         success: false,
         message: "WhatsApp chat limit exhausted. Please recharge or contact support.",
@@ -961,19 +1004,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
         ? Number(updatedUsers[0].whatsappChatLimit)
         : null;
 
-    logWhatsappApi("whatsapp/session/ask", traceId, "chat_limit_consumed", {
-      sessionId: session.id,
-      userId: session.userId,
-      remainingWhatsappChatLimit,
-    });
-
     if (processInBackground) {
-      logWhatsappApi("whatsapp/session/ask", traceId, "background_accepted", {
-        sessionId: session.id,
-        questionLength: String(question || "").length,
-        remainingWhatsappChatLimit,
-      });
-
       // Optional async mode: acknowledge quickly and process in background.
       setImmediate(async () => {
         try {
@@ -981,13 +1012,8 @@ const askQuestionInWhatsappSession = async (req, res) => {
             userId: session.userId,
             sessionId: session.id,
             question,
-            traceId,
           });
         } catch (backgroundError) {
-          logWhatsappApi("whatsapp/session/ask", traceId, "background_exception", {
-            sessionId: session.id,
-            errorMessage: backgroundError?.message || "Unknown background error",
-          });
           console.error("Background WhatsApp question processing error:", backgroundError);
         }
       });
@@ -1010,20 +1036,9 @@ const askQuestionInWhatsappSession = async (req, res) => {
       },
     };
 
-    logWhatsappApi("whatsapp/session/ask", traceId, "delegating_to_send_message", {
-      sessionId: session.id,
-      questionLength: String(question || "").length,
-      fastMode: true,
-      historyLimit: 8,
-      remainingWhatsappChatLimit,
-    });
-
     // Delegate to the existing AI chat send endpoint logic.
     return sendMessage(delegatedRequest, res);
   } catch (error) {
-    logWhatsappApi("whatsapp/session/ask", traceId, "exception", {
-      errorMessage: error?.message || "Unknown error",
-    });
     console.error("WhatsApp session ask error:", error);
     return res.status(mapErrorStatus(error)).json({
       success: false,
@@ -1416,6 +1431,7 @@ const getSharedKundli = async (req, res) => {
 module.exports = {
   createKundli,
   createKundliFromWhatsapp,
+  formatWhatsappKundliInputFast,
   askQuestionInWhatsappSession,
   getKundli,
   getAllKundlis,
