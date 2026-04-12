@@ -139,6 +139,30 @@ const extractWhatsappApiKey = (req) => {
 const normalizeText = (value) =>
   typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
+const getWhatsappTraceId = (req) => {
+  const fromHeaders = normalizeText(
+    req.headers["x-request-id"] ||
+      req.headers["x-correlation-id"] ||
+      req.headers["x-trace-id"]
+  );
+
+  return fromHeaders || randomUUID();
+};
+
+const maskMobileForLog = (mobile) => {
+  const digits = String(mobile || "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.length <= 4) return `***${digits}`;
+  return `${"*".repeat(digits.length - 4)}${digits.slice(-4)}`;
+};
+
+const logWhatsappApi = (apiName, traceId, stage, details = {}) => {
+  console.log(`[WhatsAppAPI][${apiName}][${stage}]`, {
+    traceId,
+    ...details,
+  });
+};
+
 const derivePlaceCityAndState = ({ place, state }) => {
   const normalizedPlace = normalizeText(place);
   const normalizedState = normalizeText(state);
@@ -226,7 +250,15 @@ const runWhatsappSessionQuestionInBackground = async ({
   userId,
   sessionId,
   question,
+  traceId,
 }) => {
+  const effectiveTraceId = traceId || randomUUID();
+  const startedAt = Date.now();
+  logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_started", {
+    sessionId,
+    questionLength: String(question || "").length,
+  });
+
   const delegatedRequest = {
     user: { id: userId },
     params: { sessionId },
@@ -244,10 +276,19 @@ const runWhatsappSessionQuestionInBackground = async ({
       return this;
     },
     json(payload) {
+      const durationMs = Date.now() - startedAt;
       if (this.statusCode >= 400) {
-        console.error("Background WhatsApp session ask failed:", {
+        logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_failed", {
           statusCode: this.statusCode,
-          payload,
+          durationMs,
+          errorMessage: payload?.message || null,
+        });
+      } else {
+        logWhatsappApi("whatsapp/session/ask", effectiveTraceId, "background_completed", {
+          statusCode: this.statusCode,
+          durationMs,
+          aiMessageId: payload?.aiMessage?.id || null,
+          tokensUsed: payload?.tokensUsed ?? null,
         });
       }
       return payload;
@@ -465,12 +506,50 @@ const createKundli = async (req, res) => {
 };
 
 const createKundliFromWhatsapp = async (req, res) => {
+  const traceId = getWhatsappTraceId(req);
+  const startedAt = Date.now();
+  let responseStatusCode = 200;
+  let responseLogged = false;
+  const originalStatus = res.status.bind(res);
+  const originalJson = res.json.bind(res);
+
+  res.status = (statusCode) => {
+    responseStatusCode = statusCode;
+    return originalStatus(statusCode);
+  };
+
+  res.json = (payload) => {
+    if (!responseLogged) {
+      responseLogged = true;
+      logWhatsappApi("whatsapp/create", traceId, "request_completed", {
+        statusCode: responseStatusCode,
+        durationMs: Date.now() - startedAt,
+        success: payload?.success ?? responseStatusCode < 400,
+        reason: payload?.reason || null,
+        errorMessage: payload?.message || null,
+        userRequestId: payload?.userRequestId || null,
+        sessionId: payload?.sessionId || null,
+      });
+    }
+
+    return originalJson(payload);
+  };
+
   try {
     const requestBody = req.body || {};
     const providedApiKey = extractWhatsappApiKey(req);
+
+    logWhatsappApi("whatsapp/create", traceId, "request_received", {
+      hasApiKey: Boolean(providedApiKey),
+      bodyKeys: Object.keys(requestBody),
+    });
+
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
+      logWhatsappApi("whatsapp/create", traceId, "auth_failed", {
+        reason: apiKeyValidation.reason,
+      });
       return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
         success: false,
         message: "WhatsApp API key validation failed",
@@ -508,7 +587,17 @@ const createKundliFromWhatsapp = async (req, res) => {
       requestBody.user_mobile ||
       requestBody.user_phone;
 
-    if (!gender || !rawDob || !rawTob || !rawPlaceOfBirth || !rawMobile) {
+    const missingFields = [];
+    if (!gender) missingFields.push("gender");
+    if (!rawDob) missingFields.push("dob");
+    if (!rawTob) missingFields.push("tob");
+    if (!rawPlaceOfBirth) missingFields.push("place_of_birth");
+    if (!rawMobile) missingFields.push("mobileNumber/mobile/destination");
+
+    if (missingFields.length > 0) {
+      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
+        missingFields,
+      });
       return res.status(400).json({
         success: false,
         message:
@@ -518,6 +607,10 @@ const createKundliFromWhatsapp = async (req, res) => {
 
     const normalizedMobile = normalizeMobileNumber(rawMobile);
     if (!normalizedMobile) {
+      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
+        invalidField: "mobile",
+        maskedMobile: maskMobileForLog(rawMobile),
+      });
       return res.status(400).json({
         success: false,
         message: "Invalid mobile number format",
@@ -530,11 +623,20 @@ const createKundliFromWhatsapp = async (req, res) => {
     });
 
     if (!city) {
+      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
+        invalidField: "place_of_birth",
+      });
       return res.status(400).json({
         success: false,
         message: "place_of_birth must include at least a city name",
       });
     }
+
+    logWhatsappApi("whatsapp/create", traceId, "preprocessing_started", {
+      maskedMobile: maskMobileForLog(normalizedMobile),
+      city,
+      state: state || null,
+    });
 
     // Critical path optimization: execute DB lookup, geocoding, and DOB/TOB normalization in parallel.
     const [userResult, locationResult, normalizeResult] = await Promise.allSettled([
@@ -547,10 +649,17 @@ const createKundliFromWhatsapp = async (req, res) => {
     ]);
 
     if (userResult.status === "rejected") {
+      logWhatsappApi("whatsapp/create", traceId, "user_lookup_failed", {
+        errorMessage: userResult.reason?.message || "Unknown user lookup error",
+      });
       throw userResult.reason;
     }
 
     if (normalizeResult.status === "rejected") {
+      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
+        invalidField: normalizeResult.reason?.field || "dob/tob",
+        errorMessage: normalizeResult.reason?.message || "Invalid dob/tob format",
+      });
       return res.status(mapErrorStatus(normalizeResult.reason, 400)).json({
         success: false,
         message: normalizeResult.reason?.message || "Invalid dob/tob format",
@@ -559,6 +668,13 @@ const createKundliFromWhatsapp = async (req, res) => {
     }
 
     if (locationResult.status === "rejected") {
+      logWhatsappApi("whatsapp/create", traceId, "geocoding_failed", {
+        city,
+        state: state || null,
+        errorMessage:
+          locationResult.reason?.message ||
+          "Unable to resolve latitude and longitude for place_of_birth",
+      });
       return res.status(mapErrorStatus(locationResult.reason, 422)).json({
         success: false,
         message:
@@ -569,6 +685,9 @@ const createKundliFromWhatsapp = async (req, res) => {
 
     const existingUser = userResult.value;
     if (!existingUser) {
+      logWhatsappApi("whatsapp/create", traceId, "user_not_found", {
+        maskedMobile: maskMobileForLog(normalizedMobile),
+      });
       return res.status(404).json({
         success: false,
         message: "User not found for provided mobile number",
@@ -589,6 +708,9 @@ const createKundliFromWhatsapp = async (req, res) => {
     });
 
     if (validationError) {
+      logWhatsappApi("whatsapp/create", traceId, "validation_failed", {
+        errorMessage: validationError,
+      });
       return res.status(400).json({
         success: false,
         message: validationError,
@@ -624,9 +746,19 @@ const createKundliFromWhatsapp = async (req, res) => {
       },
     };
 
+    logWhatsappApi("whatsapp/create", traceId, "delegating_to_create_kundli", {
+      userId: existingUser.id,
+      maskedMobile: maskMobileForLog(normalizedMobile),
+      placeOfBirth: preparedKundliPayload.place_of_birth,
+      aiAstrologerId: delegatedRequest.aiAstrologerId || null,
+    });
+
     // Reuse the existing Kundli creation route handler to avoid duplicating generation logic.
     return createKundli(delegatedRequest, res);
   } catch (error) {
+    logWhatsappApi("whatsapp/create", traceId, "exception", {
+      errorMessage: error?.message || "Unknown error",
+    });
     console.error("WhatsApp Kundli creation error:", error);
     return res.status(mapErrorStatus(error)).json({
       success: false,
@@ -637,12 +769,50 @@ const createKundliFromWhatsapp = async (req, res) => {
 };
 
 const askQuestionInWhatsappSession = async (req, res) => {
+  const traceId = getWhatsappTraceId(req);
+  const startedAt = Date.now();
+  let responseStatusCode = 200;
+  let responseLogged = false;
+  const originalStatus = res.status.bind(res);
+  const originalJson = res.json.bind(res);
+
+  res.status = (statusCode) => {
+    responseStatusCode = statusCode;
+    return originalStatus(statusCode);
+  };
+
+  res.json = (payload) => {
+    if (!responseLogged) {
+      responseLogged = true;
+      logWhatsappApi("whatsapp/session/ask", traceId, "request_completed", {
+        statusCode: responseStatusCode,
+        durationMs: Date.now() - startedAt,
+        success: payload?.success ?? responseStatusCode < 400,
+        errorMessage: payload?.message || null,
+        sessionId: payload?.sessionId || null,
+        aiMessageId: payload?.aiMessage?.id || null,
+        tokensUsed: payload?.tokensUsed ?? null,
+      });
+    }
+
+    return originalJson(payload);
+  };
+
   try {
     const requestBody = req.body || {};
     const providedApiKey = extractWhatsappApiKey(req);
+
+    logWhatsappApi("whatsapp/session/ask", traceId, "request_received", {
+      hasApiKey: Boolean(providedApiKey),
+      bodyKeys: Object.keys(requestBody),
+    });
+
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "auth_failed", {
+        reason: apiKeyValidation.reason,
+      });
       return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
         success: false,
         message: "WhatsApp API key validation failed",
@@ -670,6 +840,12 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const processInBackground = runAsync && !waitForReply;
 
     if (!sessionId || !question) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "validation_failed", {
+        missingFields: [
+          ...(!sessionId ? ["sessionId"] : []),
+          ...(!question ? ["question"] : []),
+        ],
+      });
       return res.status(400).json({
         success: false,
         message: "sessionId and question are required",
@@ -677,6 +853,9 @@ const askQuestionInWhatsappSession = async (req, res) => {
     }
 
     if (hasTemplatePlaceholder(sessionId) || hasTemplatePlaceholder(question)) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "validation_failed", {
+        reason: "template_placeholder_detected",
+      });
       return res.status(400).json({
         success: false,
         message:
@@ -690,6 +869,9 @@ const askQuestionInWhatsappSession = async (req, res) => {
     });
 
     if (!session) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "session_not_found", {
+        sessionId,
+      });
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -697,6 +879,11 @@ const askQuestionInWhatsappSession = async (req, res) => {
     }
 
     if (processInBackground) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "background_accepted", {
+        sessionId: session.id,
+        questionLength: String(question || "").length,
+      });
+
       // Optional async mode: acknowledge quickly and process in background.
       setImmediate(async () => {
         try {
@@ -704,8 +891,13 @@ const askQuestionInWhatsappSession = async (req, res) => {
             userId: session.userId,
             sessionId: session.id,
             question,
+            traceId,
           });
         } catch (backgroundError) {
+          logWhatsappApi("whatsapp/session/ask", traceId, "background_exception", {
+            sessionId: session.id,
+            errorMessage: backgroundError?.message || "Unknown background error",
+          });
           console.error("Background WhatsApp question processing error:", backgroundError);
         }
       });
@@ -728,9 +920,19 @@ const askQuestionInWhatsappSession = async (req, res) => {
       },
     };
 
+    logWhatsappApi("whatsapp/session/ask", traceId, "delegating_to_send_message", {
+      sessionId: session.id,
+      questionLength: String(question || "").length,
+      fastMode: true,
+      historyLimit: 8,
+    });
+
     // Delegate to the existing AI chat send endpoint logic.
     return sendMessage(delegatedRequest, res);
   } catch (error) {
+    logWhatsappApi("whatsapp/session/ask", traceId, "exception", {
+      errorMessage: error?.message || "Unknown error",
+    });
     console.error("WhatsApp session ask error:", error);
     return res.status(mapErrorStatus(error)).json({
       success: false,
