@@ -650,10 +650,19 @@ const askQuestionInWhatsappSession = async (req, res) => {
       });
     }
 
-    const sessionId = normalizeText(requestBody.sessionId || requestBody.session_id);
-    const question = normalizeText(
-      requestBody.question || requestBody.message || requestBody.user_question
+    const sessionId = normalizeText(
+      requestBody.sessionId ||
+      requestBody.session_id ||
+      requestBody.session_Id ||
+      requestBody.sessionID
     );
+    const question = normalizeText(
+      requestBody.question ||
+      requestBody.message ||
+      requestBody.user_question ||
+      requestBody.userQuestion
+    );
+    const hasTemplatePlaceholder = (value) => /^\$[a-zA-Z_]/.test(String(value || "").trim());
     const waitForReply =
       requestBody.waitForReply === true || requestBody.wait_for_reply === true;
     const runAsync =
@@ -664,6 +673,14 @@ const askQuestionInWhatsappSession = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "sessionId and question are required",
+      });
+    }
+
+    if (hasTemplatePlaceholder(sessionId) || hasTemplatePlaceholder(question)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Template placeholders detected. Please send actual values for sessionId and question.",
       });
     }
 
