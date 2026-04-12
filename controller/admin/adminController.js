@@ -365,6 +365,52 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+const updateUserWhatsappChatLimit = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const parsedLimit = Number(req.body?.whatsappChatLimit);
+
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "whatsappChatLimit must be a non-negative integer",
+      });
+    }
+
+    const user = await User.findByPk(userId, {
+      attributes: ["id", "fullName", "email", "mobile", "whatsappChatLimit"],
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    await user.update({ whatsappChatLimit: parsedLimit });
+
+    return res.status(200).json({
+      success: true,
+      message: "WhatsApp chat limit updated successfully",
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        mobile: user.mobile,
+        whatsappChatLimit: user.whatsappChatLimit,
+      },
+    });
+  } catch (error) {
+    console.error("Update user WhatsApp chat limit error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update WhatsApp chat limit",
+      error: error.message,
+    });
+  }
+};
+
 const getAllAstrologers = async (req, res) => {
   try {
     const { page = 1, limit = 20, isApproved, isActive } = req.query;
@@ -1012,6 +1058,7 @@ module.exports = {
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
+  updateUserWhatsappChatLimit,
   getAllAstrologers,
   getPendingAstrologers,
   approveAstrologer,
