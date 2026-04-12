@@ -16,6 +16,7 @@ const getWhatsappAuthSettings = async (req, res) => {
       settings: {
         isEnabled: setting.isEnabled,
         isConfigured: setting.isConfigured,
+        apiKey: setting.apiKey,
         apiKeyMasked: maskApiKey(setting.apiKey),
         updatedAt: setting.updatedAt,
       },
@@ -75,6 +76,7 @@ const updateWhatsappAuthSettings = async (req, res) => {
       settings: {
         isEnabled: setting.isEnabled,
         isConfigured: setting.isConfigured,
+        apiKey: setting.apiKey,
         apiKeyMasked: maskApiKey(setting.apiKey),
         updatedAt: setting.updatedAt,
       },

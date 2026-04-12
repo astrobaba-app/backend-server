@@ -13,6 +13,28 @@ let memoryCache = {
   expiresAt: 0,
 };
 
+const normalizeApiKeyValue = (rawValue) => {
+  if (typeof rawValue !== "string") return "";
+
+  let normalized = rawValue.trim();
+
+  if (normalized.toLowerCase().startsWith("bearer ")) {
+    normalized = normalized.slice(7).trim();
+  }
+
+  const hasWrappedDoubleQuotes =
+    normalized.startsWith('"') && normalized.endsWith('"') && normalized.length >= 2;
+  const hasWrappedSingleQuotes =
+    normalized.startsWith("'") && normalized.endsWith("'") && normalized.length >= 2;
+
+  if (hasWrappedDoubleQuotes || hasWrappedSingleQuotes) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+
+  // API keys should be token-safe; stripping whitespace avoids copy/paste issues.
+  return normalized.replace(/\s+/g, "");
+};
+
 const parseJsonValue = (rawValue, fallbackValue = {}) => {
   if (!rawValue) return fallbackValue;
 
@@ -137,7 +159,7 @@ const saveWhatsappAuthSetting = async ({ apiKey, isEnabled }) => {
   const currentSetting = normalizeDbSetting(setting);
 
   const normalizedApiKey =
-    apiKey !== undefined ? String(apiKey).trim() : currentSetting.apiKey;
+    apiKey !== undefined ? normalizeApiKeyValue(apiKey) : currentSetting.apiKey;
   const normalizedIsEnabled =
     typeof isEnabled === "boolean" ? isEnabled : currentSetting.isEnabled;
 
@@ -163,8 +185,8 @@ const saveWhatsappAuthSetting = async ({ apiKey, isEnabled }) => {
 };
 
 const isApiKeyMatch = (providedApiKey, configuredApiKey) => {
-  const provided = Buffer.from(String(providedApiKey));
-  const configured = Buffer.from(String(configuredApiKey));
+  const provided = Buffer.from(normalizeApiKeyValue(providedApiKey));
+  const configured = Buffer.from(normalizeApiKeyValue(configuredApiKey));
 
   if (provided.length !== configured.length) {
     return false;
@@ -174,8 +196,7 @@ const isApiKeyMatch = (providedApiKey, configuredApiKey) => {
 };
 
 const validateWhatsappApiKey = async (providedApiKey) => {
-  const normalizedProvidedKey =
-    typeof providedApiKey === "string" ? providedApiKey.trim() : "";
+  const normalizedProvidedKey = normalizeApiKeyValue(providedApiKey);
 
   if (!normalizedProvidedKey) {
     return {

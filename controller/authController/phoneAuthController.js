@@ -227,19 +227,45 @@ const verifyOtp = async (req, res) => {
 
 const whatsappRegisterOrCheck = async (req, res) => {
   try {
+    const requestBody = req.body || {};
+    const normalizeApiKeyCandidate = (value) => {
+      if (typeof value !== "string") return "";
+      let normalized = value.trim();
+      if (normalized.toLowerCase().startsWith("bearer ")) {
+        normalized = normalized.slice(7).trim();
+      }
+      if (
+        ((normalized.startsWith('"') && normalized.endsWith('"')) ||
+          (normalized.startsWith("'") && normalized.endsWith("'"))) &&
+        normalized.length >= 2
+      ) {
+        normalized = normalized.slice(1, -1).trim();
+      }
+      return normalized.replace(/\s+/g, "");
+    };
+    const headerWhatsappApiKey =
+      typeof req.headers["x-whatsapp-api-key"] === "string"
+        ? normalizeApiKeyCandidate(req.headers["x-whatsapp-api-key"])
+        : "";
+    const headerGenericApiKey =
+      typeof req.headers["x-api-key"] === "string"
+        ? normalizeApiKeyCandidate(req.headers["x-api-key"])
+        : "";
+    const bodyApiKey =
+      typeof requestBody.apiKey === "string"
+        ? normalizeApiKeyCandidate(requestBody.apiKey)
+        : "";
     const authorizationHeader =
       typeof req.headers.authorization === "string"
         ? req.headers.authorization.trim()
         : "";
-    const authorizationApiKey = authorizationHeader.toLowerCase().startsWith("bearer ")
-      ? authorizationHeader.slice(7).trim()
-      : authorizationHeader;
+    const authorizationApiKey = normalizeApiKeyCandidate(authorizationHeader);
 
     const providedApiKey =
-      req.headers["x-api-key"] ||
-      req.headers["x-whatsapp-api-key"] ||
+      headerWhatsappApiKey ||
+      headerGenericApiKey ||
       authorizationApiKey ||
-      req.body.apiKey;
+      bodyApiKey;
 
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
     if (!apiKeyValidation.isValid) {

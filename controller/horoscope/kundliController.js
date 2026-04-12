@@ -1,6 +1,17 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
+const User = require("../../model/user/userAuth");
+const {
+  validateWhatsappApiKey,
+} = require("../../services/whatsappAuthSettingsService");
+const {
+  resolveIndianCityCoordinates,
+} = require("../../services/locationResolverService");
+const {
+  DateTimeNormalizationError,
+  normalizeDobAndTob,
+} = require("../../utils/dateTimeNormalizer");
 const {
   getBasicDetails,
   getAstroDetails,
@@ -55,6 +66,135 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
 }
 
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
+
+const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
+
+const normalizeMobileNumber = (rawMobile) => {
+  const digits = String(rawMobile || "").replace(/\D/g, "");
+  if (!digits) return null;
+
+  const withoutLeadingZeros = digits.replace(/^0+/, "");
+  const candidates = [
+    digits,
+    withoutLeadingZeros,
+    digits.slice(-10),
+    withoutLeadingZeros.slice(-10),
+  ];
+
+  for (const candidate of candidates) {
+    if (/^[6-9]\d{9}$/.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
+const extractWhatsappApiKey = (req) => {
+  const requestBody = req.body || {};
+  const normalizeApiKeyCandidate = (value) => {
+    if (typeof value !== "string") return "";
+    let normalized = value.trim();
+    if (normalized.toLowerCase().startsWith("bearer ")) {
+      normalized = normalized.slice(7).trim();
+    }
+    if (
+      ((normalized.startsWith('"') && normalized.endsWith('"')) ||
+        (normalized.startsWith("'") && normalized.endsWith("'"))) &&
+      normalized.length >= 2
+    ) {
+      normalized = normalized.slice(1, -1).trim();
+    }
+    return normalized.replace(/\s+/g, "");
+  };
+  const bodyApiKey =
+    typeof requestBody.apiKey === "string"
+      ? normalizeApiKeyCandidate(requestBody.apiKey)
+      : "";
+  const headerWhatsappApiKey =
+    typeof req.headers["x-whatsapp-api-key"] === "string"
+      ? normalizeApiKeyCandidate(req.headers["x-whatsapp-api-key"])
+      : "";
+  const headerGenericApiKey =
+    typeof req.headers["x-api-key"] === "string"
+      ? normalizeApiKeyCandidate(req.headers["x-api-key"])
+      : "";
+  const authorizationHeader =
+    typeof req.headers.authorization === "string"
+      ? req.headers.authorization.trim()
+      : "";
+
+  const authorizationApiKey = normalizeApiKeyCandidate(authorizationHeader);
+
+  // Prefer dedicated WhatsApp header first to avoid collisions with generic x-api-key.
+  return headerWhatsappApiKey || headerGenericApiKey || authorizationApiKey || bodyApiKey;
+};
+
+const normalizeText = (value) =>
+  typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
+
+const derivePlaceCityAndState = ({ place, state }) => {
+  const normalizedPlace = normalizeText(place);
+  const normalizedState = normalizeText(state);
+
+  const placeSegments = normalizedPlace
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  const city = placeSegments[0] || "";
+  const derivedState = normalizedState || placeSegments[1] || "";
+  const normalizedPlaceOfBirth = derivedState ? `${city}, ${derivedState}` : city;
+
+  return {
+    city,
+    state: derivedState,
+    placeOfBirth: normalizedPlaceOfBirth,
+  };
+};
+
+const validateKundliPayload = ({ dob, tob, placeOfBirth, latitude, longitude }) => {
+  if (!KUNDLI_DOB_REGEX.test(dob)) {
+    return "dob must be in YYYY-MM-DD format";
+  }
+
+  if (!KUNDLI_TOB_REGEX.test(tob)) {
+    return "tob must be in HH:mm:ss (24-hour) format";
+  }
+
+  if (!normalizeText(placeOfBirth)) {
+    return "place_of_birth is required";
+  }
+
+  const lat = Number(latitude);
+  const lon = Number(longitude);
+
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) {
+    return "latitude must be a valid number between -90 and 90";
+  }
+
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) {
+    return "longitude must be a valid number between -180 and 180";
+  }
+
+  return null;
+};
+
+const mapWhatsappApiKeyErrorStatus = (reason) => {
+  if (reason === "disabled" || reason === "not_configured") {
+    return 503;
+  }
+
+  return 401;
+};
+
+const mapErrorStatus = (error, defaultStatus = 500) => {
+  if (!error) return defaultStatus;
+  if (Number.isInteger(error.statusCode)) return error.statusCode;
+  if (error instanceof DateTimeNormalizationError) return 400;
+  return defaultStatus;
+};
 
 
 
@@ -215,8 +355,22 @@ const createKundli = async (req, res) => {
         console.error("[KundliController] Background AI Free Report generation failed:", err?.message || err);
       });
 
+    const responseStatusCode = 201;
+
+    // WhatsApp flow requests a compact payload for low-overhead integrations.
+    if (req.responseFormat === "whatsapp-minimal") {
+      return res.status(responseStatusCode).json({
+        success: true,
+        statusCode: responseStatusCode,
+        userRequestId: userRequest.id,
+        kundli: {
+          id: kundli.id,
+        },
+      });
+    }
+
     // Return immediately without waiting for AI generation
-    res.status(201).json({
+    return res.status(responseStatusCode).json({
       success: true,
       message: "Kundli created successfully",
       userRequest,
@@ -227,6 +381,153 @@ const createKundli = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to create kundli",
+      error: error.message,
+    });
+  }
+};
+
+const createKundliFromWhatsapp = async (req, res) => {
+  try {
+    const requestBody = req.body || {};
+    const providedApiKey = extractWhatsappApiKey(req);
+    const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
+
+    if (!apiKeyValidation.isValid) {
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
+    }
+
+    const name = normalizeText(requestBody.name || requestBody.fullName || requestBody.userName);
+    const gender = normalizeText(requestBody.gender);
+    const rawDob = requestBody.dob || requestBody.dateOfbirth || requestBody.dateOfBirth;
+    const rawTob = requestBody.tob || requestBody.timeOfbirth || requestBody.timeOfBirth;
+    const rawPlaceOfBirth =
+      requestBody.place_of_birth || requestBody.placeOfBirth || requestBody.pob;
+    const rawState = requestBody.state;
+    const rawMobile =
+      requestBody.mobileNumber || requestBody.mobile || requestBody.destination;
+
+    if (!gender || !rawDob || !rawTob || !rawPlaceOfBirth || !rawMobile) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Required fields are missing. Expected: gender, dob, tob, place_of_birth and mobileNumber/mobile/destination.",
+      });
+    }
+
+    const normalizedMobile = normalizeMobileNumber(rawMobile);
+    if (!normalizedMobile) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid mobile number format",
+      });
+    }
+
+    const { city, state, placeOfBirth } = derivePlaceCityAndState({
+      place: rawPlaceOfBirth,
+      state: rawState,
+    });
+
+    if (!city) {
+      return res.status(400).json({
+        success: false,
+        message: "place_of_birth must include at least a city name",
+      });
+    }
+
+    // Critical path optimization: execute DB lookup, geocoding, and DOB/TOB normalization in parallel.
+    const [userResult, locationResult, normalizeResult] = await Promise.allSettled([
+      User.findOne({
+        where: { mobile: normalizedMobile },
+        attributes: ["id", "fullName", "mobile"],
+      }),
+      resolveIndianCityCoordinates({ city, state }),
+      Promise.resolve().then(() => normalizeDobAndTob({ dob: rawDob, tob: rawTob })),
+    ]);
+
+    if (userResult.status === "rejected") {
+      throw userResult.reason;
+    }
+
+    if (normalizeResult.status === "rejected") {
+      return res.status(mapErrorStatus(normalizeResult.reason, 400)).json({
+        success: false,
+        message: normalizeResult.reason?.message || "Invalid dob/tob format",
+        field: normalizeResult.reason?.field || null,
+      });
+    }
+
+    if (locationResult.status === "rejected") {
+      return res.status(mapErrorStatus(locationResult.reason, 422)).json({
+        success: false,
+        message:
+          locationResult.reason?.message ||
+          "Unable to resolve latitude and longitude for place_of_birth",
+      });
+    }
+
+    const existingUser = userResult.value;
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found for provided mobile number",
+      });
+    }
+
+    const normalizedDob = normalizeResult.value.dob;
+    const normalizedTob = normalizeResult.value.tob;
+    const latitude = locationResult.value.latitude;
+    const longitude = locationResult.value.longitude;
+
+    const validationError = validateKundliPayload({
+      dob: normalizedDob,
+      tob: normalizedTob,
+      placeOfBirth,
+      latitude,
+      longitude,
+    });
+
+    if (validationError) {
+      return res.status(400).json({
+        success: false,
+        message: validationError,
+      });
+    }
+
+    const preparedKundliPayload = {
+      name: name || existingUser.fullName || "User",
+      gender,
+      dob: normalizedDob,
+      tob: normalizedTob,
+      place_of_birth: placeOfBirth,
+      latitude,
+      longitude,
+    };
+
+    const delegatedRequest = {
+      responseFormat: "whatsapp-minimal",
+      user: { id: existingUser.id },
+      body: {
+        fullName: preparedKundliPayload.name,
+        gender: preparedKundliPayload.gender,
+        dateOfbirth: preparedKundliPayload.dob,
+        timeOfbirth: preparedKundliPayload.tob,
+        placeOfBirth: preparedKundliPayload.place_of_birth,
+        latitude: preparedKundliPayload.latitude,
+        longitude: preparedKundliPayload.longitude,
+      },
+    };
+
+    // Reuse the existing Kundli creation route handler to avoid duplicating generation logic.
+    return createKundli(delegatedRequest, res);
+  } catch (error) {
+    console.error("WhatsApp Kundli creation error:", error);
+    return res.status(mapErrorStatus(error)).json({
+      success: false,
+      message: "Failed to create kundli from WhatsApp data",
       error: error.message,
     });
   }
@@ -614,6 +915,7 @@ const getSharedKundli = async (req, res) => {
 
 module.exports = {
   createKundli,
+  createKundliFromWhatsapp,
   getKundli,
   getAllKundlis,
   deleteKundli,
