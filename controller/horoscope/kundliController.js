@@ -467,7 +467,7 @@ const createKundli = async (req, res) => {
         console.error("[KundliController] Background AI Free Report generation failed:", err?.message || err);
       });
 
-    const responseStatusCode = 201;
+    const responseStatusCode = req.responseFormat === "whatsapp-minimal" ? 200 : 201;
 
     // WhatsApp flow requests a compact payload for low-overhead integrations.
     if (req.responseFormat === "whatsapp-minimal") {
@@ -487,7 +487,7 @@ const createKundli = async (req, res) => {
         }
       });
 
-      return res.status(responseStatusCode).json({
+      const whatsappData = {
         success: true,
         statusCode: responseStatusCode,
         userRequestId: userRequest.id,
@@ -495,6 +495,11 @@ const createKundli = async (req, res) => {
           id: kundli.id,
         },
         sessionId,
+      };
+
+      return res.status(responseStatusCode).json({
+        ...whatsappData,
+        data: whatsappData,
       });
     }
 
@@ -782,6 +787,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
   const traceId = getWhatsappTraceId(req);
   const startedAt = Date.now();
   let responseStatusCode = 200;
+  let resolvedSessionId = null;
   let responseLogged = false;
   const originalStatus = res.status.bind(res);
   const originalJson = res.json.bind(res);
@@ -792,20 +798,36 @@ const askQuestionInWhatsappSession = async (req, res) => {
   };
 
   res.json = (payload) => {
+    const payloadWithData =
+      payload && typeof payload === "object" && !Array.isArray(payload) && !payload.data
+        ? {
+            ...payload,
+            data: {
+              success: payload.success ?? responseStatusCode < 400,
+              statusCode: payload.statusCode || responseStatusCode,
+              message: payload.message || null,
+              sessionId: payload.sessionId || resolvedSessionId || null,
+              userMessage: payload.userMessage || null,
+              aiMessage: payload.aiMessage || null,
+              tokensUsed: payload.tokensUsed ?? null,
+            },
+          }
+        : payload;
+
     if (!responseLogged) {
       responseLogged = true;
       logWhatsappApi("whatsapp/session/ask", traceId, "request_completed", {
         statusCode: responseStatusCode,
         durationMs: Date.now() - startedAt,
-        success: payload?.success ?? responseStatusCode < 400,
-        errorMessage: payload?.message || null,
-        sessionId: payload?.sessionId || null,
-        aiMessageId: payload?.aiMessage?.id || null,
-        tokensUsed: payload?.tokensUsed ?? null,
+        success: payloadWithData?.success ?? responseStatusCode < 400,
+        errorMessage: payloadWithData?.message || null,
+        sessionId: payloadWithData?.sessionId || resolvedSessionId || null,
+        aiMessageId: payloadWithData?.aiMessage?.id || null,
+        tokensUsed: payloadWithData?.tokensUsed ?? null,
       });
     }
 
-    return originalJson(payload);
+    return originalJson(payloadWithData);
   };
 
   try {
@@ -845,6 +867,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
 
     const sessionId = normalizeText(sessionIdRaw);
     const question = normalizeText(questionRaw);
+    resolvedSessionId = sessionId || null;
     const hasTemplatePlaceholder = (value) => /^\$[a-zA-Z_]/.test(String(value || "").trim());
     const waitForReply =
       requestBody.waitForReply === true || requestBody.wait_for_reply === true;
