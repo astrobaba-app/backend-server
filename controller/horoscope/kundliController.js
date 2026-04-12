@@ -163,6 +163,16 @@ const logWhatsappApi = (apiName, traceId, stage, details = {}) => {
   });
 };
 
+const getFirstProvidedBodyValue = (body, keys = []) => {
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(body, key)) {
+      return body[key];
+    }
+  }
+
+  return undefined;
+};
+
 const derivePlaceCityAndState = ({ place, state }) => {
   const normalizedPlace = normalizeText(place);
   const normalizedState = normalizeText(state);
@@ -820,18 +830,21 @@ const askQuestionInWhatsappSession = async (req, res) => {
       });
     }
 
-    const sessionId = normalizeText(
-      requestBody.sessionId ||
-      requestBody.session_id ||
-      requestBody.session_Id ||
-      requestBody.sessionID
-    );
-    const question = normalizeText(
-      requestBody.question ||
-      requestBody.message ||
-      requestBody.user_question ||
-      requestBody.userQuestion
-    );
+    const sessionIdRaw = getFirstProvidedBodyValue(requestBody, [
+      "sessionId",
+      "session_id",
+      "session_Id",
+      "sessionID",
+    ]);
+    const questionRaw = getFirstProvidedBodyValue(requestBody, [
+      "question",
+      "message",
+      "user_question",
+      "userQuestion",
+    ]);
+
+    const sessionId = normalizeText(sessionIdRaw);
+    const question = normalizeText(questionRaw);
     const hasTemplatePlaceholder = (value) => /^\$[a-zA-Z_]/.test(String(value || "").trim());
     const waitForReply =
       requestBody.waitForReply === true || requestBody.wait_for_reply === true;
@@ -840,15 +853,28 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const processInBackground = runAsync && !waitForReply;
 
     if (!sessionId || !question) {
+      const missingFields = [
+        ...(!sessionIdRaw ? ["sessionId"] : []),
+        ...(!questionRaw ? ["question"] : []),
+      ];
+
+      const emptyProvidedFields = [
+        ...(sessionIdRaw !== undefined && !sessionId ? ["sessionId"] : []),
+        ...(questionRaw !== undefined && !question ? ["question"] : []),
+      ];
+
       logWhatsappApi("whatsapp/session/ask", traceId, "validation_failed", {
-        missingFields: [
-          ...(!sessionId ? ["sessionId"] : []),
-          ...(!question ? ["question"] : []),
-        ],
+        missingFields,
+        emptyProvidedFields,
+        sessionIdRawType: typeof sessionIdRaw,
+        questionRawType: typeof questionRaw,
+        sessionIdRawLength: typeof sessionIdRaw === "string" ? sessionIdRaw.length : null,
+        questionRawLength: typeof questionRaw === "string" ? questionRaw.length : null,
       });
       return res.status(400).json({
         success: false,
-        message: "sessionId and question are required",
+        message:
+          "sessionId and question are required. If you are using template variables, ensure they are resolved before request is sent.",
       });
     }
 
