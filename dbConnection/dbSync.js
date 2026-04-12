@@ -445,6 +445,16 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.whatsappChatLimit && !table.whatsapp_chat_limit) {
+      operations.push(
+        queryInterface.addColumn("users", "whatsappChatLimit", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured user preference columns exist");

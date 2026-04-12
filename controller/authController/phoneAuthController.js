@@ -338,6 +338,7 @@ const whatsappRegisterOrCheck = async (req, res) => {
         mobile,
         fullName: fullName || null,
         isUserRequested: false,
+        whatsappChatLimit: 2,
       });
     } catch (createError) {
       if (createError.name === "SequelizeUniqueConstraintError") {

@@ -122,6 +122,11 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    whatsappChatLimit: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
   },
   {
     tableName: "users",

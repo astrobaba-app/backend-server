@@ -1,6 +1,7 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
+const { Op, literal } = require("sequelize");
 const { randomUUID } = require("crypto");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
 const User = require("../../model/user/userAuth");
@@ -788,6 +789,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
   const startedAt = Date.now();
   let responseStatusCode = 200;
   let resolvedSessionId = null;
+  let remainingWhatsappChatLimit = null;
   let responseLogged = false;
   const originalStatus = res.status.bind(res);
   const originalJson = res.json.bind(res);
@@ -810,6 +812,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
               userMessage: payload.userMessage || null,
               aiMessage: payload.aiMessage || null,
               tokensUsed: payload.tokensUsed ?? null,
+              remainingWhatsappChatLimit,
             },
           }
         : payload;
@@ -927,10 +930,48 @@ const askQuestionInWhatsappSession = async (req, res) => {
       });
     }
 
+    const [updatedCount, updatedUsers] = await User.update(
+      {
+        whatsappChatLimit: literal('GREATEST("whatsappChatLimit" - 1, 0)'),
+      },
+      {
+        where: {
+          id: session.userId,
+          whatsappChatLimit: {
+            [Op.gt]: 0,
+          },
+        },
+        returning: true,
+      }
+    );
+
+    if (!updatedCount) {
+      logWhatsappApi("whatsapp/session/ask", traceId, "chat_limit_exhausted", {
+        sessionId: session.id,
+        userId: session.userId,
+      });
+      return res.status(400).json({
+        success: false,
+        message: "WhatsApp chat limit exhausted. Please recharge or contact support.",
+      });
+    }
+
+    remainingWhatsappChatLimit =
+      updatedUsers && updatedUsers[0]
+        ? Number(updatedUsers[0].whatsappChatLimit)
+        : null;
+
+    logWhatsappApi("whatsapp/session/ask", traceId, "chat_limit_consumed", {
+      sessionId: session.id,
+      userId: session.userId,
+      remainingWhatsappChatLimit,
+    });
+
     if (processInBackground) {
       logWhatsappApi("whatsapp/session/ask", traceId, "background_accepted", {
         sessionId: session.id,
         questionLength: String(question || "").length,
+        remainingWhatsappChatLimit,
       });
 
       // Optional async mode: acknowledge quickly and process in background.
@@ -974,6 +1015,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
       questionLength: String(question || "").length,
       fastMode: true,
       historyLimit: 8,
+      remainingWhatsappChatLimit,
     });
 
     // Delegate to the existing AI chat send endpoint logic.
