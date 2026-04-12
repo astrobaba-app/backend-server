@@ -1,7 +1,10 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
+const { randomUUID } = require("crypto");
+const AIChatSession = require("../../model/aiChat/aiChatSession");
 const User = require("../../model/user/userAuth");
+const { sendMessage } = require("../aiChat/aiChatController");
 const {
   validateWhatsappApiKey,
 } = require("../../services/whatsappAuthSettingsService");
@@ -69,6 +72,8 @@ const { generateFreeReportNarratives } = require("../../services/freeReportAiSer
 
 const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
+const DEFAULT_WHATSAPP_AI_ASTROLOGER_ID =
+  process.env.WHATSAPP_AI_ASTROLOGER_ID || "ai-astrologer-devansh";
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -194,6 +199,62 @@ const mapErrorStatus = (error, defaultStatus = 500) => {
   if (Number.isInteger(error.statusCode)) return error.statusCode;
   if (error instanceof DateTimeNormalizationError) return 400;
   return defaultStatus;
+};
+
+const createAiAstrologerSessionForKundli = async ({
+  sessionId,
+  userId,
+  kundliUserRequestId,
+  astrologerId,
+}) => {
+  const normalizedAstrologerId = normalizeText(astrologerId);
+
+  const session = await AIChatSession.create({
+    ...(sessionId ? { id: sessionId } : {}),
+    userId,
+    astrologerId: normalizedAstrologerId || DEFAULT_WHATSAPP_AI_ASTROLOGER_ID,
+    title: "New Chat",
+    isActive: true,
+    lastMessageAt: new Date(),
+    kundliUserRequestId,
+  });
+
+  return session.id;
+};
+
+const runWhatsappSessionQuestionInBackground = async ({
+  userId,
+  sessionId,
+  question,
+}) => {
+  const delegatedRequest = {
+    user: { id: userId },
+    params: { sessionId },
+    body: {
+      message: question,
+      fastMode: true,
+      historyLimit: 8,
+    },
+  };
+
+  const delegatedResponse = {
+    statusCode: 200,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      if (this.statusCode >= 400) {
+        console.error("Background WhatsApp session ask failed:", {
+          statusCode: this.statusCode,
+          payload,
+        });
+      }
+      return payload;
+    },
+  };
+
+  await sendMessage(delegatedRequest, delegatedResponse);
 };
 
 
@@ -359,6 +420,22 @@ const createKundli = async (req, res) => {
 
     // WhatsApp flow requests a compact payload for low-overhead integrations.
     if (req.responseFormat === "whatsapp-minimal") {
+      const sessionId = randomUUID();
+
+      // Create AI session in background so response is returned immediately.
+      setImmediate(async () => {
+        try {
+          await createAiAstrologerSessionForKundli({
+            sessionId,
+            userId,
+            kundliUserRequestId: userRequest.id,
+            astrologerId: req.aiAstrologerId,
+          });
+        } catch (sessionError) {
+          console.error("Create AI astrologer session error:", sessionError);
+        }
+      });
+
       return res.status(responseStatusCode).json({
         success: true,
         statusCode: responseStatusCode,
@@ -366,6 +443,7 @@ const createKundli = async (req, res) => {
         kundli: {
           id: kundli.id,
         },
+        sessionId,
       });
     }
 
@@ -527,8 +605,13 @@ const createKundliFromWhatsapp = async (req, res) => {
       longitude,
     };
 
+    const requestedAiAstrologerId = normalizeText(
+      requestBody.aiAstrologerId || requestBody.ai_astrologer_id || requestBody.astrologerId
+    );
+
     const delegatedRequest = {
       responseFormat: "whatsapp-minimal",
+      aiAstrologerId: requestedAiAstrologerId || null,
       user: { id: existingUser.id },
       body: {
         fullName: preparedKundliPayload.name,
@@ -548,6 +631,93 @@ const createKundliFromWhatsapp = async (req, res) => {
     return res.status(mapErrorStatus(error)).json({
       success: false,
       message: "Failed to create kundli from WhatsApp data",
+      error: error.message,
+    });
+  }
+};
+
+const askQuestionInWhatsappSession = async (req, res) => {
+  try {
+    const requestBody = req.body || {};
+    const providedApiKey = extractWhatsappApiKey(req);
+    const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
+
+    if (!apiKeyValidation.isValid) {
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
+    }
+
+    const sessionId = normalizeText(requestBody.sessionId || requestBody.session_id);
+    const question = normalizeText(
+      requestBody.question || requestBody.message || requestBody.user_question
+    );
+    const waitForReply =
+      requestBody.waitForReply === true || requestBody.wait_for_reply === true;
+    const runAsync =
+      requestBody.async === true || requestBody.background === true;
+    const processInBackground = runAsync && !waitForReply;
+
+    if (!sessionId || !question) {
+      return res.status(400).json({
+        success: false,
+        message: "sessionId and question are required",
+      });
+    }
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, isActive: true },
+      attributes: ["id", "userId"],
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    if (processInBackground) {
+      // Optional async mode: acknowledge quickly and process in background.
+      setImmediate(async () => {
+        try {
+          await runWhatsappSessionQuestionInBackground({
+            userId: session.userId,
+            sessionId: session.id,
+            question,
+          });
+        } catch (backgroundError) {
+          console.error("Background WhatsApp question processing error:", backgroundError);
+        }
+      });
+
+      return res.status(202).json({
+        success: true,
+        statusCode: 202,
+        sessionId: session.id,
+        message: "Question accepted and processing in background",
+      });
+    }
+
+    const delegatedRequest = {
+      user: { id: session.userId },
+      params: { sessionId: session.id },
+      body: {
+        message: question,
+        fastMode: true,
+        historyLimit: 8,
+      },
+    };
+
+    // Delegate to the existing AI chat send endpoint logic.
+    return sendMessage(delegatedRequest, res);
+  } catch (error) {
+    console.error("WhatsApp session ask error:", error);
+    return res.status(mapErrorStatus(error)).json({
+      success: false,
+      message: "Failed to send question in WhatsApp session",
       error: error.message,
     });
   }
@@ -936,6 +1106,7 @@ const getSharedKundli = async (req, res) => {
 module.exports = {
   createKundli,
   createKundliFromWhatsapp,
+  askQuestionInWhatsappSession,
   getKundli,
   getAllKundlis,
   deleteKundli,

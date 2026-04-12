@@ -39,12 +39,26 @@ const ASTROLOGER_PROFILES = {
 };
 
 // Generate astrologer-specific system prompt
-const getSystemPrompt = (astrologerId) => {
+const getSystemPrompt = (astrologerId, { concise = false } = {}) => {
   const profile = ASTROLOGER_PROFILES[astrologerId];
   const astrologerName = profile ? profile.name : "Astro AI";
   const expertise = profile ? profile.expertise : "all aspects of life";
   const style = profile ? profile.style : "accurate, compassionate, and insightful astrological guidance";
   const astrologerGender = profile?.gender || "unspecified";
+
+  if (concise) {
+    return `You are ${astrologerName}, an expert Vedic astrologer focused on ${expertise}. Your style is ${style}. Your gender identity is ${astrologerGender}.
+
+Rules:
+- Reply in the same language/style as user.
+- Stay strictly within astrology guidance.
+- Never fabricate user details.
+- Use available kundli/session context directly.
+- Keep answers concise (2-5 lines), practical, and warm.
+- Avoid fear-based or absolute claims.
+- If exact timing needs more details, ask briefly.
+- Output plain text only.`;
+  }
   
   return `You are ${astrologerName}, a highly experienced Vedic astrologer and spiritual guide on an astrology platform. You specialize in ${expertise}. Your style is ${style}. Your fixed gender identity is ${astrologerGender}. You are warm, intuitive, engaging, emotionally supportive, spiritually grounded, and practical in your guidance.
 
@@ -474,7 +488,17 @@ const sendMessage = async (req, res) => {
   try {
     const userId = req.user.id;
     const { sessionId } = req.params;
-    const { message } = req.body;
+    const requestBody = req.body || {};
+    const { message } = requestBody;
+    const fastMode = requestBody.fastMode === true || requestBody.fast_mode === true;
+    const requestedHistoryLimit = Number(
+      requestBody.historyLimit ?? requestBody.history_limit
+    );
+    const historyLimit = Number.isFinite(requestedHistoryLimit) && requestedHistoryLimit > 0
+      ? Math.min(Math.floor(requestedHistoryLimit), 20)
+      : fastMode
+        ? 8
+        : 20;
 
     if (!message || !message.trim()) {
       return res.status(400).json({
@@ -527,7 +551,7 @@ const sendMessage = async (req, res) => {
     const previousMessages = await AIChatMessage.findAll({
       where: { sessionId },
       order: [["createdAt", "DESC"]],
-      limit: 20, // Only last 20 messages
+      limit: historyLimit,
     });
 
     // Reverse to chronological order
@@ -536,23 +560,25 @@ const sendMessage = async (req, res) => {
     // Extract user info from conversation (DOB, name, time, place)
     // This way we don't need all messages - just key information
     let userContext = "";
-    const conversationText = previousMessages.map(m => m.content).join(" ");
-    
-    // Check for DOB pattern
-    const dobMatch = conversationText.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
-    // Check for time pattern
-    const timeMatch = conversationText.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?\b/);
-    // Check for place/city with stricter matching to avoid random capitalized words
-    const CITY_PATTERN = "(Mumbai|Delhi|Bangalore|Bengaluru|Chennai|Kolkata|Hyderabad|Pune|Ahmedabad|Jaipur|Lucknow)";
-    const placeMatch =
-      conversationText.match(new RegExp(`\\b(?:born in|birth place(?: is)?|from)\\s+${CITY_PATTERN}\\b`, "i")) ||
-      conversationText.match(new RegExp(`\\b${CITY_PATTERN}\\b`, "i"));
-    
-    if (dobMatch || timeMatch || placeMatch) {
-      userContext = "\n\nUSER INFO FROM CONVERSATION:";
-      if (dobMatch) userContext += `\n- Date of Birth: ${dobMatch[0]}`;
-      if (timeMatch) userContext += `\n- Birth Time: ${timeMatch[0]}`;
-      if (placeMatch) userContext += `\n- Birth Place: ${placeMatch[1]}`;
+    if (!fastMode) {
+      const conversationText = previousMessages.map((m) => m.content).join(" ");
+
+      // Check for DOB pattern
+      const dobMatch = conversationText.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
+      // Check for time pattern
+      const timeMatch = conversationText.match(/\b(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?\b/);
+      // Check for place/city with stricter matching to avoid random capitalized words
+      const CITY_PATTERN = "(Mumbai|Delhi|Bangalore|Bengaluru|Chennai|Kolkata|Hyderabad|Pune|Ahmedabad|Jaipur|Lucknow)";
+      const placeMatch =
+        conversationText.match(new RegExp(`\\b(?:born in|birth place(?: is)?|from)\\s+${CITY_PATTERN}\\b`, "i")) ||
+        conversationText.match(new RegExp(`\\b${CITY_PATTERN}\\b`, "i"));
+
+      if (dobMatch || timeMatch || placeMatch) {
+        userContext = "\n\nUSER INFO FROM CONVERSATION:";
+        if (dobMatch) userContext += `\n- Date of Birth: ${dobMatch[0]}`;
+        if (timeMatch) userContext += `\n- Birth Time: ${timeMatch[0]}`;
+        if (placeMatch) userContext += `\n- Birth Place: ${placeMatch[1]}`;
+      }
     }
 
     // Add current date and time context
@@ -566,7 +592,7 @@ const sendMessage = async (req, res) => {
 IMPORTANT: When user asks about "today", "now", "this year", "current", etc., use the above date and time for your response.`;
 
     // Get astrologer-specific system prompt
-    const systemPrompt = getSystemPrompt(session.astrologerId);
+    const systemPrompt = getSystemPrompt(session.astrologerId, { concise: fastMode });
 
     // Build messages array for OpenAI with optimized context
     const messages = [
@@ -584,16 +610,18 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
 
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
-      model: CHAT_MODEL,
+      model: fastMode
+        ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
+        : CHAT_MODEL,
       messages: messages,
-      max_tokens: 100,
-      temperature: 0.7,
+      max_tokens: fastMode ? 80 : 100,
+      temperature: fastMode ? 0.6 : 0.7,
     });
 
     let aiRawResponse = completion.choices[0].message.content || "";
     let tokensUsed = completion.usage?.total_tokens || 0;
 
-    if (completion.choices[0].finish_reason === "length") {
+    if (!fastMode && completion.choices[0].finish_reason === "length") {
       const repairCompletion = await openai.chat.completions.create({
         model: CHAT_MODEL,
         messages: buildCompletionRepairMessages(message.trim(), aiRawResponse),
