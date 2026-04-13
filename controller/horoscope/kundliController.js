@@ -74,6 +74,21 @@ const { generateFreeReportNarratives } = require("../../services/freeReportAiSer
 
 const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
+const UNKNOWN_WHATSAPP_TOB_DEFAULT = "00:00:00";
+const UNKNOWN_WHATSAPP_TOB_TOKENS = new Set([
+  "dont know",
+  "don't know",
+  "do not know",
+  "not sure",
+  "unknown",
+  "not known",
+  "no idea",
+  "dont remember",
+  "don't remember",
+  "na",
+  "n/a",
+  "none",
+]);
 const DEFAULT_WHATSAPP_AI_ASTROLOGER_ID =
   process.env.WHATSAPP_AI_ASTROLOGER_ID || "ai-astrologer-devansh";
 const WHATSAPP_FAST_FORMAT_MODEL =
@@ -148,6 +163,40 @@ const extractWhatsappApiKey = (req) => {
 const normalizeText = (value) =>
   typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 
+const isUnknownWhatsappTob = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return false;
+
+  if (UNKNOWN_WHATSAPP_TOB_TOKENS.has(normalized)) {
+    return true;
+  }
+
+  if (/\bdon'?t\s+know\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\bdo\s+not\s+know\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\bnot\s+sure\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
+
+const resolveWhatsappTob = ({ rawTob, aiTob }) => {
+  const normalizedRawTob = normalizeText(rawTob);
+  const normalizedAiTob = normalizeText(aiTob);
+
+  if (isUnknownWhatsappTob(normalizedRawTob) || isUnknownWhatsappTob(normalizedAiTob)) {
+    return UNKNOWN_WHATSAPP_TOB_DEFAULT;
+  }
+
+  return normalizedAiTob || normalizedRawTob;
+};
+
 const parseAiJsonContent = (content) => {
   const text = String(content || "").trim();
   if (!text) return null;
@@ -216,7 +265,7 @@ const formatWhatsappKundliInputWithOpenAI = async ({
         {
           role: "system",
           content:
-            "You normalize WhatsApp kundli fields. Return ONLY JSON with keys: gender, dob, tob, place_of_birth. Rules: gender must be male/female/other. dob must be YYYY-MM-DD. tob must be HH:mm:ss in 24-hour format. place_of_birth should be 'City, State' when possible, otherwise city. No extra keys.",
+            "You normalize WhatsApp kundli fields. Return ONLY JSON with keys: gender, dob, tob, place_of_birth. Rules: gender must be male/female/other. dob must be YYYY-MM-DD. tob must be HH:mm:ss in 24-hour format. If user_tob means unknown time (for example: don't know, not sure, unknown), set tob to 00:00:00. place_of_birth should be 'City, State' when possible, otherwise city. No extra keys.",
         },
         {
           role: "user",
@@ -266,7 +315,7 @@ const getFormattedWhatsappKundliInput = async ({
 
   const mergedGender = normalizeGenderForKundli(aiFormatted?.gender || rawGender);
   const mergedDob = normalizeText(aiFormatted?.dob || rawDob);
-  const mergedTob = normalizeText(aiFormatted?.tob || rawTob);
+  const mergedTob = resolveWhatsappTob({ rawTob, aiTob: aiFormatted?.tob });
   const mergedPlace = normalizeText(aiFormatted?.place_of_birth || rawPob);
 
   const normalized = normalizeDobAndTob({ dob: mergedDob, tob: mergedTob });
