@@ -4,6 +4,7 @@ const User = require("../../model/user/userAuth");
 const BroadcastLog = require("../../model/admin/broadcastLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { literal } = require("sequelize");
 const {
   sendAstrologerApprovalEmail,
   sendAstrologerRejectionEmail,
@@ -406,6 +407,67 @@ const updateUserWhatsappChatLimit = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update WhatsApp chat limit",
+      error: error.message,
+    });
+  }
+};
+
+const updateAllUsersWhatsappChatLimit = async (req, res) => {
+  try {
+    const parsedLimit = Number(req.body?.whatsappChatLimit);
+    const operation = req.body?.operation ?? "set";
+
+    if (!Number.isInteger(parsedLimit) || parsedLimit < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "whatsappChatLimit must be a non-negative integer",
+      });
+    }
+
+    if (operation !== "set" && operation !== "add") {
+      return res.status(400).json({
+        success: false,
+        message: "operation must be either 'set' or 'add'",
+      });
+    }
+
+    let updatedCount = 0;
+
+    if (operation === "add") {
+      const [count] = await User.update(
+        {
+          whatsappChatLimit: literal(
+            `COALESCE("whatsappChatLimit", 0) + ${parsedLimit}`
+          ),
+        },
+        { where: {} }
+      );
+      updatedCount = count;
+    } else {
+      const [count] = await User.update(
+        { whatsappChatLimit: parsedLimit },
+        { where: {} }
+      );
+      updatedCount = count;
+    }
+
+    const actionMessage =
+      operation === "add"
+        ? `WhatsApp chat limit increased by ${parsedLimit} for ${updatedCount} users`
+        : `WhatsApp chat limit updated for ${updatedCount} users`;
+
+    return res.status(200).json({
+      success: true,
+      message: actionMessage,
+      whatsappChatLimit: parsedLimit,
+      operation,
+      updatedCount,
+    });
+  } catch (error) {
+    console.error("Update all users WhatsApp chat limit error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update WhatsApp chat limit for all users",
       error: error.message,
     });
   }
@@ -1059,6 +1121,7 @@ module.exports = {
   changeAdminRole,
   getAllUsers,
   updateUserWhatsappChatLimit,
+  updateAllUsersWhatsappChatLimit,
   getAllAstrologers,
   getPendingAstrologers,
   approveAstrologer,
