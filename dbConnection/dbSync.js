@@ -72,6 +72,10 @@ const ProductReview = require("../model/store/productReview");
 const SupportTicket = require("../model/support/supportTicket");
 const TicketReply = require("../model/support/ticketReply");
 
+// Job models
+const Job = require("../model/job/job");
+const JobApplication = require("../model/job/jobApplication");
+
 // User models
 const User = require("../model/user/userAuth");
 const UserRequest = require("../model/user/userRequest");
@@ -779,6 +783,40 @@ async function ensureAstrologerEarningColumns() {
   }
 }
 
+async function ensureJobApplicationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("job_applications");
+    const operations = [];
+
+    if (!table.linkedInUrl && !table.linked_in_url) {
+      operations.push(
+        queryInterface.addColumn("job_applications", "linkedInUrl", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.portfolioUrl && !table.portfolio_url) {
+      operations.push(
+        queryInterface.addColumn("job_applications", "portfolioUrl", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured job_applications profile link columns exist");
+    }
+  } catch (error) {
+    console.log("job_applications table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -798,6 +836,7 @@ const initDB = (callback) => {
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
+    .then(() => ensureJobApplicationColumns())
     .then(() => {
       console.log("All models synced");
       callback();

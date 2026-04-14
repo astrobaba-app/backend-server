@@ -42,6 +42,8 @@ const ForumComment = require("../forum/forumComment");
 const ForumPostLike = require("../forum/forumPostLike");
 const ForumPostReport = require("../forum/forumPostReport");
 const ForumPostAppeal = require("../forum/forumPostAppeal");
+const Job = require("../job/job");
+const JobApplication = require("../job/jobApplication");
 
 
   // User has many UserRequests
@@ -410,6 +412,18 @@ const ForumPostAppeal = require("../forum/forumPostAppeal");
   ForumPost.belongsTo(Admin, {
     foreignKey: "moderatedByAdminId",
     as: "moderatedBy",
+  });
+
+  // Job application associations
+  Job.hasMany(JobApplication, {
+    foreignKey: "jobId",
+    as: "applications",
+    onDelete: "CASCADE",
+  });
+
+  JobApplication.belongsTo(Job, {
+    foreignKey: "jobId",
+    as: "job",
   });
 
   User.hasMany(ForumComment, {

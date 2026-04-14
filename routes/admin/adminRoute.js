@@ -47,6 +47,14 @@ const {
   updateForumReportStatus,
   updateForumUserRestriction,
 } = require("../../controller/admin/adminForumController");
+const {
+  createJob,
+  getAdminJobs,
+  updateJobStatus,
+  getAdminJobApplications,
+  getAdminJobApplicationById,
+  getAdminJobApplicationResume,
+} = require("../../controller/job/jobController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
@@ -275,6 +283,49 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   rejectPayoutRequest
+);
+
+// Jobs management routes
+router.post(
+  "/jobs",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  createJob
+);
+
+router.get(
+  "/jobs",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminJobs
+);
+
+router.patch(
+  "/jobs/:jobId/status",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateJobStatus
+);
+
+router.get(
+  "/job-applications",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminJobApplications
+);
+
+router.get(
+  "/job-applications/:applicationId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminJobApplicationById
+);
+
+router.get(
+  "/job-applications/:applicationId/resume",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminJobApplicationResume
 );
 
 module.exports = router;
