@@ -9,6 +9,7 @@ const {
   clearChatSession,
   attachKundliToSession,
   greetSession,
+  getAutoFollowUpQuestion,
 } = require("../../controller/aiChat/aiChatController");
 const {
   createVoiceSession,
@@ -25,6 +26,7 @@ router.delete("/session/:sessionId", checkForAuthenticationCookie(), deleteChatS
 router.delete("/session/:sessionId/clear", checkForAuthenticationCookie(), clearChatSession);
 router.put("/session/:sessionId/attach-kundli", checkForAuthenticationCookie(), attachKundliToSession);
 router.post("/session/:sessionId/greet", checkForAuthenticationCookie(), greetSession);
+router.post("/session/:sessionId/follow-up-question", checkForAuthenticationCookie(), getAutoFollowUpQuestion);
 
 // Voice call routes
 router.post("/voice/session", checkForAuthenticationCookie(), createVoiceSession);

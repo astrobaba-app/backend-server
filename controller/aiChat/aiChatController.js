@@ -498,6 +498,173 @@ const buildCompletionRepairMessages = (
   },
 ];
 
+const normalizeFollowUpQuestionLine = (question) => {
+  const plain = sanitizeAssistantResponse(String(question || ""))
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[-*•\d\.)\s]+/, "")
+    .replace(/^["'`]+|["'`]+$/g, "");
+
+  if (!plain) return "";
+
+  let normalized = plain.replace(/[.!]+$/, "").trim();
+  if (!normalized) return "";
+
+  if (!/[?]$/.test(normalized)) {
+    normalized = `${normalized}?`;
+  }
+
+  if (normalized.length > 70) {
+    const truncated = normalized.slice(0, 69).trimEnd().replace(/[.!?]+$/, "");
+    normalized = `${truncated}?`;
+  }
+
+  return normalized;
+};
+
+const extractFollowUpQuestionsFromText = (text) => {
+  const source = String(text || "").trim();
+  if (!source) return [];
+
+  const lines = source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const expandedLines =
+    lines.length > 1
+      ? lines
+      : source
+          .split("?")
+          .map((chunk) => chunk.trim())
+          .filter(Boolean)
+          .map((chunk) => `${chunk}?`);
+
+  const unique = [];
+  const seen = new Set();
+
+  expandedLines.forEach((line) => {
+    const normalized = normalizeFollowUpQuestionLine(line);
+    if (!normalized) return;
+
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    unique.push(normalized);
+  });
+
+  return unique;
+};
+
+const FOLLOW_UP_QUESTION_MAX_RESULTS = 6;
+const FOLLOW_UP_QUESTION_GENERATION_ATTEMPTS = 2;
+
+const collectRecentAssistantQuestions = (messages, maxCount = 8) => {
+  const unique = [];
+  const seen = new Set();
+
+  for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+    const message = messages[idx];
+    if (message.role !== "assistant") continue;
+
+    const candidates = extractFollowUpQuestionsFromText(message.content || "");
+    for (const question of candidates) {
+      const key = question.toLowerCase();
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      unique.push(question);
+
+      if (unique.length >= maxCount) {
+        return unique;
+      }
+    }
+  }
+
+  return unique;
+};
+
+const generateFollowUpQuestions = async ({
+  astrologerId,
+  userQuestion,
+  aiAnswer,
+  hasKundli,
+  kundliContextStr,
+  count = 1,
+  avoidQuestions = [],
+}) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || null;
+  const astrologerName = profile?.name || "Astrologer";
+  const kundliHint = hasKundli
+    ? "Kundli context is available. At least one question should connect with kundli or timing."
+    : "Kundli context is not available. Ask clarifying life-context questions.";
+  const requestedCount = Math.max(
+    1,
+    Math.min(Math.floor(Number(count) || 1), FOLLOW_UP_QUESTION_MAX_RESULTS)
+  );
+
+  const normalizedAvoidQuestions = Array.from(
+    new Set(
+      (avoidQuestions || [])
+        .map((question) => normalizeFollowUpQuestionLine(question))
+        .filter(Boolean)
+        .map((question) => question.toLowerCase())
+    )
+  ).slice(0, 8);
+
+  const avoidInstruction = normalizedAvoidQuestions.length
+    ? `Avoid repeating these recent assistant questions:\n${normalizedAvoidQuestions
+        .map((question, index) => `${index + 1}. ${question}`)
+        .join("\n")}`
+    : "Avoid repeating the exact same tone as your immediate previous follow-up.";
+
+  let bestResult = [];
+
+  for (let attempt = 0; attempt < FOLLOW_UP_QUESTION_GENERATION_ATTEMPTS; attempt += 1) {
+    try {
+      const completion = await openai.chat.completions.create({
+        model: process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL,
+        messages: [
+          {
+            role: "system",
+            content: `You are ${astrologerName}. Create follow-up questions for an astrology chat.\nRules:\n- Return exactly ${requestedCount} very short one-line questions.\n- Match the language style used by the user and assistant (Hindi/Hinglish/English).\n- Questions must be directly related to the user's last question and the assistant's answer.\n- Keep each question under 70 characters and under 10 words when possible.\n- Do not mention that you are AI.\n- End each line with '?'.\n- Output only ${requestedCount} lines, no bullets or numbering.\n- ${avoidInstruction}`,
+          },
+          {
+            role: "user",
+            content:
+              `User question: ${userQuestion}\n` +
+              `Assistant answer: ${aiAnswer}\n` +
+              `${kundliHint}` +
+              (hasKundli && kundliContextStr
+                ? `\nKundli context:\n${kundliContextStr.slice(0, 800)}`
+                : ""),
+          },
+        ],
+        max_tokens: 180,
+        temperature: 0.75 + attempt * 0.1,
+      });
+
+      const raw = completion.choices?.[0]?.message?.content || "";
+      const parsed = extractFollowUpQuestionsFromText(raw).filter(
+        (question) => !normalizedAvoidQuestions.includes(question.toLowerCase())
+      );
+
+      if (parsed.length > bestResult.length) {
+        bestResult = parsed;
+      }
+
+      if (parsed.length >= requestedCount) {
+        return parsed.slice(0, requestedCount);
+      }
+    } catch (error) {
+      console.error("Generate follow-up questions error:", error?.message || error);
+    }
+  }
+
+  return bestResult.slice(0, requestedCount);
+};
+
 // ============= USER ROUTES =============
 
 /**
@@ -742,6 +909,126 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     res.status(500).json({
       success: false,
       message: "Failed to send message",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Generate one dynamic AI follow-up question for idle conversations.
+ * This endpoint always asks OpenAI in real-time so tone and phrasing stay fresh.
+ */
+const getAutoFollowUpQuestion = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    const previousMessages = await AIChatMessage.findAll({
+      where: { sessionId },
+      order: [["createdAt", "ASC"]],
+      limit: 40,
+    });
+
+    if (!previousMessages.length) {
+      return res.status(200).json({
+        success: true,
+        followUpQuestion: null,
+        followUpMessage: null,
+      });
+    }
+
+    const reversedMessages = [...previousMessages].reverse();
+    const lastUserMessage = reversedMessages.find((message) => message.role === "user");
+    const lastAssistantMessage = reversedMessages.find(
+      (message) => message.role === "assistant"
+    );
+
+    if (!lastUserMessage || !lastAssistantMessage) {
+      return res.status(200).json({
+        success: true,
+        followUpQuestion: null,
+        followUpMessage: null,
+      });
+    }
+
+    let kundliContextStr = "";
+    if (session.kundliUserRequestId) {
+      try {
+        const [kundliRecord, userRequestRecord] = await Promise.all([
+          Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
+          UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
+        ]);
+
+        if (kundliRecord && userRequestRecord) {
+          kundliContextStr = extractKundliContext(
+            kundliRecord.toJSON(),
+            userRequestRecord.toJSON()
+          );
+        }
+      } catch (kundliErr) {
+        console.error(
+          "Failed to load Kundli context for follow-up generation:",
+          kundliErr.message
+        );
+      }
+    }
+
+    const avoidQuestions = collectRecentAssistantQuestions(previousMessages, 8);
+    const generatedQuestions = await generateFollowUpQuestions({
+      astrologerId: session.astrologerId,
+      userQuestion: lastUserMessage.content,
+      aiAnswer: lastAssistantMessage.content,
+      hasKundli: Boolean(kundliContextStr),
+      kundliContextStr,
+      count: 1,
+      avoidQuestions,
+    });
+
+    const followUpQuestion = generatedQuestions[0] || null;
+    if (!followUpQuestion) {
+      return res.status(200).json({
+        success: true,
+        followUpQuestion: null,
+        followUpMessage: null,
+      });
+    }
+
+    const followUpMessage = await AIChatMessage.create({
+      sessionId,
+      role: "assistant",
+      content: followUpQuestion,
+    });
+
+    await session.update({ lastMessageAt: new Date() });
+
+    return res.status(200).json({
+      success: true,
+      followUpQuestion: followUpMessage.content,
+      followUpMessage: {
+        id: followUpMessage.id,
+        sessionId: followUpMessage.sessionId,
+        role: followUpMessage.role,
+        content: followUpMessage.content,
+        createdAt: followUpMessage.createdAt,
+        updatedAt: followUpMessage.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Get auto follow-up question error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate follow-up question",
       error: error.message,
     });
   }
@@ -1111,4 +1398,5 @@ module.exports = {
   clearChatSession,
   attachKundliToSession,
   greetSession,
+  getAutoFollowUpQuestion,
 };
