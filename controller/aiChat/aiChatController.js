@@ -399,7 +399,14 @@ IMPORTANT KUNDLI INSTRUCTIONS:
  */
 const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) => {
   const profile = ASTROLOGER_PROFILES[astrologerId] || null;
-  const astrologerName = profile ? profile.name : "Aapka AI Astrologer";
+  const astrologerGender = profile?.gender === "female" ? "female" : "male";
+  const possessivePronoun = astrologerGender === "female" ? "aapki" : "aapka";
+  const helpingVerb = astrologerGender === "female" ? "kar sakti hun" : "kar sakta hun";
+  const astrologerName = profile
+    ? profile.name
+    : astrologerGender === "female"
+    ? "Aapki Astrologer"
+    : "Aapka Astrologer";
 
   // Derive a friendly first name for the user
   const firstName = userName
@@ -410,10 +417,10 @@ const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) =>
     const kundliName = userRequest.fullName
       ? userRequest.fullName.trim().split(/\s+/)[0]
       : firstName;
-    return `Namaste ${firstName}!  Main ${astrologerName} hun, aapka AI astrologer. Maine ${kundliName} ki kundli dekh li hai. Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Main yahan hun aapke liye! `;
+    return `Namaste ${firstName}!  Main ${astrologerName} hun, ${possessivePronoun} astrologer. Maine ${kundliName} ki kundli dekh li hai. Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Main yahan hun aapke liye! `;
   }
 
-  return `Namaste ${firstName}!  Main ${astrologerName} hun, aapka AI astrologer. Aaj main aapki kya madad kar sakta hun? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
+  return `Namaste ${firstName}!  Main ${astrologerName} hun, ${possessivePronoun} astrologer. Aaj main aapki kya madad ${helpingVerb}? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
 };
 
 /**
