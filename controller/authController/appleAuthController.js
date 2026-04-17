@@ -13,6 +13,52 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 
+const normalizeSource = (value) => {
+  if (Array.isArray(value)) {
+    return value.some((item) => String(item).toLowerCase() === "app") ? "app" : "web";
+  }
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "app" ? "app" : "web";
+  }
+
+  return "web";
+};
+
+const encodeOAuthState = (payload) => {
+  try {
+    return Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+  } catch {
+    return "";
+  }
+};
+
+const decodeOAuthState = (stateValue) => {
+  if (!stateValue) {
+    return null;
+  }
+
+  const rawState = String(stateValue).trim();
+  const decodeAttempts = [
+    () => Buffer.from(rawState, "base64url").toString("utf-8"),
+    () => Buffer.from(rawState.replace(/ /g, "+"), "base64").toString("utf-8"),
+  ];
+
+  for (const attempt of decodeAttempts) {
+    try {
+      const decoded = attempt();
+      const parsed = JSON.parse(decoded);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // Try next decoder format.
+    }
+  }
+
+  return null;
+};
+
 const APPLE_TEAM_ID = process.env.APPLE_TEAM_ID;
 const APPLE_CLIENT_ID = process.env.APPLE_CLIENT_ID;   // Services ID (e.g. com.graho.web)
 const APPLE_KEY_ID = process.env.APPLE_KEY_ID;
@@ -48,8 +94,8 @@ const redirectToApple = (req, res) => {
     return res.status(500).json({ message: "Apple Sign In not configured properly" });
   }
 
-  const source = req.query.source || "web";
-  const state = Buffer.from(JSON.stringify({ source })).toString("base64");
+  const source = normalizeSource(req.query.source);
+  const state = encodeOAuthState({ source });
 
   const params = new URLSearchParams({
     client_id: APPLE_CLIENT_ID,
@@ -87,8 +133,8 @@ const appleCallback = async (req, res) => {
   let source = "web";
   try {
     if (state) {
-      const decoded = JSON.parse(Buffer.from(state, "base64").toString("utf-8"));
-      source = decoded.source || "web";
+      const decoded = decodeOAuthState(state);
+      source = normalizeSource(decoded?.source);
     }
   } catch (err) {
     console.error("Error decoding Apple state:", err);

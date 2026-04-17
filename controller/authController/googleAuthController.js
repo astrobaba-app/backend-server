@@ -18,6 +18,52 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 
+const normalizeSource = (value) => {
+  if (Array.isArray(value)) {
+    return value.some((item) => String(item).toLowerCase() === "app") ? "app" : "web";
+  }
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "app" ? "app" : "web";
+  }
+
+  return "web";
+};
+
+const encodeOAuthState = (payload) => {
+  try {
+    return Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+  } catch {
+    return "";
+  }
+};
+
+const decodeOAuthState = (stateValue) => {
+  if (!stateValue) {
+    return null;
+  }
+
+  const rawState = String(stateValue).trim();
+  const decodeAttempts = [
+    () => Buffer.from(rawState, "base64url").toString("utf-8"),
+    () => Buffer.from(rawState.replace(/ /g, "+"), "base64").toString("utf-8"),
+  ];
+
+  for (const attempt of decodeAttempts) {
+    try {
+      const decoded = attempt();
+      const parsed = JSON.parse(decoded);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    } catch {
+      // Try next decoder format.
+    }
+  }
+
+  return null;
+};
+
 const redirectToGoogle = (req, res) => {
   // Validate environment variables
   if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
@@ -30,10 +76,10 @@ const redirectToGoogle = (req, res) => {
   }
 
   // Capture the source (app or web) from query parameter, default to 'web'
-  const source = req.query.source || 'web';
+  const source = normalizeSource(req.query.source);
   
   // Use state parameter to preserve source through OAuth flow
-  const state = Buffer.from(JSON.stringify({ source })).toString('base64');
+  const state = encodeOAuthState({ source });
 
   const googleAuthURL =
     `https://accounts.google.com/o/oauth2/v2/auth?` +
@@ -59,8 +105,8 @@ const googleCallback = async (req, res) => {
   let source = 'web';
   try {
     if (state) {
-      const decoded = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
-      source = decoded.source || 'web';
+      const decoded = decodeOAuthState(state);
+      source = normalizeSource(decoded?.source);
     }
   } catch (error) {
     console.error('Error decoding state parameter:', error);
