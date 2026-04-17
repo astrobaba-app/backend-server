@@ -9,7 +9,13 @@ const {
   sendAstrologerApprovalEmail,
   sendAstrologerRejectionEmail,
 } = require("../../emailService/adminApproval");
-const { createMiddlewareToken, createToken } = require("../../services/authService");
+const {
+  createMiddlewareToken,
+  createToken,
+  createRefreshToken,
+  validateRefreshToken,
+  resolveActorType,
+} = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const notificationService = require("../../services/notificationService");
@@ -132,8 +138,9 @@ const login = async (req, res) => {
     
     const token = createToken(admin);
     const middlewareToken = createMiddlewareToken(admin);
+    const refreshToken = createRefreshToken(admin);
 
-    setTokenCookie(res, token, middlewareToken);
+    setTokenCookie(res, token, middlewareToken, refreshToken);
 
     res.status(200).json({
       success: true,
@@ -218,8 +225,9 @@ const verify2FALogin = async (req, res) => {
     
     const token = createToken(admin);
     const middlewareToken = createMiddlewareToken(admin);
+    const refreshToken = createRefreshToken(admin);
 
-    setTokenCookie(res, token, middlewareToken);
+    setTokenCookie(res, token, middlewareToken, refreshToken);
 
     res.status(200).json({
       success: true,
@@ -632,6 +640,65 @@ const rejectAstrologer = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to reject astrologer",
+      error: error.message,
+    });
+  }
+};
+
+const refreshAccessToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token not found",
+      });
+    }
+
+    const refreshPayload = validateRefreshToken(refreshToken);
+    if (!refreshPayload || resolveActorType(refreshPayload) !== "admin") {
+      clearTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
+
+    const admin = await Admin.findByPk(refreshPayload.id);
+    if (!admin) {
+      clearTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
+    if (!admin.isActive || !admin.isApproved) {
+      clearTokenCookie(res);
+      return res.status(403).json({
+        success: false,
+        message: "Admin account is not active",
+      });
+    }
+
+    const token = createToken(admin);
+    const middlewareToken = createMiddlewareToken(admin);
+    const nextRefreshToken = createRefreshToken(admin);
+
+    setTokenCookie(res, token, middlewareToken, nextRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: "Token refreshed successfully",
+      token,
+      middlewareToken,
+    });
+  } catch (error) {
+    console.error("Admin refresh token error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to refresh token",
       error: error.message,
     });
   }
@@ -1117,6 +1184,7 @@ module.exports = {
   register,
   login,
   verify2FALogin,
+  refreshAccessToken,
   getAllAdmins,
   changeAdminRole,
   getAllUsers,

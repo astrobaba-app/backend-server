@@ -1,6 +1,12 @@
 const User = require("../../model/user/userAuth");
 const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
-const { createToken, createMiddlewareToken } = require("../../services/authService");
+const {
+  createToken,
+  createMiddlewareToken,
+  createRefreshToken,
+  validateRefreshToken,
+  resolveActorType,
+} = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const redis = require("../../config/redis/redis");
@@ -175,8 +181,9 @@ const verifyOtp = async (req, res) => {
     // Generate tokens and set cookies
     const token = createToken(user);
     const middlewareToken = createMiddlewareToken(user);
+    const refreshToken = createRefreshToken(user);
 
-    setTokenCookie(res, token, middlewareToken);
+    setTokenCookie(res, token, middlewareToken, refreshToken);
 
     // Apply signup bonus for new users
     let bonusInfo = null;
@@ -385,6 +392,58 @@ const whatsappRegisterOrCheck = async (req, res) => {
 };
 
 
+const refreshAccessToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token not found",
+      });
+    }
+
+    const refreshPayload = validateRefreshToken(refreshToken);
+    if (!refreshPayload || resolveActorType(refreshPayload) !== "user") {
+      clearTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
+
+    const user = await User.findByPk(refreshPayload.id);
+    if (!user) {
+      clearTokenCookie(res);
+      return res.status(401).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const token = createToken(user);
+    const middlewareToken = createMiddlewareToken(user);
+    const nextRefreshToken = createRefreshToken(user);
+
+    setTokenCookie(res, token, middlewareToken, nextRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: "Token refreshed successfully",
+      token,
+      middlewareToken,
+    });
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to refresh token",
+      error: error.message,
+    });
+  }
+};
+
+
 const logout = async (req, res) => {
   try {
     clearTokenCookie(res);
@@ -407,5 +466,6 @@ module.exports = {
   generateOtp,
   verifyOtp,
   whatsappRegisterOrCheck,
+  refreshAccessToken,
   logout,
 };

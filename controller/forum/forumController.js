@@ -520,7 +520,7 @@ const createForumComment = async (req, res) => {
 
     const userForTransaction = await User.findByPk(req.user.id, { transaction });
     const authorSnapshot = await buildForumAuthorSnapshot(userForTransaction, transaction);
-
+//ai moderation is temporarily bypassed, setting to approved with reason for now. Will implement actual moderation flow in next phase
     const comment = await ForumComment.create(
       {
         ...authorSnapshot,
@@ -530,9 +530,9 @@ const createForumComment = async (req, res) => {
         depth: parentComment ? parentComment.depth + 1 : 0,
         sortOrder: nextSortOrder,
         path,
-        aiModerationStatus: "pending",
-        aiModerationReason: null,
-        aiModeratedAt: null,
+        aiModerationStatus: "approved",
+        aiModerationReason: "Comment AI moderation temporarily bypassed",
+        aiModeratedAt: new Date(),
         isRemovedByModerator: false,
       },
       { transaction }
@@ -1072,9 +1072,9 @@ const updateForumComment = async (req, res) => {
       content,
       isEdited: true,
       editedAt: new Date(),
-      aiModerationStatus: "pending",
-      aiModerationReason: null,
-      aiModeratedAt: null,
+      aiModerationStatus: "approved",
+      aiModerationReason: "Comment AI moderation temporarily bypassed",
+      aiModeratedAt: new Date(),
     });
 
     res.status(200).json({

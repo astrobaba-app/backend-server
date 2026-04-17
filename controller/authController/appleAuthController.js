@@ -5,7 +5,11 @@ const qs = require("querystring");
 
 const User = require("../../model/user/userAuth");
 const AppleAuth = require("../../model/user/appleAuth");
-const { createToken, createMiddlewareToken } = require("../../services/authService");
+const {
+  createToken,
+  createMiddlewareToken,
+  createRefreshToken,
+} = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 
@@ -163,7 +167,8 @@ const appleCallback = async (req, res) => {
     // ── 4. Issue tokens & set cookie ─────────────────────────────────────────
     const token = createToken(user);
     const middlewareToken = createMiddlewareToken(user);
-    setTokenCookie(res, token, middlewareToken);
+    const refreshToken = createRefreshToken(user);
+    setTokenCookie(res, token, middlewareToken, refreshToken);
 
     // ── 5. Signup bonus for new users ────────────────────────────────────────
     if (isNewUser) {
@@ -177,7 +182,9 @@ const appleCallback = async (req, res) => {
     // ── 6. Redirect ──────────────────────────────────────────────────────────
     if (source === "app") {
       return res.redirect(
-        `graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(middlewareToken)}`
+        `graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(
+          middlewareToken
+        )}&refreshToken=${encodeURIComponent(refreshToken)}`
       );
     }
 

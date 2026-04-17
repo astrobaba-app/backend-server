@@ -5,7 +5,13 @@ const crypto = require("crypto");
 const redis = require("../../config/redis/redis");
 const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
 const { sendAstrologerPasswordResetOTPEmail } = require("../../emailService/authEmail");
-const { createToken, createMiddlewareToken } = require("../../services/authService");
+const {
+  createToken,
+  createMiddlewareToken,
+  createRefreshToken,
+  validateRefreshToken,
+  resolveActorType,
+} = require("../../services/authService");
 const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
 const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
 const Follow = require("../../model/follow/follow");
@@ -356,8 +362,9 @@ const login = async (req, res) => {
     const authPayload = { id: astrologer.id, role: "astrologer" };
     const token = createToken(authPayload);
     const astrologerToken = createMiddlewareToken(authPayload);
+    const refreshToken = createRefreshToken(authPayload);
   
-    setTokenCookieAstrologer(res, token, astrologerToken);
+    setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
 
 
     res.status(200).json({
@@ -551,6 +558,66 @@ const updateProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update profile",
+      error: error.message,
+    });
+  }
+};
+
+const refreshAccessToken = async (req, res) => {
+  try {
+    const refreshToken = req.cookies?.refresh_token;
+
+    if (!refreshToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh token not found",
+      });
+    }
+
+    const refreshPayload = validateRefreshToken(refreshToken);
+    if (!refreshPayload || resolveActorType(refreshPayload) !== "astrologer") {
+      clearTokenCookieAstrologer(res);
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
+
+    const astrologer = await Astrologer.findByPk(refreshPayload.id);
+    if (!astrologer) {
+      clearTokenCookieAstrologer(res);
+      return res.status(401).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    if (!astrologer.isApproved || !astrologer.isActive) {
+      clearTokenCookieAstrologer(res);
+      return res.status(403).json({
+        success: false,
+        message: "Astrologer account is not active",
+      });
+    }
+
+    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const token = createToken(authPayload);
+    const astrologerToken = createMiddlewareToken(authPayload);
+    const nextRefreshToken = createRefreshToken(authPayload);
+
+    setTokenCookieAstrologer(res, token, astrologerToken, nextRefreshToken);
+
+    return res.status(200).json({
+      success: true,
+      message: "Token refreshed successfully",
+      token,
+      astrologerToken,
+    });
+  } catch (error) {
+    console.error("Astrologer refresh token error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to refresh token",
       error: error.message,
     });
   }
@@ -1003,6 +1070,7 @@ module.exports = {
   verifyOTP,
   completeRegistration,
   login,
+  refreshAccessToken,
   getProfile,
   updateProfile,
   logout,

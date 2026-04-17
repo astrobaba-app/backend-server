@@ -5,6 +5,7 @@ const {
   verifyOTP,
   completeRegistration,
   login,
+  refreshAccessToken,
   sendForgotPasswordOTP,
   verifyForgotPasswordOTP,
   resetForgotPassword,
@@ -24,6 +25,7 @@ router.post("/send-otp", sendRegistrationOTP);
 router.post("/verify-otp", verifyOTP);
 router.post("/register", upload.single("photo"), completeRegistration);
 router.post("/login", login);
+router.post("/refresh-token", refreshAccessToken);
 router.post("/forgot-password/send-otp", sendForgotPasswordOTP);
 router.post("/forgot-password/verify-otp", verifyForgotPasswordOTP);
 router.post("/forgot-password/reset", resetForgotPassword);
@@ -31,7 +33,7 @@ router.post("/forgot-password/reset", resetForgotPassword);
 // Protected routes
 router.get("/profile",checkForAuthenticationCookie(), getProfile);
 router.put("/profile",  checkForAuthenticationCookie(), upload.single("photo"), updateProfile);
-router.post("/logout",  checkForAuthenticationCookie(),logout);
+router.post("/logout", logout);
 
 // Availability routes
 router.post("/toggle-status",  checkForAuthenticationCookie(), toggleOnlineStatus);

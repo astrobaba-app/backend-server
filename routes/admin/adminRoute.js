@@ -4,6 +4,7 @@ const {
   register,
   login,
   verify2FALogin,
+  refreshAccessToken,
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
@@ -61,6 +62,7 @@ const { authorizeRoles } = require("../../middleware/roleMiddleware");
 router.post("/register", register);
 router.post("/login", login);
 router.post("/verify-2fa-login", verify2FALogin);
+router.post("/refresh-token", refreshAccessToken);
 
 router.post("/logout", logout);
 

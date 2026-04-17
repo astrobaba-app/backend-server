@@ -10,7 +10,11 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const qs = require("querystring");
 const User = require("../../model/user/userAuth");
 const GoogleAuth = require("../../model/user/googleAuth");
-const { createToken, createMiddlewareToken } = require("../../services/authService");
+const {
+  createToken,
+  createMiddlewareToken,
+  createRefreshToken,
+} = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 
@@ -165,8 +169,9 @@ const googleCallback = async (req, res) => {
 
     const token = createToken(user);
     const middlewareToken = createMiddlewareToken(user);
+    const refreshToken = createRefreshToken(user);
 
-    setTokenCookie(res, token, middlewareToken);
+    setTokenCookie(res, token, middlewareToken, refreshToken);
 
     // Apply signup bonus for new users
     if (isNewUser) {
@@ -184,7 +189,11 @@ const googleCallback = async (req, res) => {
     if (source === 'app') {
       // Redirect to app deep link
       console.log('Redirecting to app deep link');
-      res.redirect(`graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(middlewareToken)}`);
+      res.redirect(
+        `graho://auth/callback?token=${encodeURIComponent(token)}&middlewareToken=${encodeURIComponent(
+          middlewareToken
+        )}&refreshToken=${encodeURIComponent(refreshToken)}`
+      );
     } else {
       // Redirect to login-success page for all web users (mobile and desktop browsers)
       console.log('Redirecting to web login-success page');

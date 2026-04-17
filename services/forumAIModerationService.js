@@ -58,6 +58,22 @@ const HIGH_SEVERITY_REASON_KEYWORDS = [
   "bully",
 ];
 
+const NSFW_REASON_KEYWORDS = [
+  "nsfw",
+  "nfw",
+  "porn",
+  "porno",
+  "nude",
+  "nudity",
+  "sexual",
+  "sexually explicit",
+  "explicit sexual",
+  "adult content",
+  "xxx",
+  "erotic",
+  "obscene",
+];
+
 let openaiClient = null;
 let moderationTimer = null;
 let running = false;
@@ -130,6 +146,27 @@ const isLikelyRelevanceRejection = (reason = "") => {
   );
 };
 
+const isNsfwOrPornReason = (reason = "") => {
+  const normalized = String(reason || "").toLowerCase();
+  return NSFW_REASON_KEYWORDS.some((keyword) => normalized.includes(keyword));
+};
+
+const enforceNsfwOnlyPolicy = (moderation, approveReason) => {
+  if (!moderation || moderation.decision !== "reject") {
+    return moderation;
+  }
+
+  if (isNsfwOrPornReason(moderation.reason)) {
+    return moderation;
+  }
+
+  return {
+    decision: "approve",
+    reason: approveReason,
+    severity: "low",
+  };
+};
+
 const getPenaltyLevel = (moderation) => {
   if (moderation.severity === "high" || isHighSeverityReason(moderation.reason)) {
     return "block";
@@ -157,20 +194,18 @@ const moderateImagesWithAI = async ({ title, body, tags = [], imageUrls = [] }) 
   }
 
   const prompt = `You are image moderation AI for an astrology-focused platform.
-Task: Evaluate image safety and semantic relevance with provided title/body/tags.
+Task: Detect only NSFW/pornographic imagery.
 
 Return STRICT JSON only:
 {
   "decision": "approve" | "reject",
   "reason": "short clear reason",
   "severity": "low" | "high",
-  "nsfw": true | false,
-  "relevantToText": true | false
+  "nsfw": true | false
 }
 
-Reject with severity="high" if image contains explicit sexual nudity, graphic violence, extreme hate symbols, or clear unsafe content.
-Reject with severity="low" if image is clearly unrelated/mismatched to the post's title/body/tags.
-Approve when image appears safe and reasonably aligned with the post context.
+Reject only if image contains explicit sexual nudity or pornographic content.
+Allow everything else for now, even if irrelevant/off-topic.
 
 Title: ${title || "N/A"}
 Body: ${body || "N/A"}
@@ -184,7 +219,7 @@ Tags: ${(tags || []).join(", ") || "N/A"}`;
       {
         role: "system",
         content:
-          "You are strict image moderation engine. Return valid JSON only with decision, reason, severity, nsfw, and relevantToText.",
+          "You are strict NSFW image moderation engine. Reject only porn/explicit sexual nudity. Return valid JSON only with decision, reason, severity, and nsfw.",
       },
       {
         role: "user",
@@ -214,25 +249,21 @@ Tags: ${(tags || []).join(", ") || "N/A"}`;
     };
   }
 
-  if (parsed?.relevantToText === false && mapped.decision !== "reject") {
-    return {
-      decision: "reject",
-      reason: mapped.reason || "Image does not match post title/content",
-      severity: "low",
-    };
-  }
-
-  return mapped;
+  return enforceNsfwOnlyPolicy(
+    mapped,
+    "Allowed by policy: only NSFW/porn images are blocked for now"
+  );
 };
 
 const moderateWithAI = async ({ contentType, title, body, tags = [], imageUrls = [] }) => {
   const normalizedImageUrls = normalizeImageUrls(imageUrls);
   const combinedText = `${title || ""}\n${body || ""}\n${(tags || []).join(" ")}`;
   const fallbackSafety = evaluateForumSubmission({ text: combinedText });
-  if (fallbackSafety.decision === "block") {
+  const fallbackReason = fallbackSafety.reasons?.join("; ") || "";
+  if (fallbackSafety.decision === "block" && isNsfwOrPornReason(fallbackReason)) {
     return {
       decision: "reject",
-      reason: fallbackSafety.reasons?.join("; ") || "Blocked by safety checks",
+      reason: fallbackReason || "Blocked by safety checks",
       severity: "high",
     };
   }
@@ -257,20 +288,12 @@ Evaluate this ${contentType} and return STRICT JSON only:
 {
   "decision": "approve" | "reject",
   "reason": "short clear reason",
-  "severity": "low" | "high"
+  "severity": "low" | "high",
+  "nsfw": true | false
 }
 
-Reject if:
-1) Abusive, hateful, sexual, violent, spam/scam, self-harm encouragement.
-2) Clearly unrelated to astrology/kundli/horoscope/astrologer experience.
-
-Important leniency rule:
-- Use title + body + tags together for intent.
-- If title/tag shows astrology intent and body is generic (e.g., "sharing my experience", "will post details soon"), approve.
-- Do not reject just because detail level is low.
-
-Use severity = "high" only for clear harmful abuse/safety violations.
-Use severity = "low" for non-harmful relevance concerns.
+Reject only when the text itself is clearly pornographic/NSFW/explicit sexual content.
+Allow everything else for now.
 
 Title: ${title || "N/A"}
 Body: ${body || "N/A"}
@@ -286,7 +309,7 @@ IntentDetectedByKeywords: ${intentDetected ? "yes" : "no"}`;
       {
         role: "system",
         content:
-          "You are strict moderation engine. Return valid JSON only with decision and reason.",
+          "You are strict NSFW moderation engine. Reject only porn/explicit sexual content. Return valid JSON only with decision, reason, severity, and nsfw.",
       },
       {
         role: "user",
@@ -299,18 +322,19 @@ IntentDetectedByKeywords: ${intentDetected ? "yes" : "no"}`;
   const parsed = JSON.parse(cleanJsonString(rawText));
   const mapped = mapAIDecision(parsed);
 
-  if (
-    mapped.decision === "reject" &&
-    intentDetected &&
-    mapped.severity !== "high" &&
-    isLikelyRelevanceRejection(mapped.reason)
-  ) {
-    return {
-      decision: "approve",
-      reason: "Approved due to clear astrology intent from title/tags",
-      severity: "low",
+  let finalModeration = mapped;
+  if (parsed?.nsfw === true && mapped.decision !== "reject") {
+    finalModeration = {
+      decision: "reject",
+      reason: mapped.reason || "NSFW content detected",
+      severity: "high",
     };
   }
+
+  finalModeration = enforceNsfwOnlyPolicy(
+    finalModeration,
+    "Allowed by policy: only NSFW/porn text is blocked for now"
+  );
 
   if (contentType === "forum post" && normalizedImageUrls.length > 0) {
     const imageModeration = await moderateImagesWithAI({
@@ -329,7 +353,7 @@ IntentDetectedByKeywords: ${intentDetected ? "yes" : "no"}`;
     }
   }
 
-  return mapped;
+  return finalModeration;
 };
 
 const notifyPostRemoval = async (post, reason) => {
