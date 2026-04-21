@@ -1,5 +1,5 @@
 const User = require("../../model/user/userAuth");
-const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
+// const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
 const {
   createToken,
   createMiddlewareToken,
@@ -14,6 +14,10 @@ const { applySignupBonus } = require("../../services/signupBonusService");
 const {
   validateWhatsappApiKey,
 } = require("../../services/whatsappAuthSettingsService");
+const {
+  verifyFirebasePhoneToken,
+  normalizeIndianMobile,
+} = require("../../services/firebasePhoneAuthService");
 
 
 // Demo credentials – no real SMS is sent for this number
@@ -64,54 +68,44 @@ const generateOtp = async (req, res) => {
       });
     }
 
-    // Validate mobile number (basic validation)
-    const mobileRegex = /^[6-9]\d{9}$/;
-    if (!mobileRegex.test(mobile)) {
+    const normalizedMobile = normalizeIndianMobile(mobile);
+    if (!normalizedMobile) {
       return res.status(400).json({
         success: false,
         message: "Invalid mobile number format",
       });
     }
 
-    // Check if user exists (for determining new vs existing user)
-    let user = await User.findOne({ where: { mobile } });
-    const isNewUser = !user;
-
-    // Demo mode – skip Twilio, use fixed OTP
-    if (mobile === DEMO_MOBILE) {
-      const otpKey = `user:otp:${mobile}`;
-      await redis.setex(otpKey, 300, {
-        otp: DEMO_OTP,
-        mobile,
-        isNewUser,
-        createdAt: Date.now(),
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "OTP sent successfully",
-      });
-    }
-
-    // Generate 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Store OTP in Redis with 5 minutes expiry
-    const otpKey = `user:otp:${mobile}`;
-    await redis.setex(otpKey, 300, {
-      otp,
-      mobile,
-      isNewUser,
-      createdAt: Date.now()
-    });
-
-    // Send OTP via Twilio
-    await handleSendAuthOTP(mobile, otp);
+    // Twilio-based OTP flow retained for rollback/reference.
+    // const user = await User.findOne({ where: { mobile: normalizedMobile } });
+    // const isNewUser = !user;
+    // if (normalizedMobile === DEMO_MOBILE) {
+    //   const otpKey = `user:otp:${normalizedMobile}`;
+    //   await redis.setex(otpKey, 300, {
+    //     otp: DEMO_OTP,
+    //     mobile: normalizedMobile,
+    //     isNewUser,
+    //     createdAt: Date.now(),
+    //   });
+    //   return res.status(200).json({
+    //     success: true,
+    //     message: "OTP sent successfully",
+    //   });
+    // }
+    // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    // const otpKey = `user:otp:${normalizedMobile}`;
+    // await redis.setex(otpKey, 300, {
+    //   otp,
+    //   mobile: normalizedMobile,
+    //   isNewUser,
+    //   createdAt: Date.now(),
+    // });
+    // await handleSendAuthOTP(normalizedMobile, otp);
 
     res.status(200).json({
       success: true,
-      message: "OTP sent successfully",
-      otp: otp, // Remove in production
+      message: "Use Firebase phone authentication to receive OTP",
+      mobile: normalizedMobile,
     });
   } catch (error) {
     console.error("Generate OTP error:", error);
@@ -126,53 +120,53 @@ const generateOtp = async (req, res) => {
 
 const verifyOtp = async (req, res) => {
   try {
-    const { otp } = req.body;
+    const { firebaseIdToken, mobile } = req.body;
 
-    if (!otp) {
+    if (!firebaseIdToken) {
       return res.status(400).json({
         success: false,
-        message: "OTP is required",
+        message: "firebaseIdToken is required",
       });
     }
 
-    // Find the mobile number associated with this OTP in Redis
-    // We need to scan all user OTP keys to find the matching OTP
-    let mobile = null;
-    let otpData = null;
-    
-    // Get all keys matching the pattern
-    const keys = await redis.keys('user:otp:*');
-    
-    for (const key of keys) {
-      const data = await redis.get(key);
-      if (data) {
-        // Upstash Redis automatically parses JSON, so data is already an object
-        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-        if (parsed.otp === otp) {
-          mobile = parsed.mobile;
-          otpData = parsed;
-          // Delete OTP from Redis after successful verification
-          await redis.del(key);
-          break;
-        }
-      }
-    }
+    const verificationResult = await verifyFirebasePhoneToken(
+      firebaseIdToken,
+      mobile
+    );
+    const verifiedMobile = verificationResult.mobile;
 
-    if (!otpData) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP",
-      });
-    }
+    // Legacy Redis OTP verification retained for rollback/reference.
+    // const { otp } = req.body;
+    // let mobileFromRedis = null;
+    // let otpData = null;
+    // const keys = await redis.keys("user:otp:*");
+    // for (const key of keys) {
+    //   const data = await redis.get(key);
+    //   if (data) {
+    //     const parsed = typeof data === "string" ? JSON.parse(data) : data;
+    //     if (parsed.otp === otp) {
+    //       mobileFromRedis = parsed.mobile;
+    //       otpData = parsed;
+    //       await redis.del(key);
+    //       break;
+    //     }
+    //   }
+    // }
+    // if (!otpData) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Invalid or expired OTP",
+    //   });
+    // }
 
     // Find or create user
-    let user = await User.findOne({ where: { mobile } });
+    let user = await User.findOne({ where: { mobile: verifiedMobile } });
     
     let isNewUser = false;
     if (!user) {
       // Create new user
       user = await User.create({
-        mobile,
+        mobile: verifiedMobile,
         isUserRequested: false,
       });
       isNewUser = true;
@@ -223,7 +217,8 @@ const verifyOtp = async (req, res) => {
     });
   } catch (error) {
     console.error("Verify OTP error:", error);
-    res.status(500).json({
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({
       success: false,
       message: "Failed to verify OTP",
       error: error.message,

@@ -16,6 +16,10 @@ const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstro
 const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
 const Follow = require("../../model/follow/follow");
 const notificationService = require("../../services/notificationService");
+const {
+  verifyFirebasePhoneToken,
+  normalizeIndianMobile,
+} = require("../../services/firebasePhoneAuthService");
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -34,30 +38,28 @@ const sendRegistrationOTP = async (req, res) => {
   try {
     const { phoneNumber } = req.body;
 
-    if (!phoneNumber || !/^\d{10}$/.test(phoneNumber)) {
+    const normalizedPhoneNumber = normalizeIndianMobile(phoneNumber);
+    if (!normalizedPhoneNumber) {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid 10-digit phone number",
       });
     }
 
-    const otp = generateOTP();
-    
-    // Store OTP in Redis with 10 minutes expiry
-    const otpKey = `astrologer:otp:${phoneNumber}`;
-    await redis.setex(otpKey, 600, {
-      otp,
-      type: "registration",
-      createdAt: Date.now()
-    });
-
-    // Send OTP via Twilio
-    await handleSendAuthOTP(phoneNumber, otp);
+    // Twilio-based OTP flow retained for rollback/reference.
+    // const otp = generateOTP();
+    // const otpKey = `astrologer:otp:${normalizedPhoneNumber}`;
+    // await redis.setex(otpKey, 600, {
+    //   otp,
+    //   type: "registration",
+    //   createdAt: Date.now(),
+    // });
+    // await handleSendAuthOTP(normalizedPhoneNumber, otp);
 
     res.status(200).json({
       success: true,
-      message: "OTP sent successfully to your phone number",
-     otp :otp
+      message: "Use Firebase phone authentication to receive OTP",
+      phoneNumber: normalizedPhoneNumber,
     });
   } catch (error) {
     console.error("Send registration OTP error:", error);
@@ -72,47 +74,48 @@ const sendRegistrationOTP = async (req, res) => {
 // Verify OTP
 const verifyOTP = async (req, res) => {
   try {
-    const { phoneNumber, otp } = req.body;
+    const { phoneNumber, firebaseIdToken } = req.body;
 
-    if (!phoneNumber || !otp) {
+    if (!phoneNumber || !firebaseIdToken) {
       return res.status(400).json({
         success: false,
-        message: "Phone number and OTP are required",
+        message: "Phone number and firebaseIdToken are required",
       });
     }
 
-    // Get OTP from Redis
-    const otpKey = `astrologer:otp:${phoneNumber}`;
-    const storedData = await redis.get(otpKey);
+    const verificationResult = await verifyFirebasePhoneToken(
+      firebaseIdToken,
+      phoneNumber
+    );
 
-    if (!storedData) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP not found or expired. Please request a new OTP",
-      });
-    }
-
-    // Upstash Redis automatically parses JSON, so data is already an object
-    const otpData = typeof storedData === 'string' ? JSON.parse(storedData) : storedData;
-
-    if (otpData.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    // OTP verified successfully - delete from Redis
-    await redis.del(otpKey);
+    // Legacy Redis OTP verification retained for rollback/reference.
+    // const { otp } = req.body;
+    // const otpKey = `astrologer:otp:${phoneNumber}`;
+    // const storedData = await redis.get(otpKey);
+    // if (!storedData) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "OTP not found or expired. Please request a new OTP",
+    //   });
+    // }
+    // const otpData = typeof storedData === "string" ? JSON.parse(storedData) : storedData;
+    // if (otpData.otp !== otp) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Invalid OTP",
+    //   });
+    // }
+    // await redis.del(otpKey);
 
     res.status(200).json({
       success: true,
-      message: "OTP verified successfully",
-      phoneNumber,
+      message: "Phone number verified successfully",
+      phoneNumber: verificationResult.mobile,
     });
   } catch (error) {
     console.error("Verify OTP error:", error);
-    res.status(500).json({
+    const statusCode = error.statusCode || 500;
+    res.status(statusCode).json({
       success: false,
       message: "Failed to verify OTP",
       error: error.message,

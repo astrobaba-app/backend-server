@@ -54,8 +54,9 @@ Rules:
 - Stay strictly within astrology guidance.
 - Never fabricate user details.
 - Use available kundli/session context directly.
-- Respond in exactly 2-3 short lines.
-- In these 2-3 lines, cover the direct answer and one practical astrology guidance.
+- Prefer 2-3 short lines; use 4 only if absolutely needed.
+- Keep total response under 65 words whenever possible.
+- In these lines, cover the direct answer and one practical astrology guidance.
 - Avoid fear-based or absolute claims.
 - If exact timing needs more details, ask briefly.
 - Output plain text only.`;
@@ -162,9 +163,9 @@ HIGH-RISK TOPICS:
 
 RESPONSE STYLE:
 - Keep replies concise, natural, and impactful.
-- Default length: 2–5 lines.
-- For simple questions: 1–3 lines.
-- For deeper readings: 4–8 lines max unless the user asks for a detailed explanation.
+- Default length: 2–3 lines.
+- Maximum length: 4 short lines.
+- Keep answer compact (generally under 65 words) unless user explicitly asks for detailed explanation.
 - Do not sound repetitive or template-like.
 - Avoid excessive bullet points unless the user explicitly asks for structured output.
 - Output must be plain text only (no markdown formatting).
@@ -423,6 +424,221 @@ const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) =>
   return `Namaste ${firstName}!  Main ${astrologerName} hun, ${possessivePronoun} astrologer. Aaj main aapki kya madad ${helpingVerb}? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
 };
 
+const USER_STOP_INTENT_PATTERNS = [
+  /(?:\bmat\b|\bmt\b)\s*bolo/iu,
+  /मत\s*बोलो/u,
+  /kuch\s*(?:nah[ií]|nahi|ni|nhi)\s*(?:jana|jaana|janna|sunna)\s*(?:mujhe|muje)?/iu,
+  /kuch\s*mat\s*bolo/iu,
+  /(?:nahi|nhi)\s*sunna/iu,
+  /(?:bas|बस)\s*karo/iu,
+  /\bstop\b/iu,
+  /\bleave\s*me\b/iu,
+  /\bnot\s*now\b/iu,
+  /don'?t\s*(?:tell|say|ask)/iu,
+  /\bno\s*more\b/iu,
+];
+
+const isUserStopIntentMessage = (content) => {
+  const message = String(content || "").trim();
+  if (!message) return false;
+  return USER_STOP_INTENT_PATTERNS.some((pattern) => pattern.test(message));
+};
+
+const inferPauseReplyProfile = (userMessage) => {
+  const raw = String(userMessage || "").trim();
+  const text = raw.toLowerCase();
+
+  const directStopPattern =
+    /\b(stop|bas|enough|chup|chodo|mat\s+bolo|no\s+more|don't\s+ask)\b/iu;
+  const sensitivePattern =
+    /\b(sad|hurt|broken|upset|anxious|cry|akela|thak\s*gaya|thak\s*gayi|pareshan|dukhi|low)\b/iu;
+  const lightPattern =
+    /\b(ok|okay|cool|thanks|thank\s*you|haha|lol|all\s*good|fine|busy|later|baad\s*mein|kal)\b/iu;
+
+  if (sensitivePattern.test(text)) {
+    return {
+      tone: "sensitive",
+      targetLineCount: 3,
+      toneHint: "gentle, reassuring, emotionally supportive",
+    };
+  }
+
+  if (directStopPattern.test(text)) {
+    return {
+      tone: "direct",
+      targetLineCount: 1,
+      toneHint: "respectful, very brief, no extra detail",
+    };
+  }
+
+  if (lightPattern.test(text)) {
+    return {
+      tone: "light",
+      targetLineCount: Math.random() < 0.5 ? 1 : 2,
+      toneHint: "friendly, calm, light and positive",
+    };
+  }
+
+  return {
+    tone: "neutral",
+    targetLineCount: 2,
+    toneHint: "calm, warm, supportive",
+  };
+};
+
+const normalizePauseReplyByLineCount = (text, targetLineCount) => {
+  const clampedLineCount = Math.max(1, Math.min(Number(targetLineCount) || 2, 3));
+  const source = String(text || "").trim();
+  if (!source) return "";
+
+  let lines = source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length <= 1) {
+    const sentenceLines = splitTextIntoSentences(source);
+    if (sentenceLines.length > 0) {
+      lines = sentenceLines;
+    }
+  }
+
+  while (lines.length < clampedLineCount) {
+    let longestIndex = -1;
+    let longestLength = -1;
+
+    lines.forEach((line, index) => {
+      if (line.length > longestLength) {
+        longestLength = line.length;
+        longestIndex = index;
+      }
+    });
+
+    if (longestIndex === -1) break;
+
+    const split = splitLineForDisplay(lines[longestIndex]);
+    if (split.length < 2) break;
+
+    lines.splice(longestIndex, 1, ...split);
+  }
+
+  if (lines.length > clampedLineCount) {
+    lines = [
+      ...lines.slice(0, clampedLineCount - 1),
+      lines.slice(clampedLineCount - 1).join(" ").trim(),
+    ].filter(Boolean);
+  }
+
+  return ensureCompleteSentenceEnding(lines.join("\n"));
+};
+
+const buildPauseAcknowledgementFallback = ({
+  astrologerGender,
+  userName,
+  avoidMessage,
+  targetLineCount,
+}) => {
+  const pauseVerb = astrologerGender === "female" ? "rukti" : "rukta";
+  const firstName = String(userName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || "";
+  const withNamePrefix = firstName && Math.random() < 0.35 ? `${firstName}, ` : "";
+
+  const candidates = [
+    `${withNamePrefix}theek hai, abhi yahin ${pauseVerb} hun.`,
+    `${withNamePrefix}samajh gaya, hum yahin pause karte hain.\nJab chahein, fir se shuru kar lenge.`,
+    `${withNamePrefix}bilkul, abhi rukte hain.\nAap aaram se rahiye, main yahin hun.\nJab mann ho tab message kar dena.`,
+    `${withNamePrefix}ok, abhi ke liye main chup rehta hun.`,
+    `${withNamePrefix}theek hai, no pressure.\nJab ready ho, main calmly yahin milunga.`,
+  ];
+
+  const filtered = candidates.filter(
+    (candidate) =>
+      candidate.trim().toLowerCase() !== String(avoidMessage || "").trim().toLowerCase()
+  );
+
+  const pool = filtered.length > 0 ? filtered : candidates;
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  return normalizePauseReplyByLineCount(picked, targetLineCount);
+};
+
+const generateDynamicPauseAcknowledgement = async ({
+  astrologerId,
+  userMessage,
+  userName = "",
+  avoidMessage = "",
+}) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || null;
+  const astrologerName = profile?.name || "Astrologer";
+  const astrologerGender = profile?.gender === "female" ? "female" : "male";
+  const firstName = String(userName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || "";
+
+  const { tone, targetLineCount, toneHint } = inferPauseReplyProfile(userMessage);
+  const avoidMessageText = String(avoidMessage || "").trim();
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            `You are ${astrologerName}, a warm astrologer. The user asked you to stop/pause. ` +
+            `Write exactly ${targetLineCount} short line(s) in the same language/script as the user.\n` +
+            `Tone should be: ${toneHint}.\n` +
+            `Do not ask any question.\n` +
+            `Do not give predictions/remedies now.\n` +
+            `Do not mention AI.\n` +
+            `Keep it natural and fresh, not template-like.\n` +
+            (firstName
+              ? `User name is ${firstName}. You may use it naturally sometimes, but do not force it every time.\n`
+              : "Do not force name usage.\n") +
+            (avoidMessageText
+              ? `Avoid repeating this previous line verbatim: ${avoidMessageText}`
+              : "Use new wording each time."),
+        },
+        {
+          role: "user",
+          content: `User stop message: ${String(userMessage || "").trim()}\nTone label: ${tone}`,
+        },
+      ],
+      max_tokens: 120,
+      temperature: 0.95,
+    });
+
+    const generated = sanitizeAssistantResponse(
+      completion.choices?.[0]?.message?.content || ""
+    );
+    const normalized = normalizePauseReplyByLineCount(generated, targetLineCount);
+
+    if (
+      normalized &&
+      normalized.trim().toLowerCase() !== avoidMessageText.toLowerCase()
+    ) {
+      return {
+        content: normalized,
+        tokensUsed: completion.usage?.total_tokens || 0,
+      };
+    }
+  } catch (error) {
+    console.error("Dynamic pause acknowledgement generation failed:", error?.message || error);
+  }
+
+  return {
+    content: buildPauseAcknowledgementFallback({
+      astrologerGender,
+      userName,
+      avoidMessage,
+      targetLineCount,
+    }),
+    tokensUsed: 0,
+  };
+};
+
 /**
  * Converts markdown-heavy model output into plain chat text for UI rendering.
  */
@@ -439,36 +655,76 @@ const sanitizeAssistantResponse = (text) => {
     .trim();
 };
 
-const enforceTwoToThreeLines = (text) => {
-  const normalized = String(text || "")
+const splitTextIntoSentences = (text) =>
+  String(text || "")
+    .split(/(?<=[.!?\u0964])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const splitLineForDisplay = (line) => {
+  const normalized = String(line || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return [""];
+
+  const sentenceBoundary = normalized.match(/^(.{24,}?[.!?\u0964])\s+(.{8,})$/);
+  if (sentenceBoundary) {
+    return [sentenceBoundary[1].trim(), sentenceBoundary[2].trim()];
+  }
+
+  const commaBoundary = normalized.match(/^(.{24,}?,)\s+(.{8,})$/);
+  if (commaBoundary) {
+    return [commaBoundary[1].trim(), commaBoundary[2].trim()];
+  }
+
+  const words = normalized.split(/\s+/).filter(Boolean);
+  if (words.length < 8) return [normalized];
+
+  const midpoint = Math.ceil(words.length / 2);
+  return [
+    words.slice(0, midpoint).join(" ").trim(),
+    words.slice(midpoint).join(" ").trim(),
+  ].filter(Boolean);
+};
+
+const enforceTwoToThreeLinesMaxFour = (text) => {
+  const source = String(text || "").trim();
+  if (!source) return "";
+
+  let lines = source
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
 
-  if (normalized.length === 0) return "";
-
-  if (normalized.length > 3) {
-    return [normalized[0], normalized[1], normalized.slice(2).join(" ")].join("\n");
+  if (lines.length <= 1) {
+    const sentenceLines = splitTextIntoSentences(source);
+    if (sentenceLines.length > 0) {
+      lines = sentenceLines;
+    }
   }
 
-  if (normalized.length >= 2) {
-    return normalized.join("\n");
+  while (lines.length < 2) {
+    let longestIndex = -1;
+    let longestLength = -1;
+
+    lines.forEach((line, index) => {
+      if (line.length > longestLength) {
+        longestLength = line.length;
+        longestIndex = index;
+      }
+    });
+
+    if (longestIndex === -1) break;
+
+    const split = splitLineForDisplay(lines[longestIndex]);
+    if (split.length < 2) break;
+
+    lines.splice(longestIndex, 1, ...split);
   }
 
-  // Single-line fallback: split into two lines for WhatsApp-friendly readability.
-  const singleLine = normalized[0];
-  const sentenceSplit = singleLine.match(/^(.{20,}?[.!?])\s+(.+)$/);
-  if (sentenceSplit) {
-    return `${sentenceSplit[1].trim()}\n${sentenceSplit[2].trim()}`;
+  if (lines.length > 4) {
+    lines = [lines[0], lines[1], lines[2], lines.slice(3).join(" ").trim()].filter(Boolean);
   }
 
-  const words = singleLine.split(/\s+/).filter(Boolean);
-  if (words.length >= 8) {
-    const midpoint = Math.ceil(words.length / 2);
-    return `${words.slice(0, midpoint).join(" ")}\n${words.slice(midpoint).join(" ")}`;
-  }
-
-  return singleLine;
+  return lines.join("\n");
 };
 
 const hasCompleteSentenceEnding = (text) =>
@@ -489,8 +745,8 @@ const buildCompletionRepairMessages = (
   {
     role: "system",
     content: concise
-      ? "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it to 2-3 short lines, include direct answer plus one practical astrology guidance, avoid markdown, and ensure the final sentence is complete."
-      : "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it concise (2-5 lines), avoid markdown, and ensure the final sentence is complete.",
+      ? "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Prefer 2-3 short lines (max 4), include direct answer plus one practical astrology guidance, avoid markdown, keep it concise, and ensure no sentence is cut mid-thought."
+      : "Rewrite the draft into a complete, clear, plain-text reply in the same language as the user. Keep it concise in 2-3 lines (max 4), avoid markdown, and ensure no sentence is cut mid-thought.",
   },
   {
     role: "user",
@@ -559,6 +815,62 @@ const extractFollowUpQuestionsFromText = (text) => {
 
 const FOLLOW_UP_QUESTION_MAX_RESULTS = 6;
 const FOLLOW_UP_QUESTION_GENERATION_ATTEMPTS = 2;
+const FOLLOW_UP_NAME_ADDRESS_PROBABILITY = 0.38;
+
+const escapeRegex = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const getFirstName = (fullName) =>
+  String(fullName || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || "";
+
+const startsWithName = (question, firstName) => {
+  const normalizedQuestion = String(question || "").trim();
+  const normalizedFirstName = getFirstName(firstName);
+  if (!normalizedQuestion || !normalizedFirstName) return false;
+
+  const namePrefixRegex = new RegExp(
+    `^${escapeRegex(normalizedFirstName)}(?:\\b|\\s|,)`,
+    "i"
+  );
+
+  return namePrefixRegex.test(normalizedQuestion);
+};
+
+const getQuestionStarterFingerprint = (question, firstName) => {
+  const normalizedFirstName = getFirstName(firstName);
+  const withoutNamePrefix = normalizedFirstName
+    ? String(question || "").replace(
+        new RegExp(`^${escapeRegex(normalizedFirstName)}\\s*,?\\s*`, "i"),
+        ""
+      )
+    : String(question || "");
+
+  const clean = withoutNamePrefix
+    .replace(/[?!.]+$/g, "")
+    .trim()
+    .toLowerCase();
+
+  if (!clean) return "";
+
+  return clean.split(/\s+/).slice(0, 3).join(" ");
+};
+
+const pickRandomItem = (items) => {
+  if (!Array.isArray(items) || items.length === 0) return "";
+  return items[Math.floor(Math.random() * items.length)];
+};
+
+const isLikelyAutoFollowUpQuestionMessage = (content) => {
+  const normalized = normalizeFollowUpQuestionLine(content);
+  if (!normalized) return false;
+
+  const plain = normalized.replace(/[?]+$/g, "").trim();
+  const wordCount = plain ? plain.split(/\s+/).length : 0;
+
+  return normalized.endsWith("?") && wordCount > 0 && wordCount <= 14 && normalized.length <= 95;
+};
 
 const collectRecentAssistantQuestions = (messages, maxCount = 8) => {
   const unique = [];
@@ -591,6 +903,7 @@ const generateFollowUpQuestions = async ({
   aiAnswer,
   hasKundli,
   kundliContextStr,
+  userFirstName = "",
   count = 1,
   avoidQuestions = [],
 }) => {
@@ -613,6 +926,46 @@ const generateFollowUpQuestions = async ({
     )
   ).slice(0, 8);
 
+  const normalizedUserFirstName = getFirstName(userFirstName);
+  const latestQuestion = normalizedAvoidQuestions[0] || "";
+  const latestQuestionUsesName = startsWithName(
+    latestQuestion,
+    normalizedUserFirstName
+  );
+
+  const shouldAddressByName =
+    Boolean(normalizedUserFirstName) &&
+    !latestQuestionUsesName &&
+    Math.random() < FOLLOW_UP_NAME_ADDRESS_PROBABILITY;
+
+  const addressingInstruction = !normalizedUserFirstName
+    ? "Do not force name usage."
+    : shouldAddressByName
+      ? `Start the question naturally with \"${normalizedUserFirstName},\".`
+      : "Do not include the user's name in this question.";
+
+  const styleAngle = pickRandomItem([
+    "clarify one detail",
+    "timing angle",
+    "emotional impact angle",
+    "decision/priority angle",
+    "practical next-step angle",
+  ]);
+
+  const recentOpeners = Array.from(
+    new Set(
+      normalizedAvoidQuestions
+        .map((question) =>
+          getQuestionStarterFingerprint(question, normalizedUserFirstName)
+        )
+        .filter(Boolean)
+    )
+  ).slice(0, 4);
+
+  const openerInstruction = recentOpeners.length
+    ? `Avoid starting with these opener patterns: ${recentOpeners.join(" | ")}.`
+    : "Use a fresh opener pattern.";
+
   const avoidInstruction = normalizedAvoidQuestions.length
     ? `Avoid repeating these recent assistant questions:\n${normalizedAvoidQuestions
         .map((question, index) => `${index + 1}. ${question}`)
@@ -628,7 +981,7 @@ const generateFollowUpQuestions = async ({
         messages: [
           {
             role: "system",
-            content: `You are ${astrologerName}. Create follow-up questions for an astrology chat.\nRules:\n- Return exactly ${requestedCount} very short one-line questions.\n- Match the language style used by the user and assistant (Hindi/Hinglish/English).\n- Questions must be directly related to the user's last question and the assistant's answer.\n- Keep each question under 70 characters and under 10 words when possible.\n- Do not mention that you are AI.\n- End each line with '?'.\n- Output only ${requestedCount} lines, no bullets or numbering.\n- ${avoidInstruction}`,
+            content: `You are ${astrologerName}. Create follow-up questions for an astrology chat.\nRules:\n- Return exactly ${requestedCount} very short one-line questions.\n- Match the language style used by the user and assistant (Hindi/Hinglish/English).\n- Questions must be directly related to the user's last question and the assistant's answer.\n- Keep each question under 70 characters and under 10 words when possible.\n- Do not mention that you are AI.\n- End each line with '?'.\n- Output only ${requestedCount} lines, no bullets or numbering.\n- Avoid repetitive framing; each question should feel new in tone and structure.\n- For this run, use this question angle: ${styleAngle}.\n- ${addressingInstruction}\n- ${openerInstruction}\n- ${avoidInstruction}`,
           },
           {
             role: "user",
@@ -712,6 +1065,7 @@ const sendMessage = async (req, res) => {
     const { sessionId } = req.params;
     const requestBody = req.body || {};
     const { message } = requestBody;
+    const trimmedMessage = String(message || "").trim();
     const fastMode = requestBody.fastMode === true || requestBody.fast_mode === true;
     const requestedHistoryLimit = Number(
       requestBody.historyLimit ?? requestBody.history_limit
@@ -722,7 +1076,7 @@ const sendMessage = async (req, res) => {
         ? 8
         : 20;
 
-    if (!message || !message.trim()) {
+    if (!trimmedMessage) {
       return res.status(400).json({
         success: false,
         message: "Message is required",
@@ -745,8 +1099,62 @@ const sendMessage = async (req, res) => {
     const userMessage = await AIChatMessage.create({
       sessionId,
       role: "user",
-      content: message.trim(),
+      content: trimmedMessage,
     });
+
+    if (isUserStopIntentMessage(trimmedMessage)) {
+      const lastAssistantMessage = await AIChatMessage.findOne({
+        where: { sessionId, role: "assistant" },
+        order: [["createdAt", "DESC"]],
+        attributes: ["content"],
+      });
+
+      const pauseReplyResult = await generateDynamicPauseAcknowledgement({
+        astrologerId: session.astrologerId,
+        userMessage: trimmedMessage,
+        userName: req.user?.fullName || "",
+        avoidMessage: lastAssistantMessage?.content || "",
+      });
+      const pauseReply = pauseReplyResult.content;
+      const pauseTokensUsed = pauseReplyResult.tokensUsed || 0;
+
+      const aiMessage = await AIChatMessage.create({
+        sessionId,
+        role: "assistant",
+        content: pauseReply,
+        tokens: pauseTokensUsed,
+      });
+
+      if (session.title === "New Chat") {
+        const title =
+          trimmedMessage.substring(0, 50) +
+          (trimmedMessage.length > 50 ? "..." : "");
+        await session.update({
+          title,
+          lastMessageAt: new Date(),
+        });
+      } else {
+        await session.update({ lastMessageAt: new Date() });
+      }
+
+      return res.status(200).json({
+        success: true,
+        userMessage: {
+          id: userMessage.id,
+          role: "user",
+          content: userMessage.content,
+          createdAt: userMessage.createdAt,
+        },
+        aiMessage: {
+          id: aiMessage.id,
+          role: "assistant",
+          content: aiMessage.content,
+          createdAt: aiMessage.createdAt,
+        },
+        tokensUsed: pauseTokensUsed,
+        disableAutoFollowUp: true,
+      });
+    }
 
     // Load Kundli context if a Kundli is attached to this session
     let kundliContextStr = "";
@@ -836,7 +1244,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
         : CHAT_MODEL,
       messages: messages,
-      max_tokens: fastMode ? 110 : 100,
+      max_tokens: fastMode ? 180 : 260,
       temperature: fastMode ? 0.6 : 0.7,
     });
 
@@ -844,19 +1252,30 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     const completionFinishReason = completion.choices[0].finish_reason;
     let tokensUsed = completion.usage?.total_tokens || 0;
 
+    const estimatedLineCount = String(aiRawResponse || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean).length;
+    const estimatedWordCount = String(aiRawResponse || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean).length;
+
     const shouldRepair =
       completionFinishReason === "length" ||
-      (fastMode && !hasCompleteSentenceEnding(aiRawResponse));
+      !hasCompleteSentenceEnding(aiRawResponse) ||
+      estimatedLineCount > 4 ||
+      estimatedWordCount > 80;
 
     if (shouldRepair) {
       const repairCompletion = await openai.chat.completions.create({
         model: fastMode
           ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
           : CHAT_MODEL,
-        messages: buildCompletionRepairMessages(message.trim(), aiRawResponse, {
+        messages: buildCompletionRepairMessages(trimmedMessage, aiRawResponse, {
           concise: fastMode,
         }),
-        max_tokens: fastMode ? 90 : 100,
+        max_tokens: fastMode ? 180 : 220,
         temperature: fastMode ? 0.4 : 0.5,
       });
 
@@ -865,9 +1284,9 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     }
 
     const sanitizedResponse = sanitizeAssistantResponse(aiRawResponse);
-    const aiResponse = fastMode
-      ? ensureCompleteSentenceEnding(enforceTwoToThreeLines(sanitizedResponse))
-      : sanitizedResponse;
+    const aiResponse = ensureCompleteSentenceEnding(
+      enforceTwoToThreeLinesMaxFour(sanitizedResponse)
+    );
 
     // Save AI response
     const aiMessage = await AIChatMessage.create({
@@ -879,7 +1298,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
 
     // Update session title from first message if still "New Chat"
     if (session.title === "New Chat" && previousMessages.length <= 2) {
-      const title = message.substring(0, 50) + (message.length > 50 ? "..." : "");
+      const title = trimmedMessage.substring(0, 50) + (trimmedMessage.length > 50 ? "..." : "");
       await session.update({ 
         title,
         lastMessageAt: new Date(),
@@ -903,6 +1322,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         createdAt: aiMessage.createdAt,
       },
       tokensUsed,
+      disableAutoFollowUp: false,
     });
   } catch (error) {
     console.error("Send message error:", error);
@@ -953,6 +1373,12 @@ const getAutoFollowUpQuestion = async (req, res) => {
     const lastAssistantMessage = reversedMessages.find(
       (message) => message.role === "assistant"
     );
+    const lastAssistantContextMessage =
+      reversedMessages.find(
+        (message) =>
+          message.role === "assistant" &&
+          !isLikelyAutoFollowUpQuestionMessage(message.content)
+      ) || lastAssistantMessage;
 
     if (!lastUserMessage || !lastAssistantMessage) {
       return res.status(200).json({
@@ -960,6 +1386,30 @@ const getAutoFollowUpQuestion = async (req, res) => {
         followUpQuestion: null,
         followUpMessage: null,
       });
+    }
+
+    if (isUserStopIntentMessage(lastUserMessage.content)) {
+      return res.status(200).json({
+        success: true,
+        followUpQuestion: null,
+        followUpMessage: null,
+      });
+    }
+
+    let userFirstName = getFirstName(req.user?.fullName || "");
+    if (!userFirstName) {
+      try {
+        const userRecord = await User.findOne({
+          where: { id: userId },
+          attributes: ["fullName"],
+        });
+        userFirstName = getFirstName(userRecord?.fullName || "");
+      } catch (userLookupError) {
+        console.error(
+          "Failed to resolve user name for follow-up variation:",
+          userLookupError?.message || userLookupError
+        );
+      }
     }
 
     let kundliContextStr = "";
@@ -988,9 +1438,10 @@ const getAutoFollowUpQuestion = async (req, res) => {
     const generatedQuestions = await generateFollowUpQuestions({
       astrologerId: session.astrologerId,
       userQuestion: lastUserMessage.content,
-      aiAnswer: lastAssistantMessage.content,
+      aiAnswer: lastAssistantContextMessage?.content || lastAssistantMessage.content,
       hasKundli: Boolean(kundliContextStr),
       kundliContextStr,
+      userFirstName,
       count: 1,
       avoidQuestions,
     });
