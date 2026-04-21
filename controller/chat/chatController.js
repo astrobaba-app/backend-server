@@ -2,6 +2,7 @@ const ChatSession = require("../../model/chat/chatSession");
 const ChatMessage = require("../../model/chat/chatMessage");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
+const Wallet = require("../../model/wallet/wallet");
 const { Op } = require("sequelize");
 const webPushService = require("../../services/webPushService");
 const pushNotificationService = require("../../services/pushNotificationService");
@@ -10,6 +11,10 @@ const {
 } = require("../../services/chatSessionLifecycle");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
+const CHAT_END_REASON_ALLOWLIST = new Set([
+  "user_ended_chat",
+  "insufficient_balance",
+]);
 const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "id",
   "fullName",
@@ -182,6 +187,10 @@ const endChatSession = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const userId = req.user.id;
+    const requestedReason = req.body?.reason;
+    const endReason = CHAT_END_REASON_ALLOWLIST.has(requestedReason)
+      ? requestedReason
+      : "user_ended_chat";
 
     const session = await ChatSession.findOne({
       where: { id: sessionId, userId },
@@ -231,7 +240,7 @@ const endChatSession = async (req, res) => {
       io.to(getSessionRoom(session.id)).emit("chat:ended", {
         sessionId: session.id,
         endedBy: "user",
-        reason: "user_ended_chat",
+        reason: endReason,
       });
 
       io.to(getUserRoom(session.userId)).emit("chat:updated", {
@@ -325,6 +334,30 @@ const sendMessage = async (req, res) => {
         success: false,
         message: "Chat request has not been approved yet",
       });
+    }
+
+    if (senderType === "user" && session.status === "active" && session.requestStatus === "approved") {
+      const wallet = await Wallet.findOne({ where: { userId: senderId } });
+      const currentBalance = wallet ? parseFloat(wallet.balance || 0) : 0;
+
+      if (currentBalance <= 0) {
+        const io = req.app.get("io");
+        const { endSessionForInsufficientBalance } = require("../../services/chatSocket");
+        const billing = await endSessionForInsufficientBalance(io, session);
+
+        return res.status(402).json({
+          success: false,
+          message: "Insufficient wallet balance. Chat ended. Please recharge to continue.",
+          code: "INSUFFICIENT_BALANCE",
+          session: {
+            id: session.id,
+            totalMinutes: billing.totalMinutes,
+            totalCost: billing.totalCost,
+            billedAmount: billing.billedAmount,
+            pricePerMinute: parseFloat(session.pricePerMinute || 0),
+          },
+        });
+      }
     }
 
     // Get file URL if uploaded

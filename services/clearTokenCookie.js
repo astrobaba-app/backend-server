@@ -19,7 +19,7 @@ const clearTokenCookie = (res) => {
       expires: new Date(0),
     }),
     serialize("refresh_token", "", {
-      domain: ".graho.in",
+     domain: ".graho.in",
       httpOnly: true,
       secure: true,
       sameSite: "none",

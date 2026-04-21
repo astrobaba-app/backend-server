@@ -4,6 +4,7 @@ const ChatSession = require("../model/chat/chatSession");
 const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
+const Wallet = require("../model/wallet/wallet");
 const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
@@ -194,6 +195,32 @@ function scheduleUserInactivityAutoEnd(io, sessionLike) {
   }, USER_MESSAGE_INACTIVITY_TIMEOUT_MS);
 
   userInactivityTimers.set(sessionLike.id, timeout);
+}
+
+async function endSessionForInsufficientBalance(io, session) {
+  const billing = await completeChatSessionWithBilling(session, io);
+  await session.reload();
+  clearUserInactivityAutoEnd(session.id);
+
+  if (io) {
+    io.to(getSessionRoom(session.id)).emit("chat:ended", {
+      sessionId: session.id,
+      endedBy: "system",
+      reason: "insufficient_balance",
+    });
+
+    io.to(getUserRoom(session.userId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "user"),
+    });
+
+    io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "astrologer"),
+    });
+  }
+
+  return billing;
 }
 
 /**
@@ -472,6 +499,22 @@ function initializeChatSocket(io) {
             return;
           }
 
+          if (!isAstrologer && session.status === "active" && session.requestStatus === "approved") {
+            const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+            const currentBalance = wallet ? parseFloat(wallet.balance || 0) : 0;
+
+            if (currentBalance <= 0) {
+              await endSessionForInsufficientBalance(io, session);
+              if (callback) {
+                callback({
+                  success: false,
+                  error: "Insufficient wallet balance. Chat ended.",
+                });
+              }
+              return;
+            }
+          }
+
           const messagePayload = await createAndBroadcastMessage({
             io,
             session,
@@ -625,6 +668,7 @@ module.exports = {
   getUserRoom,
   getAstrologerRoom,
   getLiveSessionRoom,
+  endSessionForInsufficientBalance,
   scheduleUserInactivityAutoEnd,
   clearUserInactivityAutoEnd,
 };
