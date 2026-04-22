@@ -20,6 +20,9 @@ const {
   verifyFirebasePhoneToken,
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
+const {
+  checkAndConsumeFirebaseOtpQuota,
+} = require("../../services/firebaseOtpRateLimitService");
 
 const generateOTP = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -46,6 +49,22 @@ const sendRegistrationOTP = async (req, res) => {
       });
     }
 
+    const otpRateLimit = await checkAndConsumeFirebaseOtpQuota({
+      mobile: normalizedPhoneNumber,
+      scope: "astrologer-signup",
+    });
+
+    if (!otpRateLimit.allowed) {
+      return res.status(429).json({
+        success: false,
+        message: `Too many OTP requests. Please try again in ${otpRateLimit.retryAfterSeconds} seconds.`,
+        error: "otp-rate-limit-exceeded",
+        limit: otpRateLimit.limit,
+        windowSeconds: otpRateLimit.windowSeconds,
+        retryAfterSeconds: otpRateLimit.retryAfterSeconds,
+      });
+    }
+
     // Twilio-based OTP flow retained for rollback/reference.
     // const otp = generateOTP();
     // const otpKey = `astrologer:otp:${normalizedPhoneNumber}`;
@@ -60,6 +79,11 @@ const sendRegistrationOTP = async (req, res) => {
       success: true,
       message: "Use Firebase phone authentication to receive OTP",
       phoneNumber: normalizedPhoneNumber,
+      otpRateLimit: {
+        limit: otpRateLimit.limit,
+        windowSeconds: otpRateLimit.windowSeconds,
+        remaining: otpRateLimit.remaining,
+      },
     });
   } catch (error) {
     console.error("Send registration OTP error:", error);
