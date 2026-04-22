@@ -18,9 +18,6 @@ const {
   verifyFirebasePhoneToken,
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
-const {
-  checkAndConsumeFirebaseOtpQuota,
-} = require("../../services/firebaseOtpRateLimitService");
 
 
 // Demo credentials – no real SMS is sent for this number
@@ -79,22 +76,6 @@ const generateOtp = async (req, res) => {
       });
     }
 
-    const otpRateLimit = await checkAndConsumeFirebaseOtpQuota({
-      mobile: normalizedMobile,
-      scope: "user-login",
-    });
-
-    if (!otpRateLimit.allowed) {
-      return res.status(429).json({
-        success: false,
-        message: `Too many OTP requests. Please try again in ${otpRateLimit.retryAfterSeconds} seconds.`,
-        error: "otp-rate-limit-exceeded",
-        limit: otpRateLimit.limit,
-        windowSeconds: otpRateLimit.windowSeconds,
-        retryAfterSeconds: otpRateLimit.retryAfterSeconds,
-      });
-    }
-
     // Twilio-based OTP flow retained for rollback/reference.
     // const user = await User.findOne({ where: { mobile: normalizedMobile } });
     // const isNewUser = !user;
@@ -125,11 +106,6 @@ const generateOtp = async (req, res) => {
       success: true,
       message: "Use Firebase phone authentication to receive OTP",
       mobile: normalizedMobile,
-      otpRateLimit: {
-        limit: otpRateLimit.limit,
-        windowSeconds: otpRateLimit.windowSeconds,
-        remaining: otpRateLimit.remaining,
-      },
     });
   } catch (error) {
     console.error("Generate OTP error:", error);
