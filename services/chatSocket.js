@@ -8,6 +8,7 @@ const Wallet = require("../model/wallet/wallet");
 const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
+const { getWalletBalanceBreakdown } = require("./walletService");
 
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
@@ -501,14 +502,23 @@ function initializeChatSocket(io) {
 
           if (!isAstrologer && session.status === "active" && session.requestStatus === "approved") {
             const wallet = await Wallet.findOne({ where: { userId: session.userId } });
-            const currentBalance = wallet ? parseFloat(wallet.balance || 0) : 0;
+            const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
 
-            if (currentBalance <= 0) {
+            if (walletBreakdown.rechargeBalance <= 0) {
               await endSessionForInsufficientBalance(io, session);
+
+              const isBonusOnlyBalance =
+                walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
+
               if (callback) {
                 callback({
                   success: false,
-                  error: "Insufficient wallet balance. Chat ended.",
+                  error: isBonusOnlyBalance
+                    ? "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers."
+                    : "Insufficient wallet balance. Chat ended.",
+                  code: isBonusOnlyBalance
+                    ? "RECHARGE_REQUIRED_FOR_HUMAN_CHAT"
+                    : "INSUFFICIENT_BALANCE",
                 });
               }
               return;

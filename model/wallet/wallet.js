@@ -26,6 +26,12 @@ const Wallet = sequelize.define(
       defaultValue: 0.00,
       comment: "Current wallet balance in INR",
     },
+    signupBonusBalance: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0.0,
+      comment: "Remaining signup bonus credits. Usable only for AI experiences",
+    },
     totalRecharge: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: false,

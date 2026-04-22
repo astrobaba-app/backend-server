@@ -9,12 +9,16 @@ const pushNotificationService = require("../../services/pushNotificationService"
 const {
   completeChatSessionWithBilling,
 } = require("../../services/chatSessionLifecycle");
+const { getWalletBalanceBreakdown } = require("../../services/walletService");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
 const CHAT_END_REASON_ALLOWLIST = new Set([
   "user_ended_chat",
   "insufficient_balance",
 ]);
+const HUMAN_CHAT_RECHARGE_REQUIRED_CODE = "RECHARGE_REQUIRED_FOR_HUMAN_CHAT";
+const HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE =
+  "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.";
 const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "id",
   "fullName",
@@ -70,6 +74,23 @@ const startChatSession = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Astrologer is currently offline",
+      });
+    }
+
+    const wallet = await Wallet.findOne({ where: { userId } });
+    const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+
+    if (walletBreakdown.rechargeBalance <= 0) {
+      return res.status(402).json({
+        success: false,
+        message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
+        code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
+        redirectTo: "/aichat",
+        wallet: {
+          balance: walletBreakdown.balance,
+          signupBonusBalance: walletBreakdown.signupBonusBalance,
+          humanChatBalance: walletBreakdown.rechargeBalance,
+        },
       });
     }
 
@@ -338,23 +359,36 @@ const sendMessage = async (req, res) => {
 
     if (senderType === "user" && session.status === "active" && session.requestStatus === "approved") {
       const wallet = await Wallet.findOne({ where: { userId: senderId } });
-      const currentBalance = wallet ? parseFloat(wallet.balance || 0) : 0;
+      const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
 
-      if (currentBalance <= 0) {
+      if (walletBreakdown.rechargeBalance <= 0) {
         const io = req.app.get("io");
         const { endSessionForInsufficientBalance } = require("../../services/chatSocket");
         const billing = await endSessionForInsufficientBalance(io, session);
 
+        const isBonusOnlyBalance =
+          walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
+
         return res.status(402).json({
           success: false,
-          message: "Insufficient wallet balance. Chat ended. Please recharge to continue.",
-          code: "INSUFFICIENT_BALANCE",
+          message: isBonusOnlyBalance
+            ? HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE
+            : "Insufficient wallet balance. Chat ended. Please recharge to continue.",
+          code: isBonusOnlyBalance
+            ? HUMAN_CHAT_RECHARGE_REQUIRED_CODE
+            : "INSUFFICIENT_BALANCE",
+          redirectTo: isBonusOnlyBalance ? "/aichat" : undefined,
           session: {
             id: session.id,
             totalMinutes: billing.totalMinutes,
             totalCost: billing.totalCost,
             billedAmount: billing.billedAmount,
             pricePerMinute: parseFloat(session.pricePerMinute || 0),
+          },
+          wallet: {
+            balance: walletBreakdown.balance,
+            signupBonusBalance: walletBreakdown.signupBonusBalance,
+            humanChatBalance: walletBreakdown.rechargeBalance,
           },
         });
       }

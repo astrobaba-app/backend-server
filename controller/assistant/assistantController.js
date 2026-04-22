@@ -3,8 +3,11 @@ const AssistantChat = require("../../model/assistant/assistantChat");
 const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const Wallet = require("../../model/wallet/wallet");
-const WalletTransaction = require("../../model/wallet/walletTransaction");
 const assistantService = require("../../services/assistantService");
+const {
+  debitWallet,
+  getWalletBalanceBreakdown,
+} = require("../../services/walletService");
 const { v4: uuidv4 } = require("uuid");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
@@ -62,14 +65,15 @@ const sendMessage = async (req, res) => {
 
     // Check user wallet balance (charge same as astrologer's per minute rate)
     const wallet = await Wallet.findOne({ where: { userId } });
-    const estimatedCost = astrologer.pricePerMinute; // Estimate 1 minute per message
+    const estimatedCost = parseFloat(astrologer.pricePerMinute || 0); // Estimate 1 minute per message
+    const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
 
-    if (!wallet || wallet.balance < estimatedCost) {
+    if (!wallet || walletBreakdown.balance < estimatedCost) {
       return res.status(402).json({
         success: false,
         message: `Insufficient wallet balance. Please recharge at least ₹${estimatedCost}`,
         required: estimatedCost,
-        current: wallet ? wallet.balance : 0,
+        current: walletBreakdown.balance,
       });
     }
 
@@ -145,26 +149,23 @@ const sendMessage = async (req, res) => {
     }
 
     // Calculate cost (same as astrologer's rate per minute)
-    const chatCost = astrologer.pricePerMinute;
+    const chatCost = parseFloat(astrologer.pricePerMinute || 0);
 
-    // Deduct from wallet
-    await wallet.update({
-      balance: parseFloat(wallet.balance) - parseFloat(chatCost),
-    });
-
-    // Create wallet transaction
-    await WalletTransaction.create({
-      walletId: wallet.id,
-      type: "debit",
-      amount: chatCost,
-      status: "completed",
-      description: `AI Assistant chat with ${astrologer.fullName}`,
-      metadata: {
-        astrologerId,
-        sessionId: chatSessionId,
-        tokensUsed,
-      },
-    });
+    const debitResult = await debitWallet(
+      userId,
+      chatCost,
+      `AI Assistant chat with ${astrologer.fullName}`,
+      "manual",
+      {
+        allowSignupBonusUsage: true,
+        metadata: {
+          astrologerId,
+          sessionId: chatSessionId,
+          tokensUsed,
+          usageType: "ai_assistant",
+        },
+      }
+    );
 
     // Save assistant response
     const contextUsed = {
@@ -199,7 +200,7 @@ const sendMessage = async (req, res) => {
       assistantName: assistantPlan.assistantName || `${astrologer.fullName}'s Assistant`,
       remainingChats: limitCheck.remaining - 1,
       chatCost,
-      walletBalance: parseFloat(wallet.balance),
+      walletBalance: debitResult.wallet.balance,
       tokensUsed,
     });
   } catch (error) {

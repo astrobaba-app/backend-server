@@ -5,6 +5,10 @@ const CouponUsage = require("../../model/coupon/couponUsage");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const { Op } = require("sequelize");
+const {
+  getWalletBalanceBreakdown,
+  buildWalletDebitPlan,
+} = require("../../services/walletService");
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -18,6 +22,26 @@ console.log('[Razorpay] Initialization status:', {
   keySecretPresent: !!process.env.RAZORPAY_KEY_SECRET,
   keyIdPrefix: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 8) + '...' : 'NOT SET'
 });
+
+const toAmount = (value) => {
+  const parsed = parseFloat(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildWalletPayload = (wallet) => {
+  const { balance, signupBonusBalance, rechargeBalance } =
+    getWalletBalanceBreakdown(wallet || {});
+
+  return {
+    balance,
+    signupBonusBalance,
+    humanChatBalance: rechargeBalance,
+    aiUsableBalance: balance,
+    totalRecharge: toAmount(wallet?.totalRecharge),
+    totalSpent: toAmount(wallet?.totalSpent),
+    isActive: wallet?.isActive ?? true,
+  };
+};
 
 
 const getWalletBalance = async (req, res) => {
@@ -33,12 +57,7 @@ const getWalletBalance = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      wallet: {
-        balance: parseFloat(wallet.balance),
-        totalRecharge: parseFloat(wallet.totalRecharge),
-        totalSpent: parseFloat(wallet.totalSpent),
-        isActive: wallet.isActive,
-      },
+      wallet: buildWalletPayload(wallet),
     });
   } catch (error) {
     console.error("Get wallet balance error:", error);
@@ -303,10 +322,7 @@ const verifyRecharge = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: "Transaction already completed",
-        wallet: {
-          balance: parseFloat(wallet.balance),
-          totalRecharge: parseFloat(wallet.totalRecharge),
-        },
+        wallet: buildWalletPayload(wallet),
         transaction: {
           id: transaction.id,
           amount: parseFloat(transaction.amount),
@@ -335,8 +351,8 @@ const verifyRecharge = async (req, res) => {
 
     try {
       // Update wallet balance
-      const newBalance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
-      const newTotalRecharge = parseFloat(wallet.totalRecharge) + parseFloat(transaction.amount);
+      const newBalance = toAmount(wallet.balance) + toAmount(transaction.amount);
+      const newTotalRecharge = toAmount(wallet.totalRecharge) + toAmount(transaction.amount);
 
       await wallet.update(
         {
@@ -390,10 +406,7 @@ const verifyRecharge = async (req, res) => {
       res.status(200).json({
         success: true,
         message: "Wallet recharged successfully",
-        wallet: {
-          balance: newBalance,
-          totalRecharge: newTotalRecharge,
-        },
+        wallet: buildWalletPayload(wallet),
         transaction: {
           id: transaction.id,
           amount: parseFloat(transaction.amount),
@@ -472,34 +485,36 @@ const deductFromWallet = async (userId, amount, description = "Payment") => {
     throw new Error("Wallet not found");
   }
 
-  if (parseFloat(wallet.balance) < amount) {
-    throw new Error("Insufficient wallet balance");
-  }
-
-  const balanceBefore = parseFloat(wallet.balance);
-  const newBalance = balanceBefore - amount;
-  const newTotalSpent = parseFloat(wallet.totalSpent) + amount;
+  const debitPlan = buildWalletDebitPlan(wallet, amount, {
+    allowSignupBonusUsage: true,
+  });
+  const newTotalSpent = toAmount(wallet.totalSpent) + debitPlan.debitAmount;
 
   await wallet.update({
-    balance: newBalance,
+    balance: debitPlan.nextBalance,
+    signupBonusBalance: debitPlan.nextSignupBonusBalance,
     totalSpent: newTotalSpent,
   });
 
   const transaction = await WalletTransaction.create({
     userId,
     walletId: wallet.id,
-    amount,
+    amount: debitPlan.debitAmount,
     type: "debit",
     status: "completed",
     paymentMethod: "manual",
     description,
-    balanceBefore,
-    balanceAfter: newBalance,
+    balanceBefore: debitPlan.previousBalance,
+    balanceAfter: debitPlan.nextBalance,
+    metadata: {
+      rechargeConsumed: debitPlan.rechargeConsumed,
+      signupBonusConsumed: debitPlan.signupBonusConsumed,
+    },
   });
 
   return {
     success: true,
-    wallet,
+    wallet: buildWalletPayload(wallet),
     transaction,
   };
 };
@@ -511,6 +526,8 @@ const deductForAIUsage = async (req, res) => {
   try {
     const userId = req.user.id;
     const { amount, type, minutes } = req.body;
+    const parsedAmount = toAmount(amount);
+    const parsedMinutes = toAmount(minutes);
 
     console.log('=== AI WALLET DEDUCTION START ===');
     console.log('[PRODUCTION DEBUG] Timestamp:', new Date().toISOString());
@@ -522,7 +539,7 @@ const deductForAIUsage = async (req, res) => {
     console.log('[PRODUCTION DEBUG] Request body:', JSON.stringify(req.body));
     console.log('[PRODUCTION DEBUG] Request headers:', JSON.stringify(req.headers));
 
-    if (!amount || amount <= 0) {
+    if (!parsedAmount || parsedAmount <= 0) {
       console.error('[PRODUCTION DEBUG] Invalid amount validation failed:', { amount, type: typeof amount });
       return res.status(400).json({
         success: false,
@@ -562,16 +579,16 @@ const deductForAIUsage = async (req, res) => {
     const currentBalance = parseFloat(wallet.balance);
     console.log('[PRODUCTION DEBUG] Balance check:', {
       currentBalance,
-      requiredAmount: amount,
-      hasSufficientBalance: currentBalance >= amount
+      requiredAmount: parsedAmount,
+      hasSufficientBalance: currentBalance >= parsedAmount
     });
 
-    if (currentBalance < amount) {
+    if (currentBalance < parsedAmount) {
       console.error('[PRODUCTION DEBUG] Insufficient balance for AI usage:', {
         userId,
         currentBalance,
-        requiredAmount: amount,
-        deficit: amount - currentBalance
+        requiredAmount: parsedAmount,
+        deficit: parsedAmount - currentBalance
       });
       return res.status(400).json({
         success: false,
@@ -586,14 +603,19 @@ const deductForAIUsage = async (req, res) => {
     const dbTransaction = await sequelize.transaction();
 
     try {
-      const balanceBefore = parseFloat(wallet.balance);
-      const newBalance = balanceBefore - amount;
-      const newTotalSpent = parseFloat(wallet.totalSpent) + amount;
+      const debitPlan = buildWalletDebitPlan(wallet, parsedAmount, {
+        allowSignupBonusUsage: true,
+      });
+      const newTotalSpent = toAmount(wallet.totalSpent) + debitPlan.debitAmount;
 
       console.log('[PRODUCTION DEBUG] Calculating new balances:', {
-        balanceBefore,
-        amount,
-        newBalance,
+        balanceBefore: debitPlan.previousBalance,
+        amount: parsedAmount,
+        newBalance: debitPlan.nextBalance,
+        signupBonusBefore: debitPlan.previousSignupBonusBalance,
+        signupBonusAfter: debitPlan.nextSignupBonusBalance,
+        rechargeConsumed: debitPlan.rechargeConsumed,
+        signupBonusConsumed: debitPlan.signupBonusConsumed,
         currentTotalSpent: wallet.totalSpent,
         newTotalSpent
       });
@@ -602,7 +624,8 @@ const deductForAIUsage = async (req, res) => {
       console.log('[PRODUCTION DEBUG] Updating wallet in database');
       await wallet.update(
         {
-          balance: newBalance,
+          balance: debitPlan.nextBalance,
+          signupBonusBalance: debitPlan.nextSignupBonusBalance,
           totalSpent: newTotalSpent,
         },
         { transaction: dbTransaction }
@@ -615,13 +638,19 @@ const deductForAIUsage = async (req, res) => {
         {
           userId,
           walletId: wallet.id,
-          amount,
+          amount: debitPlan.debitAmount,
           type: "debit",
           status: "completed",
           paymentMethod: "manual",
-          description: `AI ${type} usage - ${minutes.toFixed(2)} minutes`,
-          balanceBefore,
-          balanceAfter: newBalance,
+          description: `AI ${type} usage - ${parsedMinutes.toFixed(2)} minutes`,
+          balanceBefore: debitPlan.previousBalance,
+          balanceAfter: debitPlan.nextBalance,
+          metadata: {
+            usageType: `ai_${type}`,
+            durationMinutes: parsedMinutes,
+            rechargeConsumed: debitPlan.rechargeConsumed,
+            signupBonusConsumed: debitPlan.signupBonusConsumed,
+          },
         },
         { transaction: dbTransaction }
       );
@@ -637,23 +666,26 @@ const deductForAIUsage = async (req, res) => {
 
       console.log('[PRODUCTION DEBUG] AI wallet deduction successful:', {
         userId,
-        amount,
+        amount: parsedAmount,
         type,
-        minutes,
-        balanceBefore,
-        newBalance,
+        minutes: parsedMinutes,
+        balanceBefore: debitPlan.previousBalance,
+        newBalance: debitPlan.nextBalance,
         transactionId: transaction.id
       });
 
       const responseData = {
         success: true,
         message: "Amount deducted successfully",
-        newBalance,
+        newBalance: debitPlan.nextBalance,
+        wallet: buildWalletPayload(wallet),
         transaction: {
           id: transaction.id,
-          amount,
-          balanceBefore,
-          balanceAfter: newBalance,
+          amount: debitPlan.debitAmount,
+          balanceBefore: debitPlan.previousBalance,
+          balanceAfter: debitPlan.nextBalance,
+          rechargeConsumed: debitPlan.rechargeConsumed,
+          signupBonusConsumed: debitPlan.signupBonusConsumed,
         },
       };
       console.log('[PRODUCTION DEBUG] Sending success response:', JSON.stringify(responseData));

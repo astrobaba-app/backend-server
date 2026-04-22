@@ -3,6 +3,10 @@ const WalletTransaction = require("../model/wallet/walletTransaction");
 const AstrologerEarning = require("../model/astrologer/astrologerEarning");
 const ChatSession = require("../model/chat/chatSession");
 const { sequelize } = require("../dbConnection/dbConfig");
+const {
+  getWalletBalanceBreakdown,
+  buildWalletDebitPlan,
+} = require("./walletService");
 
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
 
@@ -82,6 +86,7 @@ async function completeChatSessionWithBilling(session, io) {
 
     let billedAmount = 0;
     let updatedWalletBalance = null;
+    let updatedRechargeBalance = null;
 
     const wallet = await Wallet.findOne({
       where: { userId: lockedSession.userId },
@@ -90,15 +95,20 @@ async function completeChatSessionWithBilling(session, io) {
     });
 
     if (wallet && currentCost > 0) {
-      const currentBalance = parseFloat(wallet.balance || 0);
-      billedAmount = Math.min(currentBalance, currentCost);
+      const walletBreakdown = getWalletBalanceBreakdown(wallet);
+      billedAmount = Math.min(walletBreakdown.rechargeBalance, currentCost);
 
       if (billedAmount > 0) {
-        updatedWalletBalance = currentBalance - billedAmount;
+        const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
+          allowSignupBonusUsage: false,
+        });
+        updatedWalletBalance = debitPlan.nextBalance;
+        updatedRechargeBalance = debitPlan.nextRechargeBalance;
 
         await wallet.update(
           {
             balance: updatedWalletBalance,
+            signupBonusBalance: debitPlan.nextSignupBonusBalance,
             totalSpent: parseFloat(wallet.totalSpent || 0) + billedAmount,
           },
           { transaction: dbTransaction }
@@ -112,13 +122,15 @@ async function completeChatSessionWithBilling(session, io) {
             type: "debit",
             status: "completed",
             description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
-            balanceBefore: currentBalance,
+            balanceBefore: debitPlan.previousBalance,
             balanceAfter: updatedWalletBalance,
             metadata: {
               chatSessionId: lockedSession.id,
               astrologerId: lockedSession.astrologerId,
               durationMinutes: currentMinutes,
               pricePerMinute,
+              rechargeConsumed: debitPlan.rechargeConsumed,
+              signupBonusConsumed: debitPlan.signupBonusConsumed,
             },
           },
           { transaction: dbTransaction }
@@ -156,6 +168,7 @@ async function completeChatSessionWithBilling(session, io) {
     if (io && billedAmount > 0 && updatedWalletBalance !== null) {
       io.to(`user:${lockedSession.userId}`).emit("wallet:updated", {
         balance: updatedWalletBalance,
+        rechargeBalance: updatedRechargeBalance,
         deduction: billedAmount,
         reason: "chat",
         sessionId: lockedSession.id,

@@ -328,6 +328,32 @@ async function ensureAIChatSessionColumns() {
   }
 }
 
+async function ensureWalletColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("wallets");
+    const operations = [];
+
+    if (!table.signupBonusBalance && !table.signup_bonus_balance) {
+      operations.push(
+        queryInterface.addColumn("wallets", "signupBonusBalance", {
+          type: DataTypes.DECIMAL(10, 2),
+          allowNull: false,
+          defaultValue: 0.0,
+          comment: "Remaining signup bonus credits. Usable only for AI experiences",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured wallet bonus columns exist");
+    }
+  } catch (error) {
+    console.log("wallets table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureKundliShareColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -831,6 +857,7 @@ const initDB = (callback) => {
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
+    .then(() => ensureWalletColumns())
     .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureForumPostModerationColumns())
