@@ -4,7 +4,7 @@ const User = require("../../model/user/userAuth");
 const BroadcastLog = require("../../model/admin/broadcastLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { literal } = require("sequelize");
+const { literal, Op } = require("sequelize");
 const {
   sendAstrologerApprovalEmail,
   sendAstrologerRejectionEmail,
@@ -19,6 +19,154 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const notificationService = require("../../services/notificationService");
+const redis = require("../../config/redis/redis");
+const {
+  USERS_LIST_CACHE_TTL_SECONDS,
+  getCachedUsersList,
+  setCachedUsersList,
+  invalidateUsersListCache,
+} = require("../../services/adminUsersCacheService");
+
+const TOTAL_USERS_CACHE_KEY = "admin:dashboard:total-users:v1";
+const TODAY_LOGINS_CACHE_PREFIX = "admin:dashboard:today-logins:";
+const TOTAL_USERS_CACHE_TTL_SECONDS = 10 * 60;
+const TODAY_LOGINS_CACHE_TTL_SECONDS = 5 * 60;
+
+const parseCachedValue = (cachedValue) => {
+  if (!cachedValue) return null;
+
+  if (typeof cachedValue === "string") {
+    try {
+      return JSON.parse(cachedValue);
+    } catch {
+      return null;
+    }
+  }
+
+  return cachedValue;
+};
+
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getTodayWindow = () => {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const startOfTomorrow = new Date(startOfToday);
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1);
+
+  return {
+    dateKey: getLocalDateKey(startOfToday),
+    startOfToday,
+    startOfTomorrow,
+  };
+};
+
+const getCachedTotalUsersStats = async () => {
+  try {
+    const cached = await redis.get(TOTAL_USERS_CACHE_KEY);
+    const parsed = parseCachedValue(cached);
+
+    if (parsed) {
+      return parsed;
+    }
+  } catch (error) {
+    console.error("Failed to read total users stats cache:", error.message || error);
+  }
+
+  const emailFilter = {
+    [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }],
+  };
+
+  const [totalUsers, totalUsersByPhone, totalUsersByEmail] = await Promise.all([
+    User.count(),
+    User.count({
+      where: {
+        mobile: { [Op.ne]: null },
+      },
+    }),
+    User.count({
+      where: {
+        email: emailFilter,
+      },
+    }),
+  ]);
+
+  const stats = {
+    totalUsers,
+    totalUsersByPhone,
+    totalUsersByEmail,
+  };
+
+  try {
+    await redis.setex(TOTAL_USERS_CACHE_KEY, TOTAL_USERS_CACHE_TTL_SECONDS, stats);
+  } catch (error) {
+    console.error("Failed to write total users stats cache:", error.message || error);
+  }
+
+  return stats;
+};
+
+const getCachedTodayLoginStats = async () => {
+  const { dateKey, startOfToday, startOfTomorrow } = getTodayWindow();
+  const cacheKey = `${TODAY_LOGINS_CACHE_PREFIX}${dateKey}:v1`;
+
+  try {
+    const cached = await redis.get(cacheKey);
+    const parsed = parseCachedValue(cached);
+
+    if (parsed) {
+      return parsed;
+    }
+  } catch (error) {
+    console.error("Failed to read today login stats cache:", error.message || error);
+  }
+
+  const dateRangeFilter = {
+    [Op.gte]: startOfToday,
+    [Op.lt]: startOfTomorrow,
+  };
+
+  const [todayLoggedInUsers, todayLoggedInPhoneUsers, todayLoggedInEmailUsers] =
+    await Promise.all([
+      User.count({
+        where: {
+          lastLoginAt: dateRangeFilter,
+        },
+      }),
+      User.count({
+        where: {
+          lastLoginAt: dateRangeFilter,
+          lastLoginMethod: "phone",
+        },
+      }),
+      User.count({
+        where: {
+          lastLoginAt: dateRangeFilter,
+          lastLoginMethod: "email",
+        },
+      }),
+    ]);
+
+  const stats = {
+    todayLoggedInUsers,
+    todayLoggedInPhoneUsers,
+    todayLoggedInEmailUsers,
+  };
+
+  try {
+    await redis.setex(cacheKey, TODAY_LOGINS_CACHE_TTL_SECONDS, stats);
+  } catch (error) {
+    console.error("Failed to write today login stats cache:", error.message || error);
+  }
+
+  return stats;
+};
 
 
 const register = async (req, res) => {
@@ -344,31 +492,91 @@ const changeAdminRole = async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    const { page = 1, limit = 20 } = req.query;
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 20)
+    );
     const offset = (page - 1) * limit;
 
+    const cachedPayload = await getCachedUsersList({ page, limit });
+    if (cachedPayload) {
+      return res.status(200).json(cachedPayload);
+    }
+
     const { rows: users, count } = await User.findAndCountAll({
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit,
+      offset,
       order: [["createdAt", "DESC"]],
       attributes: { exclude: ["password"] },
     });
 
-    res.status(200).json({
+    const payload = {
       success: true,
       users,
       pagination: {
         total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         totalPages: Math.ceil(count / limit),
       },
-    });
+      cache: {
+        ttlSeconds: USERS_LIST_CACHE_TTL_SECONDS,
+      },
+    };
+
+    await setCachedUsersList({ page, limit, payload });
+
+    res.status(200).json(payload);
   } catch (error) {
     console.error("Get all users error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch users",
+      error: error.message,
+    });
+  }
+};
+
+const getDashboardStats = async (req, res) => {
+  try {
+    const [
+      totalUsersStats,
+      todayLoginStats,
+      totalAstrologers,
+      approvedAstrologers,
+      pendingApprovals,
+    ] = await Promise.all([
+      getCachedTotalUsersStats(),
+      getCachedTodayLoginStats(),
+      Astrologer.count(),
+      Astrologer.count({ where: { isApproved: true } }),
+      Astrologer.count({ where: { isApproved: false, isActive: true } }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalAstrologers,
+        approvedAstrologers,
+        pendingApprovals,
+        totalUsers: totalUsersStats.totalUsers,
+        totalUsersByPhone: totalUsersStats.totalUsersByPhone,
+        totalUsersByEmail: totalUsersStats.totalUsersByEmail,
+        todayLoggedInUsers: todayLoginStats.todayLoggedInUsers,
+        todayLoggedInPhoneUsers: todayLoginStats.todayLoggedInPhoneUsers,
+        todayLoggedInEmailUsers: todayLoginStats.todayLoggedInEmailUsers,
+      },
+      cache: {
+        totalUsersTtlSeconds: TOTAL_USERS_CACHE_TTL_SECONDS,
+        todayLoginsTtlSeconds: TODAY_LOGINS_CACHE_TTL_SECONDS,
+      },
+    });
+  } catch (error) {
+    console.error("Get dashboard stats error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard statistics",
       error: error.message,
     });
   }
@@ -398,6 +606,7 @@ const updateUserWhatsappChatLimit = async (req, res) => {
     }
 
     await user.update({ whatsappChatLimit: parsedLimit });
+    await invalidateUsersListCache();
 
     return res.status(200).json({
       success: true,
@@ -458,6 +667,8 @@ const updateAllUsersWhatsappChatLimit = async (req, res) => {
       );
       updatedCount = count;
     }
+
+    await invalidateUsersListCache();
 
     const actionMessage =
       operation === "add"
@@ -1188,6 +1399,7 @@ module.exports = {
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
+  getDashboardStats,
   updateUserWhatsappChatLimit,
   updateAllUsersWhatsappChatLimit,
   getAllAstrologers,

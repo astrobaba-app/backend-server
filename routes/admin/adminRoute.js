@@ -8,6 +8,7 @@ const {
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
+  getDashboardStats,
   updateUserWhatsappChatLimit,
   updateAllUsersWhatsappChatLimit,
   getAllAstrologers,
@@ -118,6 +119,12 @@ router.put(
   checkForAuthenticationCookie(),
   authorizeRoles([ "masteradmin"]),
   changeAdminRole
+);
+router.get(
+  "/dashboard/stats",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getDashboardStats
 );
 router.get(
   "/users",

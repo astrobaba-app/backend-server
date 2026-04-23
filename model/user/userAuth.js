@@ -127,6 +127,14 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    lastLoginAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    lastLoginMethod: {
+      type: DataTypes.ENUM("phone", "email"),
+      allowNull: true,
+    },
   },
   {
     tableName: "users",

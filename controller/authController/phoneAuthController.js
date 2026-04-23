@@ -18,6 +18,7 @@ const {
   verifyFirebasePhoneToken,
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
+const { trackUserLogin } = require("../../services/userLoginTrackingService");
 
 
 // Demo credentials – no real SMS is sent for this number
@@ -178,6 +179,10 @@ const verifyOtp = async (req, res) => {
     const refreshToken = createRefreshToken(user);
 
     setTokenCookie(res, token, middlewareToken, refreshToken);
+
+    await trackUserLogin(user.id, "phone", {
+      invalidateTotalUsers: isNewUser,
+    });
 
     // Apply signup bonus for new users
     let bonusInfo = null;

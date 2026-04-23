@@ -12,6 +12,7 @@ const {
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
+const { trackUserLogin } = require("../../services/userLoginTrackingService");
 
 const normalizeSource = (value) => {
   if (Array.isArray(value)) {
@@ -215,6 +216,10 @@ const appleCallback = async (req, res) => {
     const middlewareToken = createMiddlewareToken(user);
     const refreshToken = createRefreshToken(user);
     setTokenCookie(res, token, middlewareToken, refreshToken);
+
+    await trackUserLogin(user.id, "email", {
+      invalidateTotalUsers: isNewUser,
+    });
 
     // ── 5. Signup bonus for new users ────────────────────────────────────────
     if (isNewUser) {

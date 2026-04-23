@@ -486,6 +486,24 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.lastLoginAt && !table.last_login_at) {
+      operations.push(
+        queryInterface.addColumn("users", "lastLoginAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.lastLoginMethod && !table.last_login_method) {
+      operations.push(
+        queryInterface.addColumn("users", "lastLoginMethod", {
+          type: DataTypes.ENUM("phone", "email"),
+          allowNull: true,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured user preference columns exist");
