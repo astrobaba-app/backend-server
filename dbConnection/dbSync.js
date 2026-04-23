@@ -48,6 +48,7 @@ const Follow = require("../model/follow/follow");
 const Horoscope = require("../model/horoscope/horoscope");
 const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
 const Kundli = require("../model/horoscope/kundli");
+const KundliReport = require("../model/horoscope/kundliReport");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
 
@@ -843,6 +844,58 @@ async function ensureJobApplicationColumns() {
   }
 }
 
+async function ensureKundliReportPdfColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("kundli_reports");
+    const operations = [];
+
+    if (!table.pdfUrl && !table.pdf_url) {
+      operations.push(
+        queryInterface.addColumn("kundli_reports", "pdfUrl", {
+          type: DataTypes.TEXT,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pdfPublicId && !table.pdf_public_id) {
+      operations.push(
+        queryInterface.addColumn("kundli_reports", "pdfPublicId", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pdfFileName && !table.pdf_file_name) {
+      operations.push(
+        queryInterface.addColumn("kundli_reports", "pdfFileName", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pdfUploadedAt && !table.pdf_uploaded_at) {
+      operations.push(
+        queryInterface.addColumn("kundli_reports", "pdfUploadedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured kundli_reports PDF columns exist");
+    }
+  } catch (error) {
+    console.log("kundli_reports table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -864,6 +917,7 @@ const initDB = (callback) => {
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
     .then(() => ensureJobApplicationColumns())
+    .then(() => ensureKundliReportPdfColumns())
     .then(() => {
       console.log("All models synced");
       callback();

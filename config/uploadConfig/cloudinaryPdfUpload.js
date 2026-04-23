@@ -10,6 +10,9 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+const DEFAULT_PDF_FOLDER = "graho/job-resumes";
+const DEFAULT_KUNDLI_REPORT_FOLDER = "graho/kundli-reports";
+
 const isCloudinaryConfigured = () => {
   return Boolean(
     process.env.CLOUDINARY_CLOUD_NAME &&
@@ -41,7 +44,19 @@ const upload = multer({
   fileFilter,
 });
 
-const uploadToCloudinary = (file) => {
+const sanitizePdfFileName = (fileName) => {
+  const sanitized = String(fileName || "document")
+    .replace(/\.pdf$/i, "")
+    .replace(/[^a-zA-Z0-9-_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+
+  return `${sanitized || "document"}.pdf`;
+};
+
+const uploadToCloudinary = (file, options = {}) => {
+  const { folder = DEFAULT_PDF_FOLDER } = options;
+
   return new Promise((resolve, reject) => {
     if (!isCloudinaryConfigured()) {
       reject(new Error("Cloudinary configuration is missing"));
@@ -50,7 +65,7 @@ const uploadToCloudinary = (file) => {
 
     const uploadStream = cloudinary.uploader.upload_stream(
       {
-        folder: "graho/job-resumes",
+        folder,
         resource_type: "raw",
         use_filename: true,
         unique_filename: true,
@@ -67,6 +82,23 @@ const uploadToCloudinary = (file) => {
 
     Readable.from(file.buffer).pipe(uploadStream);
   });
+};
+
+const uploadPdfBuffer = async ({ buffer, fileName, folder = DEFAULT_KUNDLI_REPORT_FOLDER }) => {
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error("Invalid PDF buffer for Cloudinary upload");
+  }
+
+  const normalizedName = sanitizePdfFileName(fileName || `kundli_report_${Date.now()}.pdf`);
+
+  return uploadToCloudinary(
+    {
+      originalname: normalizedName,
+      mimetype: "application/pdf",
+      buffer,
+    },
+    { folder }
+  );
 };
 
 const singlePdfUpload = (fieldName) => [
@@ -105,4 +137,5 @@ const singlePdfUpload = (fieldName) => [
 
 module.exports = {
   single: singlePdfUpload,
+  uploadPdfBuffer,
 };

@@ -3,6 +3,7 @@ const phoneAuthApp = require("../config/firebasePhoneAuthConfig");
 const shouldCheckRevoked =
   String(process.env.FIREBASE_PHONE_AUTH_CHECK_REVOKED || "false").toLowerCase() ===
   "true";
+const firebasePhoneAuth = phoneAuthApp.auth();
 
 const normalizeIndianMobile = (rawValue) => {
   const digits = String(rawValue || "").replace(/\D/g, "");
@@ -61,11 +62,22 @@ const verifyFirebasePhoneToken = async (firebaseIdToken, expectedPhoneNumber) =>
     throw error;
   }
 
+  const normalizedExpected = expectedPhoneNumber
+    ? normalizeIndianMobile(expectedPhoneNumber)
+    : null;
+
+  if (expectedPhoneNumber && !normalizedExpected) {
+    const error = new Error("Invalid phone number format");
+    error.statusCode = 400;
+    throw error;
+  }
+
   let decodedToken;
   try {
-    decodedToken = await phoneAuthApp
-      .auth()
-      .verifyIdToken(firebaseIdToken, shouldCheckRevoked);
+    decodedToken = await firebasePhoneAuth.verifyIdToken(
+      firebaseIdToken,
+      shouldCheckRevoked
+    );
   } catch (error) {
     throw mapTokenVerificationError(error);
   }
@@ -84,14 +96,7 @@ const verifyFirebasePhoneToken = async (firebaseIdToken, expectedPhoneNumber) =>
     throw error;
   }
 
-  if (expectedPhoneNumber) {
-    const normalizedExpected = normalizeIndianMobile(expectedPhoneNumber);
-    if (!normalizedExpected) {
-      const error = new Error("Invalid phone number format");
-      error.statusCode = 400;
-      throw error;
-    }
-
+  if (normalizedExpected) {
     if (normalizedExpected !== verifiedMobile) {
       const error = new Error("Phone number mismatch");
       error.statusCode = 400;

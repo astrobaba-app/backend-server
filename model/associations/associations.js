@@ -1,6 +1,7 @@
 const User = require("../user/userAuth");
 const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
+const KundliReport = require("../horoscope/kundliReport");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
 const AppleAuth = require("../user/appleAuth");
@@ -68,6 +69,30 @@ const JobApplication = require("../job/jobApplication");
   Kundli.belongsTo(UserRequest, {
     foreignKey: "requestId",
     as: "userRequest",
+  });
+
+  // UserRequest has one generated KundliReport
+  UserRequest.hasOne(KundliReport, {
+    foreignKey: "userRequestId",
+    as: "kundliReport",
+    onDelete: "CASCADE",
+  });
+
+  KundliReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated kundli reports
+  User.hasMany(KundliReport, {
+    foreignKey: "userId",
+    as: "kundliReports",
+    onDelete: "CASCADE",
+  });
+
+  KundliReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
   });
 
 
