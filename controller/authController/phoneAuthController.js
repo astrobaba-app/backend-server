@@ -159,14 +159,18 @@ const verifyOtp = async (req, res) => {
     //   });
     // }
 
-    // Find or create user in one DB operation to reduce login latency.
-    const [user, isNewUser] = await User.findOrCreate({
-      where: { mobile: verifiedMobile },
-      defaults: {
+    // Find or create user
+    let user = await User.findOne({ where: { mobile: verifiedMobile } });
+    
+    let isNewUser = false;
+    if (!user) {
+      // Create new user
+      user = await User.create({
         mobile: verifiedMobile,
         isUserRequested: false,
-      },
-    });
+      });
+      isNewUser = true;
+    }
 
     // Generate tokens and set cookies
     const token = createToken(user);
@@ -175,16 +179,21 @@ const verifyOtp = async (req, res) => {
 
     setTokenCookie(res, token, middlewareToken, refreshToken);
 
-    // Keep OTP verify response fast; apply signup bonus in background.
-    const bonusInfo = null;
+    // Apply signup bonus for new users
+    let bonusInfo = null;
     if (isNewUser) {
-      setImmediate(async () => {
-        try {
-          await applySignupBonus(user.id, "phone");
-        } catch (error) {
-          console.error("Failed to apply signup bonus:", error);
+      try {
+        const bonusResult = await applySignupBonus(user.id, "phone");
+        if (bonusResult.bonusApplied) {
+          bonusInfo = {
+            amount: bonusResult.amount,
+            message: bonusResult.message,
+          };
         }
-      });
+      } catch (error) {
+        console.error("Failed to apply signup bonus:", error);
+        // Don't fail the registration if bonus fails
+      }
     }
 
     // Check if this is a new user (no fullName means not completed profile)
