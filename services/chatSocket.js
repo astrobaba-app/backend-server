@@ -8,6 +8,7 @@ const Wallet = require("../model/wallet/wallet");
 const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
+const { queueArchiveAndDeleteSession } = require("./chatHistoryService");
 const { getWalletBalanceBreakdown } = require("./walletService");
 
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -176,6 +177,11 @@ async function autoEndSessionForUserInactivity(io, sessionId) {
       sessionId: session.id,
       session: mapSession(session, "astrologer"),
     });
+
+    queueArchiveAndDeleteSession(session.id, {
+      endReason: "user_inactive_timeout",
+      billedAmount: billing.billedAmount,
+    });
   } catch (error) {
     console.error("auto end chat inactivity error:", error);
   }
@@ -220,6 +226,11 @@ async function endSessionForInsufficientBalance(io, session) {
       session: mapSession(session, "astrologer"),
     });
   }
+
+  queueArchiveAndDeleteSession(session.id, {
+    endReason: "insufficient_balance",
+    billedAmount: billing.billedAmount,
+  });
 
   return billing;
 }

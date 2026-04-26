@@ -17,6 +17,8 @@ const BlogLike = require("../blog/blogLike");
 const Review = require("../review/review");
 const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
+const ChatHistorySession = require("../chat/chatHistorySession");
+const ChatHistoryMessage = require("../chat/chatHistoryMessage");
 const LiveSession = require("../live/liveSession");
 const LiveParticipant = require("../live/liveParticipant");
 const CallSession = require("../call/callSession");
@@ -304,6 +306,40 @@ const JobApplication = require("../job/jobApplication");
   ChatMessage.belongsTo(ChatSession, {
     foreignKey: "sessionId",
     as: "session",
+  });
+
+  // Chat history associations
+  User.hasMany(ChatHistorySession, {
+    foreignKey: "userId",
+    as: "chatHistorySessions",
+    onDelete: "CASCADE",
+  });
+
+  ChatHistorySession.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Astrologer.hasMany(ChatHistorySession, {
+    foreignKey: "astrologerId",
+    as: "chatHistorySessions",
+    onDelete: "CASCADE",
+  });
+
+  ChatHistorySession.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
+  ChatHistorySession.hasMany(ChatHistoryMessage, {
+    foreignKey: "historySessionId",
+    as: "messages",
+    onDelete: "CASCADE",
+  });
+
+  ChatHistoryMessage.belongsTo(ChatHistorySession, {
+    foreignKey: "historySessionId",
+    as: "historySession",
   });
 
   // LiveSession associations

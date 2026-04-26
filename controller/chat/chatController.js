@@ -1,5 +1,7 @@
 const ChatSession = require("../../model/chat/chatSession");
 const ChatMessage = require("../../model/chat/chatMessage");
+const ChatHistorySession = require("../../model/chat/chatHistorySession");
+const ChatHistoryMessage = require("../../model/chat/chatHistoryMessage");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
 const Wallet = require("../../model/wallet/wallet");
@@ -9,6 +11,9 @@ const pushNotificationService = require("../../services/pushNotificationService"
 const {
   completeChatSessionWithBilling,
 } = require("../../services/chatSessionLifecycle");
+const {
+  queueArchiveAndDeleteSession,
+} = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
@@ -94,33 +99,14 @@ const startChatSession = async (req, res) => {
       });
     }
 
-    // Reuse existing session for this user-astrologer pair if it exists
-    let session = await ChatSession.findOne({
-      where: {
-        userId,
-        astrologerId,
-      },
+    const session = await ChatSession.create({
+      userId,
+      astrologerId,
+      pricePerMinute: astrologer.pricePerMinute,
+      startTime: new Date(),
+      // Every new chat starts as a fresh pending request.
+      requestStatus: "pending",
     });
-
-    // Create chat session if none exists yet
-    if (!session) {
-      session = await ChatSession.create({
-        userId,
-        astrologerId,
-        pricePerMinute: astrologer.pricePerMinute,
-        startTime: new Date(),
-        // Initially mark as pending until astrologer approves the chat request
-        requestStatus: "pending",
-      });
-    } else {
-      // Reactivate existing session for a new conversation window
-      await session.update({
-        status: "active",
-        startTime: new Date(),
-        endTime: null,
-        requestStatus: "pending",
-      });
-    }
 
     // Get astrologer details
     const astrologerDetails = await Astrologer.findByPk(astrologerId, {
@@ -218,6 +204,26 @@ const endChatSession = async (req, res) => {
     });
 
     if (!session) {
+      const archived = await ChatHistorySession.findOne({
+        where: { sourceSessionId: sessionId, userId },
+      });
+
+      if (archived) {
+        return res.status(200).json({
+          success: true,
+          message: "Chat session already ended",
+          session: {
+            id: sessionId,
+            totalMinutes: archived.totalMinutes || 0,
+            totalCost: parseFloat(archived.totalCost || 0),
+            billedAmount: parseFloat(archived.billedAmount || 0),
+            pricePerMinute: parseFloat(archived.pricePerMinute || 0),
+            startTime: archived.startTime,
+            endTime: archived.endTime,
+          },
+        });
+      }
+
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -274,6 +280,11 @@ const endChatSession = async (req, res) => {
         session: mapSession(session, "astrologer"),
       });
     }
+
+    queueArchiveAndDeleteSession(session.id, {
+      endReason,
+      billedAmount: billing.billedAmount,
+    });
 
     res.status(200).json({
       success: true,
@@ -556,14 +567,17 @@ const getSessionMessages = async (req, res) => {
   }
 };
 
-// Get user's chat sessions
+// Get user's active/pending chat sessions (live inbox)
 const getUserChatSessions = async (req, res) => {
   try {
     const userId = req.user.id;
     const { page = 1, limit = 20, status } = req.query;
     const offset = (page - 1) * limit;
 
-    const where = { userId };
+    const where = {
+      userId,
+      status: "active",
+    };
     if (status) {
       where.status = status;
     }
@@ -582,18 +596,7 @@ const getUserChatSessions = async (req, res) => {
       ],
     });
 
-    // Ensure only one session per user-astrologer pair is returned
-    // by keeping the most recently created session for each astrologer.
-    const dedupedMap = new Map();
-    sessions.forEach((session) => {
-      const key = session.astrologerId;
-      const existing = dedupedMap.get(key);
-      if (!existing || new Date(session.createdAt) > new Date(existing.createdAt)) {
-        dedupedMap.set(key, session);
-      }
-    });
-
-    const uniqueSessions = Array.from(dedupedMap.values());
+    const uniqueSessions = sessions;
 
     // Update sessions with 0 pricePerMinute to use current astrologer rate
     for (const session of uniqueSessions) {
@@ -871,7 +874,7 @@ const approveChatRequest = async (req, res) => {
     }
 
     if (activeSession) {
-      await completeChatSessionWithBilling(activeSession, io);
+      const switchedBilling = await completeChatSessionWithBilling(activeSession, io);
       await activeSession.reload();
 
       if (io && chatSocketService) {
@@ -902,6 +905,11 @@ const approveChatRequest = async (req, res) => {
           session: mapSession(activeSession, "astrologer"),
         });
       }
+
+      queueArchiveAndDeleteSession(activeSession.id, {
+        endReason: "astrologer_switched_chat",
+        billedAmount: switchedBilling.billedAmount,
+      });
     }
 
     await session.update({
@@ -1021,6 +1029,115 @@ const rejectChatRequest = async (req, res) => {
   }
 };
 
+const getUserChatHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { page = 1, limit = 5 } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageSize = Math.max(parseInt(limit, 10) || 5, 1);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const { rows: historySessions, count } = await ChatHistorySession.findAndCountAll({
+      where: { userId },
+      distinct: true,
+      col: "id",
+      limit: pageSize,
+      offset,
+      order: [["endTime", "DESC"], ["createdAt", "DESC"]],
+      include: [
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
+        },
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      historySessions,
+      pagination: {
+        total: count,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(count / pageSize),
+      },
+    });
+  } catch (error) {
+    console.error("Get user chat history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch chat history",
+      error: error.message,
+    });
+  }
+};
+
+const getUserAstrologerChatHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { astrologerId } = req.params;
+    const { page = 1, limit = 3 } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageSize = Math.max(parseInt(limit, 10) || 3, 1);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const { rows: historySessions, count } = await ChatHistorySession.findAndCountAll({
+      where: { userId, astrologerId },
+      distinct: true,
+      col: "id",
+      limit: pageSize,
+      offset,
+      order: [["endTime", "DESC"], ["createdAt", "DESC"]],
+      include: [
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
+        },
+        {
+          model: ChatHistoryMessage,
+          as: "messages",
+          required: false,
+          order: [["originalCreatedAt", "ASC"]],
+        },
+      ],
+    });
+
+    const formattedSessions = historySessions.map((session) => {
+      const json = session.toJSON();
+      const sortedMessages = (json.messages || []).sort(
+        (a, b) =>
+          new Date(a.originalCreatedAt).getTime() -
+          new Date(b.originalCreatedAt).getTime()
+      );
+
+      return {
+        ...json,
+        messages: sortedMessages,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      historySessions: formattedSessions,
+      pagination: {
+        total: count,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(count / pageSize),
+      },
+    });
+  } catch (error) {
+    console.error("Get user astrologer chat history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch astrologer chat history",
+      error: error.message,
+    });
+  }
+};
+
 // End an active chat session from astrologer side
 const endAstrologerChatSession = async (req, res) => {
   try {
@@ -1035,6 +1152,26 @@ const endAstrologerChatSession = async (req, res) => {
     });
 
     if (!session) {
+      const archived = await ChatHistorySession.findOne({
+        where: { sourceSessionId: sessionId, astrologerId },
+      });
+
+      if (archived) {
+        return res.status(200).json({
+          success: true,
+          message: "Chat session already ended",
+          session: {
+            id: sessionId,
+            totalMinutes: archived.totalMinutes || 0,
+            totalCost: parseFloat(archived.totalCost || 0),
+            billedAmount: parseFloat(archived.billedAmount || 0),
+            pricePerMinute: parseFloat(archived.pricePerMinute || 0),
+            startTime: archived.startTime,
+            endTime: archived.endTime,
+          },
+        });
+      }
+
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -1087,6 +1224,11 @@ const endAstrologerChatSession = async (req, res) => {
       });
     }
 
+    queueArchiveAndDeleteSession(session.id, {
+      endReason: "astrologer_left_chat",
+      billedAmount: billing.billedAmount,
+    });
+
     return res.status(200).json({
       success: true,
       message: "Chat session ended",
@@ -1113,6 +1255,8 @@ module.exports = {
   sendMessage,
   getSessionMessages,
   getUserChatSessions,
+  getUserChatHistory,
+  getUserAstrologerChatHistory,
   getAstrologerChatSessions,
   getActiveSession,
   getTotalMinutesWithAstrologer,

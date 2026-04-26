@@ -6,6 +6,8 @@ const {
   sendMessage,
   getSessionMessages,
   getUserChatSessions,
+  getUserChatHistory,
+  getUserAstrologerChatHistory,
   getAstrologerChatSessions,
   getActiveSession,
   getTotalMinutesWithAstrologer,
@@ -22,6 +24,8 @@ const upload = require("../../config/uploadConfig/supabaseUpload");
 router.post("/start", checkForAuthenticationCookie(), startChatSession);
 router.post("/:sessionId/end", checkForAuthenticationCookie(), endChatSession);
 router.get("/my-sessions", checkForAuthenticationCookie(), getUserChatSessions);
+router.get("/history", checkForAuthenticationCookie(), getUserChatHistory);
+router.get("/history/:astrologerId", checkForAuthenticationCookie(), getUserAstrologerChatHistory);
 router.get("/active/:astrologerId", checkForAuthenticationCookie(), getActiveSession);
 router.get("/total-minutes/:astrologerId", checkForAuthenticationCookie(), getTotalMinutesWithAstrologer);
 

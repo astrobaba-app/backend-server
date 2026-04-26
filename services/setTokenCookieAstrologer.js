@@ -27,7 +27,7 @@ const setTokenCookieAstrologer = (res, token, astrologerToken, refreshToken) => 
   if (refreshToken) {
     cookies.push(
       serialize("refresh_token", refreshToken, {
-        domain: ".graho.in",
+      domain: ".graho.in",
         httpOnly: true,
         secure: true,
         sameSite: "none",
