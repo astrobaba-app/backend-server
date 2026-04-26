@@ -14,6 +14,7 @@ const { getWalletBalanceBreakdown } = require("./walletService");
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 const userInactivityTimers = new Map();
+const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
 
 /**
  * Extract and validate JWT token from Socket.IO handshake
@@ -307,7 +308,9 @@ async function createAndBroadcastMessage({
   });
 
   const lastMessagePreview =
-    messageType === "image" || messageType === "file"
+    messageType === "voice"
+      ? "[Voice note]"
+      : messageType === "image" || messageType === "file"
       ? "[Attachment]"
       : (text || "").slice(0, 200);
 
@@ -478,8 +481,28 @@ function initializeChatSocket(io) {
         callback
       ) => {
         try {
-          if (!sessionId || !text) {
+          const normalizedMessageType = String(messageType || "text").toLowerCase();
+          const normalizedText = String(text || "").trim();
+
+          if (!sessionId || (!normalizedText && normalizedMessageType !== "voice")) {
             if (callback) callback({ success: false, error: "Missing data" });
+            return;
+          }
+
+          if (!CHAT_MESSAGE_TYPES.has(normalizedMessageType)) {
+            if (callback) {
+              callback({ success: false, error: "Unsupported message type" });
+            }
+            return;
+          }
+
+          if (normalizedMessageType === "voice" && !fileUrl) {
+            if (callback) {
+              callback({
+                success: false,
+                error: "Voice notes require uploaded audio file",
+              });
+            }
             return;
           }
 
@@ -541,8 +564,8 @@ function initializeChatSocket(io) {
             session,
             senderId: authId,
             senderType: isAstrologer ? "astrologer" : "user",
-            text,
-            messageType,
+            text: normalizedMessageType === "voice" ? (normalizedText || "[Voice note]") : normalizedText,
+            messageType: normalizedMessageType,
             fileUrl,
             replyToMessageId,
           });

@@ -33,7 +33,7 @@ const ChatHistoryMessage = sequelize.define(
       allowNull: true,
     },
     messageType: {
-      type: DataTypes.ENUM("text", "image", "file"),
+      type: DataTypes.ENUM("text", "image", "file", "voice"),
       allowNull: false,
       defaultValue: "text",
     },

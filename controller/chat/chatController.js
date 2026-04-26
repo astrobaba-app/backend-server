@@ -37,6 +37,20 @@ const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "state",
   "country",
 ];
+const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
+const VOICE_MESSAGE_ALLOWED_MIME_TYPES = new Set([
+  "audio/webm",
+  "audio/ogg",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/aac",
+  "audio/x-m4a",
+]);
+const MAX_VOICE_NOTE_SECONDS = 120;
+const MAX_VOICE_NOTE_FILE_SIZE_BYTES = 12 * 1024 * 1024;
 
 function isPendingRequestExpired(session) {
   if (!session || session.requestStatus !== "pending") return false;
@@ -313,7 +327,7 @@ const endChatSession = async (req, res) => {
 const sendMessage = async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { message, messageType = "text", replyToMessageId } = req.body;
+    const { message, messageType = "text", replyToMessageId, voiceDurationSec } = req.body;
     
     // Determine sender type and ID
     if (!req.user) {
@@ -326,11 +340,60 @@ const sendMessage = async (req, res) => {
     const senderId = req.user.id;
     const senderType = req.user.role === "astrologer" ? "astrologer" : "user";
 
-    if (!message) {
+    const normalizedMessageType = String(messageType || "text").toLowerCase();
+    if (!CHAT_MESSAGE_TYPES.has(normalizedMessageType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported message type",
+      });
+    }
+
+    const trimmedMessage = String(message || "").trim();
+    const isVoiceMessage = normalizedMessageType === "voice";
+
+    if (!isVoiceMessage && !trimmedMessage) {
       return res.status(400).json({
         success: false,
         message: "Message content is required",
       });
+    }
+
+    if (isVoiceMessage) {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "Voice note file is required",
+        });
+      }
+
+      if (!VOICE_MESSAGE_ALLOWED_MIME_TYPES.has(req.file.mimetype)) {
+        return res.status(415).json({
+          success: false,
+          message: "Unsupported voice note format",
+        });
+      }
+
+      if ((req.file.size || 0) > MAX_VOICE_NOTE_FILE_SIZE_BYTES) {
+        return res.status(413).json({
+          success: false,
+          message: "Voice note is too large",
+        });
+      }
+
+      const parsedDuration = Number(voiceDurationSec);
+      if (!Number.isFinite(parsedDuration) || parsedDuration <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Voice note duration is required",
+        });
+      }
+
+      if (parsedDuration > MAX_VOICE_NOTE_SECONDS) {
+        return res.status(400).json({
+          success: false,
+          message: "Voice note cannot exceed 2 minutes",
+        });
+      }
     }
 
     // Check if session exists and is active
@@ -409,21 +472,27 @@ const sendMessage = async (req, res) => {
     const fileUrl = req.fileUrl || null;
 
     // Create message
+    const safeMessage = isVoiceMessage
+      ? trimmedMessage || "[Voice note]"
+      : trimmedMessage;
+
     const chatMessage = await ChatMessage.create({
       sessionId,
       senderId,
       senderType,
-      message,
-      messageType,
+      message: safeMessage,
+      messageType: normalizedMessageType,
       fileUrl,
       replyToMessageId: replyToMessageId || null,
     });
 
     // Update session metadata and unread counters
     const lastMessagePreview =
-      messageType === "image" || messageType === "file"
+      normalizedMessageType === "voice"
+        ? "[Voice note]"
+        : normalizedMessageType === "image" || normalizedMessageType === "file"
         ? "[Attachment]"
-        : (message || "").slice(0, 200);
+        : safeMessage.slice(0, 200);
 
     const updates = {
       lastMessagePreview,

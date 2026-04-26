@@ -251,6 +251,41 @@ async function ensureChatMessageColumns() {
   }
 }
 
+async function ensureChatMessageVoiceEnumValues() {
+  if (sequelize.getDialect() !== "postgres") {
+    return;
+  }
+
+  await sequelize.query(`
+    DO $$
+    DECLARE
+      chat_message_enum_name text;
+      chat_history_enum_name text;
+    BEGIN
+      SELECT typname
+      INTO chat_message_enum_name
+      FROM pg_type
+      WHERE lower(typname) = lower('enum_chat_messages_messageType')
+      LIMIT 1;
+
+      IF chat_message_enum_name IS NOT NULL THEN
+        EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''voice''', chat_message_enum_name);
+      END IF;
+
+      SELECT typname
+      INTO chat_history_enum_name
+      FROM pg_type
+      WHERE lower(typname) = lower('enum_chat_history_messages_messageType')
+      LIMIT 1;
+
+      IF chat_history_enum_name IS NOT NULL THEN
+        EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''voice''', chat_history_enum_name);
+      END IF;
+    END
+    $$;
+  `);
+}
+
 async function ensureBlogColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -925,6 +960,7 @@ const initDB = (callback) => {
     })
     .then(() => ensureChatSessionColumns())
     .then(() => ensureChatMessageColumns())
+    .then(() => ensureChatMessageVoiceEnumValues())
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
