@@ -62,18 +62,23 @@ const createBlog = async (req, res) => {
 // Get all blogs (public - all users can view)
 const getAllBlogs = async (req, res) => {
   try {
-    const { page = 1, limit = 10, astrologerId } = req.query;
-    const offset = (page - 1) * limit;
+    const { page = 1, limit = 10, astrologerId, category } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageSize = Math.max(parseInt(limit, 10) || 10, 1);
+    const offset = (pageNumber - 1) * pageSize;
 
     const where = { isPublished: true };
     if (astrologerId) {
       where.astrologerId = astrologerId;
     }
+    if (category && category !== "all") {
+      where.category = category;
+    }
 
     const { rows: blogs, count } = await Blog.findAndCountAll({
       where,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: pageSize,
+      offset,
       order: [["createdAt", "DESC"]],
       include: [
         {
@@ -96,9 +101,9 @@ const getAllBlogs = async (req, res) => {
       blogs,
       pagination: {
         total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(count / pageSize),
       },
     });
   } catch (error) {
