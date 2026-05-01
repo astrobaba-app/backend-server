@@ -85,6 +85,14 @@ const JobApplication = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    acceptanceEmailSentAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    rejectionEmailSentAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "job_applications",

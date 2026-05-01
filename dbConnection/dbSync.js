@@ -888,9 +888,27 @@ async function ensureJobApplicationColumns() {
       );
     }
 
+    if (!table.acceptanceEmailSentAt && !table.acceptance_email_sent_at) {
+      operations.push(
+        queryInterface.addColumn("job_applications", "acceptanceEmailSentAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.rejectionEmailSentAt && !table.rejection_email_sent_at) {
+      operations.push(
+        queryInterface.addColumn("job_applications", "rejectionEmailSentAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
-      console.log("✓ Ensured job_applications profile link columns exist");
+      console.log("✓ Ensured job_applications columns exist");
     }
   } catch (error) {
     console.log("job_applications table will be created by sequelize.sync()");

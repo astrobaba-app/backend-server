@@ -4,6 +4,10 @@ const JobApplication = require("../../model/job/jobApplication");
 const {
   enqueueJobApplicationConfirmationEmail,
 } = require("../../services/jobApplicationEmailQueue");
+const {
+  sendJobApplicationAcceptedEmail,
+  sendJobApplicationRejectedEmail,
+} = require("../../emailService/jobApplicationEmail");
 
 const ALLOWED_MODES = ["remote", "hybrid", "onsite"];
 const ALLOWED_TYPES = ["full-time", "intern", "contract", "part-time"];
@@ -612,6 +616,110 @@ const getAdminJobApplicationResume = async (req, res) => {
   }
 };
 
+const acceptJobApplication = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+
+    const application = await JobApplication.findByPk(applicationId, {
+      include: [
+        {
+          model: Job,
+          as: "job",
+        },
+      ],
+    });
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Job application not found",
+      });
+    }
+
+    if (application.acceptanceEmailSentAt || application.rejectionEmailSentAt) {
+      return res.status(400).json({
+        success: false,
+        message: "A decision email has already been sent",
+      });
+    }
+
+    await sendJobApplicationAcceptedEmail({
+      to: application.email,
+      fullName: application.fullName,
+      jobTitle: application.job?.title || "the role you applied for",
+    });
+
+    application.acceptanceEmailSentAt = new Date();
+    await application.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Acceptance email sent successfully",
+      application,
+    });
+  } catch (error) {
+    console.error("Accept job application error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send acceptance email",
+      error: error.message,
+    });
+  }
+};
+
+const rejectJobApplication = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const { reason } = req.body || {};
+
+    const application = await JobApplication.findByPk(applicationId, {
+      include: [
+        {
+          model: Job,
+          as: "job",
+        },
+      ],
+    });
+
+    if (!application) {
+      return res.status(404).json({
+        success: false,
+        message: "Job application not found",
+      });
+    }
+
+    if (application.acceptanceEmailSentAt || application.rejectionEmailSentAt) {
+      return res.status(400).json({
+        success: false,
+        message: "A decision email has already been sent",
+      });
+    }
+
+    await sendJobApplicationRejectedEmail({
+      to: application.email,
+      fullName: application.fullName,
+      jobTitle: application.job?.title || "the role you applied for",
+      reason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+    });
+
+    application.rejectionEmailSentAt = new Date();
+    await application.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Rejection email sent successfully",
+      application,
+    });
+  } catch (error) {
+    console.error("Reject job application error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send rejection email",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createJob,
   getJobs,
@@ -622,4 +730,6 @@ module.exports = {
   getAdminJobApplications,
   getAdminJobApplicationById,
   getAdminJobApplicationResume,
+  acceptJobApplication,
+  rejectJobApplication,
 };

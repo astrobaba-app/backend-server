@@ -56,6 +56,8 @@ const {
   getAdminJobApplications,
   getAdminJobApplicationById,
   getAdminJobApplicationResume,
+  acceptJobApplication,
+  rejectJobApplication,
 } = require("../../controller/job/jobController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
@@ -335,6 +337,20 @@ router.get(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getAdminJobApplicationResume
+);
+
+router.patch(
+  "/job-applications/:applicationId/accept",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  acceptJobApplication
+);
+
+router.patch(
+  "/job-applications/:applicationId/reject",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  rejectJobApplication
 );
 
 module.exports = router;
