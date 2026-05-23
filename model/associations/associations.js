@@ -2,6 +2,7 @@ const User = require("../user/userAuth");
 const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
 const KundliReport = require("../horoscope/kundliReport");
+const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
 const AppleAuth = require("../user/appleAuth");
@@ -93,6 +94,28 @@ const JobApplication = require("../job/jobApplication");
   });
 
   KundliReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  UserRequest.hasMany(DailyInsightPayload, {
+    foreignKey: "userRequestId",
+    as: "dailyInsightPayloads",
+    onDelete: "CASCADE",
+  });
+
+  DailyInsightPayload.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  User.hasMany(DailyInsightPayload, {
+    foreignKey: "userId",
+    as: "dailyInsightPayloads",
+    onDelete: "CASCADE",
+  });
+
+  DailyInsightPayload.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

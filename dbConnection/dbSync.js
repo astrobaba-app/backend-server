@@ -49,6 +49,7 @@ const Horoscope = require("../model/horoscope/horoscope");
 const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
 const Kundli = require("../model/horoscope/kundli");
 const KundliReport = require("../model/horoscope/kundliReport");
+const DailyInsightPayload = require("../model/horoscope/dailyInsightPayload");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
 

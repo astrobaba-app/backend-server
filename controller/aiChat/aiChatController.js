@@ -6,6 +6,7 @@ const User = require("../../model/user/userAuth");
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const { Op } = require("sequelize");
+const { buildInsightPayload } = require("../../services/astroInsightEngineService");
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -386,6 +387,109 @@ IMPORTANT KUNDLI INSTRUCTIONS:
 - Use this Kundli data directly as the foundation for all astrological readings.
 - Reference their specific ascendant, signs, planetary positions, dasha, yogas, etc. in responses.
 - Treat all readings as personalised to this specific birth chart.`;
+};
+
+// ============= INSIGHT RAG CONTEXT HELPERS =============
+
+const RAG_BUCKET_KEYWORDS = {
+  career: [
+    "career", "job", "work", "promotion", "office", "business", "profession", "interview",
+    "naukri", "kaam", "promotion", "vyapar",
+  ],
+  relationships: [
+    "relationship", "marriage", "partner", "spouse", "family", "husband", "wife", "compatibility",
+    "rishta", "shaadi", "vivah", "partner",
+  ],
+  love: ["love", "romance", "dating", "crush", "boyfriend", "girlfriend", "pyaar", "prem"],
+  finance: [
+    "money", "finance", "income", "salary", "wealth", "loan", "investment", "savings", "debt",
+    "paisa", "arthik", "dhan", "kamai",
+  ],
+  health: [
+    "health", "illness", "stress", "anxiety", "sleep", "energy", "wellness", "disease",
+    "sehat", "swasth", "tanav", "neend",
+  ],
+  spirituality: ["spiritual", "meditation", "mantra", "sadhana", "dharma", "moksha", "adhyatm", "puja"],
+  travel: ["travel", "trip", "foreign", "abroad", "journey", "relocation", "yatra"],
+  education: ["study", "education", "exam", "college", "learning", "course", "padhai", "pariksha"],
+  remedy: ["remedy", "upay", "gemstone", "rudraksha", "mantra", "totka", "pooja", "seva"],
+  daily: ["today", "daily", "now", "current", "aaj", "abhi"],
+};
+
+const detectRelevantBuckets = (userMessage = "") => {
+  const text = String(userMessage || "").toLowerCase();
+  const hits = [];
+
+  Object.entries(RAG_BUCKET_KEYWORDS).forEach(([bucket, keywords]) => {
+    if (keywords.some((keyword) => text.includes(keyword))) {
+      hits.push(bucket);
+    }
+  });
+
+  if (hits.length === 0) {
+    hits.push("daily");
+  }
+
+  return Array.from(new Set(hits));
+};
+
+const buildCompactFacts = (kundli, userRequest) => {
+  return {
+    user: {
+      name: userRequest?.fullName || null,
+      gender: userRequest?.gender || null,
+      dob: userRequest?.dateOfbirth || null,
+      tob: userRequest?.timeOfbirth || null,
+      pob: userRequest?.placeOfBirth || null,
+    },
+    core: {
+      ascendant: kundli?.basicDetails?.ascendant?.sign || kundli?.personality?.ascendant_sign || null,
+      moon_sign: kundli?.basicDetails?.moon_sign || null,
+      sun_sign: kundli?.basicDetails?.sun_sign || null,
+      moon_nakshatra: kundli?.panchang?.nakshatra?.name || kundli?.planetary?.Moon?.nakshatra || null,
+      manglik: kundli?.manglikAnalysis?.is_manglik ?? null,
+    },
+  };
+};
+
+const buildInsightRagContext = ({ kundli, userRequest, userMessage }) => {
+  const insightPayload = buildInsightPayload({
+    userRequest,
+    kundli,
+    transit: kundli?.horoscope?.transit || { datetime: new Date().toISOString(), transits: {} },
+    date: new Date(),
+  });
+
+  const requestedBuckets = detectRelevantBuckets(userMessage);
+  const bucketRows = Array.isArray(insightPayload?.topBuckets) ? insightPayload.topBuckets : [];
+
+  const selectedBuckets = bucketRows.filter((row) => requestedBuckets.includes(String(row.bucket || "").toLowerCase()));
+  const finalBuckets = selectedBuckets.length > 0 ? selectedBuckets : bucketRows.slice(0, 2);
+
+  const compact = {
+    requested_buckets: requestedBuckets,
+    main_theme: insightPayload?.mainTheme || null,
+    confidence_score: insightPayload?.confidenceScore || null,
+    selected_bucket_analysis: finalBuckets.map((bucket) => ({
+      bucket: bucket.bucket,
+      label: bucket.label,
+      status: bucket.status,
+      confidence_label: bucket.confidence_label,
+      supporting_factors: (bucket.supporting_factors || []).slice(0, 3),
+      caution_factors: (bucket.caution_factors || []).slice(0, 2),
+      recommended_actions: (bucket.recommended_actions || []).slice(0, 3),
+      remedies: (bucket.remedies || []).slice(0, 2),
+    })),
+    dasha_context: {
+      mahadasha: insightPayload?.dashaContext?.mahadasha || null,
+      antardasha: insightPayload?.dashaContext?.antardasha || null,
+      pratyantardasha: insightPayload?.dashaContext?.pratyantardasha || null,
+      sookshmadasha: insightPayload?.dashaContext?.sookshmadasha || null,
+    },
+    compact_facts: buildCompactFacts(kundli, userRequest),
+  };
+
+  return `\n\nINSIGHT RAG CONTEXT (Use this only):\n${JSON.stringify(compact, null, 2)}\n\nIMPORTANT CONTEXT RULES:\n- Use only the selected bucket analysis relevant to user's latest question.\n- Do not ask for DOB/TOB/POB if compact_facts already has them.\n- Keep answers focused on requested buckets and practical guidance.\n- Avoid dumping full chart details unless user explicitly asks for deep technical reading.`;
 };
 
 // ============= GREETING HELPER =============
@@ -1156,7 +1260,7 @@ const sendMessage = async (req, res) => {
       });
     }
 
-    // Load Kundli context if a Kundli is attached to this session
+    // Load compact RAG-style Kundli context if a Kundli is attached to this session
     let kundliContextStr = "";
     if (session.kundliUserRequestId) {
       try {
@@ -1165,14 +1269,25 @@ const sendMessage = async (req, res) => {
           UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
         ]);
         if (kundliRecord && userRequestRecord) {
-          kundliContextStr = extractKundliContext(
-            kundliRecord.toJSON(),
-            userRequestRecord.toJSON()
-          );
+          const kundliJson = kundliRecord.toJSON();
+          const userRequestJson = userRequestRecord.toJSON();
+          try {
+            kundliContextStr = buildInsightRagContext({
+              kundli: kundliJson,
+              userRequest: userRequestJson,
+              userMessage: trimmedMessage,
+            });
+          } catch (ragError) {
+            console.error(
+              "Failed to build insight RAG context for session; using fallback context:",
+              ragError?.message || ragError
+            );
+            kundliContextStr = extractKundliContext(kundliJson, userRequestJson);
+          }
         }
       } catch (kundliErr) {
         console.error("Failed to load Kundli context for session:", kundliErr.message);
-        // Non-fatal — continue without Kundli context
+        // Non-fatal ? continue without Kundli context
       }
     }
 
@@ -1421,10 +1536,21 @@ const getAutoFollowUpQuestion = async (req, res) => {
         ]);
 
         if (kundliRecord && userRequestRecord) {
-          kundliContextStr = extractKundliContext(
-            kundliRecord.toJSON(),
-            userRequestRecord.toJSON()
-          );
+          const kundliJson = kundliRecord.toJSON();
+          const userRequestJson = userRequestRecord.toJSON();
+          try {
+            kundliContextStr = buildInsightRagContext({
+              kundli: kundliJson,
+              userRequest: userRequestJson,
+              userMessage: lastUserMessage.content,
+            });
+          } catch (ragError) {
+            console.error(
+              "Failed to build insight RAG context for follow-up generation; using fallback context:",
+              ragError?.message || ragError
+            );
+            kundliContextStr = extractKundliContext(kundliJson, userRequestJson);
+          }
         }
       } catch (kundliErr) {
         console.error(

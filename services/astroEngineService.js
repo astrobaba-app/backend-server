@@ -179,6 +179,30 @@ const getAllCharts = async (userRequest) => {
 };
 
 /**
+ * Fetch Transit chart for a target datetime (defaults to now)
+ */
+const getTransitChart = async (userRequest, targetDateTime = new Date()) => {
+  try {
+    const birth_data = getBirthDataPayload(userRequest);
+    const target_datetime = new Date(targetDateTime).toISOString();
+
+    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/chart/transit`, {
+      birth_data,
+      target_datetime,
+      house_system: "PLACIDUS",
+    });
+
+    // Support multiple possible response shapes from the engine
+    if (response.data?.transit) return response.data.transit;
+    if (response.data?.chart) return response.data.chart;
+    return response.data;
+  } catch (error) {
+    console.error("Error in getTransitChart:", error.response?.data || error.message);
+    return null;
+  }
+};
+
+/**
  * Fetch Vimshottari Dasha
  */
 const getVimshottariDasha = async (userRequest) => {
@@ -404,4 +428,5 @@ module.exports = {
   getRudrakshaSuggestion,
   getAshtakavarga,
   getCompleteHoroscope,
+  getTransitChart,
 };

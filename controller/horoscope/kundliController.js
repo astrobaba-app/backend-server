@@ -31,6 +31,7 @@ const {
   getRudrakshaSuggestion,
   getAshtakavarga,
   getCompleteHoroscope,
+  getTransitChart,
 } = require("../../services/astroEngineService");
 
 /**
@@ -502,6 +503,7 @@ const createKundli = async (req, res) => {
       gemstoneRemedies,
       rudrakshaSuggestion,
       ashtakavarga,
+      transit,
       completeHoroscope,
     ] = await Promise.allSettled([
       getBasicDetails(userRequest),
@@ -515,8 +517,9 @@ const createKundli = async (req, res) => {
       getAscendantReport(userRequest),
       getGemstoneRemedies(userRequest),
       getRudrakshaSuggestion(userRequest),
-      getAshtakavarga(userRequest),
-      getCompleteHoroscope(userRequest),
+        getAshtakavarga(userRequest),
+        getTransitChart(userRequest),
+        getCompleteHoroscope(userRequest),
     ]);
 
     // Extract values or set to null if failed
@@ -548,6 +551,7 @@ const createKundli = async (req, res) => {
     };
 
     const ashtakvargaData = extractValue(ashtakavarga, "Ashtakavarga");
+    const transitVal = extractValue(transit, "Transit Chart");
     const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
 
     // Prepare compact Ashtakavarga structure expected by frontend
@@ -569,6 +573,11 @@ const createKundli = async (req, res) => {
     }
 
     // Step 3: Create kundli record
+    // Merge transit data into horoscope object (safe: keeps existing `horoscope` shape)
+    const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
+    if (transitVal) {
+      finalHoroscope.transit = transitVal;
+    }
     const kundli = await Kundli.create({
       requestId: userRequest.id,
       basicDetails: basicDetailsVal,
@@ -583,17 +592,28 @@ const createKundli = async (req, res) => {
       remedies,
       ashtakvarga: ashtakvargaPayload,
       yogas,
-      horoscope,
+      horoscope: finalHoroscope,
     });
 
     // Generate AI-enhanced Free Report narratives in the background (non-blocking)
     // The AI generation takes 30+ seconds, so we don't want to block the response
     generateFreeReportNarratives({
-      basicDetails: basicDetailsVal,
-      personality: personalityVal,
-      remedies,
-      horoscope,
-      manglikAnalysis: manglikAnalysisVal,
+      userRequest: userRequest.toJSON ? userRequest.toJSON() : userRequest,
+      kundli: {
+        basicDetails: basicDetailsVal,
+        astroDetails: astroDetailsVal,
+        manglikAnalysis: manglikAnalysisVal,
+        panchang: panchangVal,
+        charts: chartsVal,
+        dasha: dashaVal,
+        yogini: yoginiVal,
+        personality: personalityVal,
+        planetary: planetaryVal,
+        remedies,
+        ashtakvarga: ashtakvargaPayload,
+        yogas,
+        horoscope: finalHoroscope,
+      },
     })
       .then((aiFreeReport) => {
         if (aiFreeReport) {
