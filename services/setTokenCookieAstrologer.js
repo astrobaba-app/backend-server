@@ -1,24 +1,38 @@
 const { serialize } = require("cookie");
 const ACCESS_COOKIE_MAX_AGE = Number(process.env.ACCESS_COOKIE_MAX_AGE_SECONDS);
 const REFRESH_COOKIE_MAX_AGE = Number(process.env.REFRESH_COOKIE_MAX_AGE_SECONDS);
+const IS_PROD = process.env.NODE_ENV === "production";
+const COOKIE_DOMAIN_ENV = process.env.COOKIE_DOMAIN;
+const COOKIE_DOMAIN =
+  COOKIE_DOMAIN_ENV && COOKIE_DOMAIN_ENV.trim() !== ""
+    ? COOKIE_DOMAIN_ENV
+    : IS_PROD
+      ? ".graho.in"
+      : undefined;
+const COOKIE_SECURE =
+  typeof process.env.COOKIE_SECURE === "string"
+    ? process.env.COOKIE_SECURE === "true"
+    : IS_PROD;
+const COOKIE_SAMESITE =
+  process.env.COOKIE_SAMESITE ?? (IS_PROD ? "none" : "lax");
 
 const setTokenCookieAstrologer = (res, token, astrologerToken, refreshToken) => {
   const cookies = [
     // Secure, HttpOnly access token cookie
     serialize("token", token, {
-      domain: ".graho.in",
+      domain: COOKIE_DOMAIN,
       httpOnly: true,
-      secure: true,
-      sameSite: "none",
+      secure: COOKIE_SECURE,
+      sameSite: COOKIE_SAMESITE,
       path: "/",
       maxAge: ACCESS_COOKIE_MAX_AGE,
     }),
     // Non-HttpOnly access token mirror for astrologer frontend flows
     serialize("token_astrologer", astrologerToken, {
-      domain: ".graho.in",
+      domain: COOKIE_DOMAIN,
       httpOnly: false,
-      secure: true,
-      sameSite: "none",
+      secure: COOKIE_SECURE,
+      sameSite: COOKIE_SAMESITE,
       path: "/",
       maxAge: ACCESS_COOKIE_MAX_AGE,
     }),
@@ -27,10 +41,10 @@ const setTokenCookieAstrologer = (res, token, astrologerToken, refreshToken) => 
   if (refreshToken) {
     cookies.push(
       serialize("refresh_token", refreshToken, {
-      domain: ".graho.in",
+        domain: COOKIE_DOMAIN,
         httpOnly: true,
-        secure: true,
-        sameSite: "none",
+        secure: COOKIE_SECURE,
+        sameSite: COOKIE_SAMESITE,
         path: "/",
         maxAge: REFRESH_COOKIE_MAX_AGE,
       })
