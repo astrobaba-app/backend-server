@@ -1,5 +1,5 @@
-const OpenAI = require("openai");
 const { getTransitChart } = require("./astroEngineService");
+const { createChatCompletion } = require("./openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
@@ -122,13 +122,6 @@ const ORBS = {
   Ketu: 4,
 };
 
-let openaiClient = null;
-
-function getOpenAIClient() {
-  if (!process.env.OPENAI_API_KEY) return null;
-  if (!openaiClient) openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  return openaiClient;
-}
 
 function normalizeSignName(sign) {
   if (!sign) return null;
@@ -585,11 +578,12 @@ function buildInsightPayload({ userRequest, kundli, transit, date = new Date() }
   };
 }
 
-async function maybeGenerateNarrative(llmPayload) {
-  const openai = getOpenAIClient();
-  if (!openai) return null;
+async function maybeGenerateNarrative(llmPayload, context = {}) {
+  if (!process.env.OPENAI_API_KEY) return null;
 
-  const completion = await openai.chat.completions.create({
+  const loggingContext = { feature: "astro_insight_narrative", ...context };
+
+  const completion = await createChatCompletion({
     model: CHAT_MODEL,
     temperature: 0.55,
     max_tokens: 650,
@@ -608,7 +602,7 @@ async function maybeGenerateNarrative(llmPayload) {
       },
     ],
     response_format: { type: "json_object" },
-  });
+  }, loggingContext);
 
   const content = completion.choices[0]?.message?.content;
   if (!content) return null;
@@ -619,7 +613,14 @@ async function maybeGenerateNarrative(llmPayload) {
   }
 }
 
-async function generateInsightForKundli({ userRequest, kundli, date = new Date(), freshTransit = false, includeNarrative = false }) {
+async function generateInsightForKundli({
+  userRequest,
+  kundli,
+  date = new Date(),
+  freshTransit = false,
+  includeNarrative = false,
+  context = {},
+}) {
   let transit = kundli.horoscope?.transit || null;
 
   if (freshTransit || !transit) {
@@ -633,7 +634,7 @@ async function generateInsightForKundli({ userRequest, kundli, date = new Date()
   const payload = buildInsightPayload({ userRequest, kundli, transit, date });
 
   if (includeNarrative) {
-    const narrative = await maybeGenerateNarrative(payload.llmPayload);
+    const narrative = await maybeGenerateNarrative(payload.llmPayload, context);
     payload.generatedText =
       narrative && typeof narrative === "object" ? JSON.stringify(narrative) : narrative;
   }

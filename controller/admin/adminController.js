@@ -2,6 +2,7 @@ const Admin = require("../../model/admin/admin");
 const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const BroadcastLog = require("../../model/admin/broadcastLog");
+const OpenAIRequestLog = require("../../model/ai/openAiRequestLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { literal, Op } = require("sequelize");
@@ -1391,6 +1392,93 @@ const disableTwoFactor = async (req, res) => {
   }
 };
 
+const getOpenAIRequestLogs = async (req, res) => {
+  try {
+    const dialect = OpenAIRequestLog?.sequelize?.getDialect?.();
+    const likeOperator = dialect === "postgres" ? Op.iLike : Op.like;
+
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const {
+      developerName,
+      model,
+      status,
+      feature,
+      gitBranch,
+      from,
+      to,
+    } = req.query;
+
+    const where = {};
+
+    if (developerName) {
+      where.developerName = { [likeOperator]: `%${developerName}%` };
+    }
+
+    if (model) {
+      where.model = { [likeOperator]: `%${model}%` };
+    }
+
+    if (feature) {
+      where.feature = { [likeOperator]: `%${feature}%` };
+    }
+
+    if (gitBranch) {
+      where.gitBranch = { [likeOperator]: `%${gitBranch}%` };
+    }
+
+    if (status) {
+      where.status = String(status).toLowerCase() === "error" ? "error" : "success";
+    }
+
+    if (from || to) {
+      const createdAt = {};
+      if (from) {
+        const fromDate = new Date(from);
+        if (!Number.isNaN(fromDate.getTime())) {
+          createdAt[Op.gte] = fromDate;
+        }
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (!Number.isNaN(toDate.getTime())) {
+          createdAt[Op.lte] = toDate;
+        }
+      }
+      if (Object.keys(createdAt).length > 0) {
+        where.createdAt = createdAt;
+      }
+    }
+
+    const { rows: logs, count } = await OpenAIRequestLog.findAndCountAll({
+      where,
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+    });
+
+    return res.status(200).json({
+      success: true,
+      logs,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get OpenAI request logs error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch OpenAI request logs",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -1416,4 +1504,5 @@ module.exports = {
   enableTwoFactor,
   verifyTwoFactor,
   disableTwoFactor,
+  getOpenAIRequestLogs,
 };

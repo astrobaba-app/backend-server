@@ -1,30 +1,19 @@
-const OpenAI = require("openai");
+const { createChatCompletion } = require("./openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
-
-let openaiClient = null;
-
-function getOpenAIClient() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
-  return openaiClient;
-}
 
 /**
  * Enhance horoscope data with AI-generated narratives
  * Converts structured predictions into 6-7 line explanations for each section
  */
-async function enhanceHoroscopeWithAI({ zodiacSign, period, horoscopeData }) {
+async function enhanceHoroscopeWithAI({ zodiacSign, period, horoscopeData, context = {} }) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       console.warn('[HoroscopeAI] OpenAI API key not configured, skipping enhancement');
       return null;
     }
 
-    const openai = getOpenAIClient();
+    const loggingContext = { feature: "horoscope_ai", ...context };
     const predictions = horoscopeData.predictions;
 
     if (!predictions) {
@@ -91,7 +80,7 @@ Return ONLY a JSON object with this exact structure (no markdown, no explanation
   "remedies": "6-7 line narrative..."
 }`;
 
-    const response = await openai.chat.completions.create({
+    const response = await createChatCompletion({
       model: CHAT_MODEL,
       messages: [
         {
@@ -105,7 +94,7 @@ Return ONLY a JSON object with this exact structure (no markdown, no explanation
       ],
       temperature: 0.7,
       max_tokens: 2000,
-    });
+    }, loggingContext);
 
     const content = response.choices[0]?.message?.content?.trim();
     

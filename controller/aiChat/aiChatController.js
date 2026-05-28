@@ -1,5 +1,4 @@
 require("dotenv").config();
-const OpenAI = require("openai");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
 const AIChatMessage = require("../../model/aiChat/aiChatMessage");
 const User = require("../../model/user/userAuth");
@@ -7,10 +6,7 @@ const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const { Op } = require("sequelize");
 const { buildInsightPayload } = require("../../services/astroInsightEngineService");
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const { createChatCompletion } = require("../../services/openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
@@ -672,6 +668,7 @@ const generateDynamicPauseAcknowledgement = async ({
   userMessage,
   userName = "",
   avoidMessage = "",
+  context = {},
 }) => {
   const profile = ASTROLOGER_PROFILES[astrologerId] || null;
   const astrologerName = profile?.name || "Astrologer";
@@ -685,7 +682,7 @@ const generateDynamicPauseAcknowledgement = async ({
   const avoidMessageText = String(avoidMessage || "").trim();
 
   try {
-    const completion = await openai.chat.completions.create({
+      const completion = await createChatCompletion({
       model: process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL,
       messages: [
         {
@@ -712,7 +709,7 @@ const generateDynamicPauseAcknowledgement = async ({
       ],
       max_tokens: 120,
       temperature: 0.95,
-    });
+      }, context);
 
     const generated = sanitizeAssistantResponse(
       completion.choices?.[0]?.message?.content || ""
@@ -1010,6 +1007,7 @@ const generateFollowUpQuestions = async ({
   userFirstName = "",
   count = 1,
   avoidQuestions = [],
+  context = {},
 }) => {
   const profile = ASTROLOGER_PROFILES[astrologerId] || null;
   const astrologerName = profile?.name || "Astrologer";
@@ -1080,7 +1078,7 @@ const generateFollowUpQuestions = async ({
 
   for (let attempt = 0; attempt < FOLLOW_UP_QUESTION_GENERATION_ATTEMPTS; attempt += 1) {
     try {
-      const completion = await openai.chat.completions.create({
+      const completion = await createChatCompletion({
         model: process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL,
         messages: [
           {
@@ -1100,7 +1098,7 @@ const generateFollowUpQuestions = async ({
         ],
         max_tokens: 180,
         temperature: 0.75 + attempt * 0.1,
-      });
+      }, context);
 
       const raw = completion.choices?.[0]?.message?.content || "";
       const parsed = extractFollowUpQuestionsFromText(raw).filter(
@@ -1218,6 +1216,7 @@ const sendMessage = async (req, res) => {
         userMessage: trimmedMessage,
         userName: req.user?.fullName || "",
         avoidMessage: lastAssistantMessage?.content || "",
+        context: { req, userId, feature: "ai_chat_pause" },
       });
       const pauseReply = pauseReplyResult.content;
       const pauseTokensUsed = pauseReplyResult.tokensUsed || 0;
@@ -1354,13 +1353,17 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     ];
 
     // Call OpenAI API
-    const completion = await openai.chat.completions.create({
+    const completion = await createChatCompletion({
       model: fastMode
         ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
         : CHAT_MODEL,
       messages: messages,
       max_tokens: fastMode ? 180 : 260,
       temperature: fastMode ? 0.6 : 0.7,
+    }, {
+      req,
+      userId,
+      feature: "ai_chat_reply",
     });
 
     let aiRawResponse = completion.choices[0].message.content || "";
@@ -1383,7 +1386,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
       estimatedWordCount > 80;
 
     if (shouldRepair) {
-      const repairCompletion = await openai.chat.completions.create({
+      const repairCompletion = await createChatCompletion({
         model: fastMode
           ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
           : CHAT_MODEL,
@@ -1392,6 +1395,10 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         }),
         max_tokens: fastMode ? 180 : 220,
         temperature: fastMode ? 0.4 : 0.5,
+      }, {
+        req,
+        userId,
+        feature: "ai_chat_reply_repair",
       });
 
       aiRawResponse = repairCompletion.choices[0].message.content || aiRawResponse;
@@ -1570,6 +1577,7 @@ const getAutoFollowUpQuestion = async (req, res) => {
       userFirstName,
       count: 1,
       avoidQuestions,
+      context: { req, userId, feature: "ai_chat_followup" },
     });
 
     const followUpQuestion = generatedQuestions[0] || null;
