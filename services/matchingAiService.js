@@ -1,17 +1,6 @@
-const OpenAI = require("openai");
+const { createChatCompletion } = require("./openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
-
-let openaiClient = null;
-
-function getOpenAIClient() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
-  return openaiClient;
-}
 
 /**
  * Enhance Ashtakoot kuta descriptions with AI-generated narratives.
@@ -19,7 +8,7 @@ function getOpenAIClient() {
  * longer 5-6 line explanations for each kuta used in the
  * Basic Details section.
  */
-async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }) {
+async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, context = {} }) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       console.warn("[MatchingAI] OpenAI API key not configured, skipping enhancement");
@@ -31,7 +20,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }) {
       return null;
     }
 
-    const openai = getOpenAIClient();
+    const loggingContext = { feature: "matching_ai", ...context };
 
     const { kutas, total_points, max_points } = ashtakootData;
 
@@ -81,7 +70,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }) {
   "yoni": { "enhanced_description": "5-6 line explanation for Yoni (Physical compatibility)" }
 }`;
 
-    const response = await openai.chat.completions.create({
+    const response = await createChatCompletion({
       model: CHAT_MODEL,
       messages: [
         {
@@ -96,7 +85,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }) {
       ],
       temperature: 0.7,
       max_tokens: 1800,
-    });
+    }, loggingContext);
 
     const content = response.choices[0]?.message?.content?.trim();
 

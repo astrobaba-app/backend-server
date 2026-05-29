@@ -1,9 +1,9 @@
-const OpenAI = require("openai");
 const { Op } = require("sequelize");
 const ForumPost = require("../model/forum/forumPost");
 const ForumComment = require("../model/forum/forumComment");
 const User = require("../model/user/userAuth");
 const notificationService = require("./notificationService");
+const { createChatCompletion } = require("./openaiClient");
 const {
   applyModerationPenalty,
   evaluateForumSubmission,
@@ -74,21 +74,8 @@ const NSFW_REASON_KEYWORDS = [
   "obscene",
 ];
 
-let openaiClient = null;
 let moderationTimer = null;
 let running = false;
-
-const getOpenAIClient = () => {
-  if (!process.env.OPENAI_API_KEY) {
-    return null;
-  }
-
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-
-  return openaiClient;
-};
 
 const cleanJsonString = (raw) => {
   if (!raw) return "";
@@ -184,8 +171,7 @@ const moderateImagesWithAI = async ({ title, body, tags = [], imageUrls = [] }) 
     };
   }
 
-  const openai = getOpenAIClient();
-  if (!openai) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       decision: "approve",
       reason: "OpenAI key unavailable for image moderation",
@@ -211,7 +197,7 @@ Title: ${title || "N/A"}
 Body: ${body || "N/A"}
 Tags: ${(tags || []).join(", ") || "N/A"}`;
 
-  const response = await openai.chat.completions.create({
+  const response = await createChatCompletion({
     model: AI_VISION_MODEL,
     temperature: 0,
     max_tokens: 280,
@@ -235,7 +221,7 @@ Tags: ${(tags || []).join(", ") || "N/A"}`;
         ],
       },
     ],
-  });
+  }, { feature: "forum_moderation" });
 
   const rawText = response.choices?.[0]?.message?.content || "";
   const parsed = JSON.parse(cleanJsonString(rawText));
@@ -269,9 +255,8 @@ const moderateWithAI = async ({ contentType, title, body, tags = [], imageUrls =
   }
 
   const intentDetected = hasAstrologyIntent({ title, body, tags });
-  const openai = getOpenAIClient();
 
-  if (!openai) {
+  if (!process.env.OPENAI_API_KEY) {
     return {
       decision: "approve",
       reason:
@@ -301,7 +286,7 @@ Tags: ${(tags || []).join(", ") || "N/A"}
 Images: ${normalizedImageUrls.length > 0 ? normalizedImageUrls.join("\n") : "N/A"}
 IntentDetectedByKeywords: ${intentDetected ? "yes" : "no"}`;
 
-  const response = await openai.chat.completions.create({
+  const response = await createChatCompletion({
     model: AI_MODEL,
     temperature: 0,
     max_tokens: 250,
@@ -316,7 +301,7 @@ IntentDetectedByKeywords: ${intentDetected ? "yes" : "no"}`;
         content: prompt,
       },
     ],
-  });
+  }, { feature: "forum_moderation" });
 
   const rawText = response.choices?.[0]?.message?.content || "";
   const parsed = JSON.parse(cleanJsonString(rawText));

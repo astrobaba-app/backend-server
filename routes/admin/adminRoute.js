@@ -25,6 +25,7 @@ const {
   enableTwoFactor,
   verifyTwoFactor,
   disableTwoFactor,
+  getOpenAIRequestLogs,
 } = require("../../controller/admin/adminController");
 const {
   getSignupBonusSettings,
@@ -107,6 +108,13 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   disableTwoFactor
+);
+
+router.get(
+  "/openai-request-logs",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getOpenAIRequestLogs
 );
 
 // Master admin only routes

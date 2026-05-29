@@ -48,6 +48,24 @@ npm install
 ```
 
 ## Environment Variables
+### Internal OpenAI log ingestion (from astrology-engine)
+
+To record OpenAI usage logs from other services (e.g. `astrology-engine` palm reading), set an internal token.
+
+- `INTERNAL_LOG_TOKEN` - shared secret used to authenticate internal log ingestion.
+
+The astrology-engine must POST logs to:
+
+- `POST /api/internal/openai-request-logs`
+
+with header:
+
+- `x-internal-log-token: <INTERNAL_LOG_TOKEN>`
+
+and its own env vars:
+
+- `LOG_SINK_URL` = `https://<this-backend-host>/api/internal/openai-request-logs`
+- `LOG_SINK_TOKEN` = same value as `INTERNAL_LOG_TOKEN`
 
 Create a `.env` file in `backend-server/`.
 
@@ -62,6 +80,7 @@ JWT_REFRESH_EXPIRES_IN=15m
 ACCESS_COOKIE_MAX_AGE_SECONDS=120
 REFRESH_COOKIE_MAX_AGE_SECONDS=600
 JWT_REFRESH_SECRET=YOUR_JWT_REFRESH_SECRET
+
 COOKIE_DOMAIN=
 COOKIE_SECURE=false
 COOKIE_SAMESITE=lax
@@ -114,6 +133,14 @@ AGORA_APP_CERTIFICATE=YOUR_AGORA_APP_CERTIFICATE
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 OPENAI_REALTIME_MODEL=YOUR_OPENAI_REALTIME_MODEL
 OPENAI_CHAT_MODEL=YOUR_OPENAI_CHAT_MODEL
+
+# Developer identity for OpenAI usage logging
+DEVELOPER_NAME=YOUR_NAME
+DEVELOPER_SECRET=YOUR_SECRET
+SERVICE_NAME=backend-server
+APP_ENV=development
+REQUIRE_DEVELOPER_IDENTITY=true
+INTERNAL_LOG_TOKEN=YOUR_INTERNAL_LOG_TOKEN
 
 MAPS_API_KEY=YOUR_MAPS_API_KEY
 TZ=Asia/Kolkata

@@ -9,6 +9,7 @@ const BroadcastLog = require("../model/admin/broadcastLog");
 // AI Chat models
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
 const AiChatSession = require("../model/aiChat/aiChatSession");
+const OpenAIRequestLog = require("../model/ai/openAiRequestLog");
 
 // Assistant models
 const AssistantChat = require("../model/assistant/assistantChat");
@@ -90,6 +91,10 @@ const AppleAuth = require("../model/user/appleAuth");
 // Wallet models
 const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
+const PalmUpload = require("../model/palm/palmUpload");
+const PalmFeature = require("../model/palm/palmFeature");
+const PalmReport = require("../model/palm/palmReport");
+const AIJob = require("../model/palm/aiJob");
 
 
 
@@ -968,6 +973,84 @@ async function ensureKundliReportPdfColumns() {
   }
 }
 
+async function ensurePalmJobColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("ai_jobs");
+    const operations = [];
+
+    if (!table.stage) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "stage", {
+          type: DataTypes.STRING,
+          allowNull: false,
+          defaultValue: "queued",
+        })
+      );
+    }
+
+    if (!table.progress) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "progress", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 5,
+        })
+      );
+    }
+
+    if (!table.stageMessage && !table.stage_message) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "stageMessage", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured ai_jobs stage columns exist");
+    }
+  } catch (error) {
+    console.log("ai_jobs table will be created by sequelize.sync()");
+  }
+}
+
+async function ensurePalmUploadColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_uploads");
+    const operations = [];
+
+    if (!table.imageHash && !table.image_hash) {
+      operations.push(
+        queryInterface.addColumn("palm_uploads", "imageHash", {
+          type: DataTypes.STRING(64),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_uploads optimization columns exist");
+    }
+
+    const updatedTable = await queryInterface.describeTable("palm_uploads");
+    const indexes = await queryInterface.showIndex("palm_uploads");
+    const hasImageHashIndex = indexes.some((index) => index.name === "palm_uploads_image_hash");
+    if (!hasImageHashIndex && (updatedTable.imageHash || updatedTable.image_hash)) {
+      await queryInterface.addIndex("palm_uploads", ["imageHash"], {
+        name: "palm_uploads_image_hash",
+      });
+      console.log("Ensured palm_uploads imageHash index exists");
+    }
+  } catch (error) {
+    console.log("palm_uploads table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -991,6 +1074,8 @@ const initDB = (callback) => {
     .then(() => ensureAstrologerEarningColumns())
     .then(() => ensureJobApplicationColumns())
     .then(() => ensureKundliReportPdfColumns())
+    .then(() => ensurePalmJobColumns())
+    .then(() => ensurePalmUploadColumns())
     .then(() => {
       console.log("All models synced");
       callback();

@@ -19,6 +19,9 @@ const {
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
+const {
+  handleNewUserOnboarding,
+} = require("../../services/newUserOnboardingService");
 
 
 // Demo credentials – no real SMS is sent for this number
@@ -198,6 +201,15 @@ const verifyOtp = async (req, res) => {
       } catch (error) {
         console.error("Failed to apply signup bonus:", error);
         // Don't fail the registration if bonus fails
+      }
+
+      try {
+        await handleNewUserOnboarding({
+          mobile: user.mobile,
+          email: user.email,
+        });
+      } catch (error) {
+        console.error("Failed during new user onboarding notifications:", error);
       }
     }
 

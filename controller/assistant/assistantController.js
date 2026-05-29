@@ -11,11 +11,7 @@ const {
 const { v4: uuidv4 } = require("uuid");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
-const OpenAI = require("openai");
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const { createChatCompletion } = require("../../services/openaiClient");
 
 // Note: You'll need to integrate with an AI API (OpenAI, Anthropic, Gemini, etc.)
 // For now, this includes the structure. Add your AI API integration in sendMessage function
@@ -130,11 +126,15 @@ const sendMessage = async (req, res) => {
     let tokensUsed = 0;
 
     try {
-      const response = await openai.chat.completions.create({
+      const response = await createChatCompletion({
         model: process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini",
         messages: messages,
         temperature: 0.7,
         max_tokens: 500,
+      }, {
+        req,
+        userId,
+        feature: "assistant_chat",
       });
 
       aiResponse = response.choices[0].message.content;

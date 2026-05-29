@@ -18,6 +18,9 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
+const {
+  handleNewUserOnboarding,
+} = require("../../services/newUserOnboardingService");
 
 const normalizeSource = (value) => {
   if (Array.isArray(value)) {
@@ -231,6 +234,15 @@ const googleCallback = async (req, res) => {
       } catch (error) {
         console.error("Failed to apply signup bonus:", error);
         // Don't fail the registration if bonus fails
+      }
+
+      try {
+        await handleNewUserOnboarding({
+          mobile: user.mobile,
+          email: user.email,
+        });
+      } catch (error) {
+        console.error("Failed during new user onboarding notifications:", error);
       }
     }
 

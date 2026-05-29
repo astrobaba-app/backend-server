@@ -122,6 +122,7 @@ const getKundliForCall = async (req, res) => {
         remedies: kundli.remedies,
         horoscope: kundli.horoscope,
         manglikAnalysis: kundli.manglikAnalysis,
+          context: { req, userId, feature: "free_report_ai" },
       });
     } catch (err) {
       console.error(
