@@ -52,6 +52,7 @@ const PalmUpload = require("../palm/palmUpload");
 const PalmFeature = require("../palm/palmFeature");
 const PalmReport = require("../palm/palmReport");
 const AIJob = require("../palm/aiJob");
+const PalmOrder = require("../palm/palmOrder");
 
 
   // User has many UserRequests
@@ -861,4 +862,8 @@ const AIJob = require("../palm/aiJob");
   AIJob.belongsTo(User, { foreignKey: "userId", as: "user" });
   PalmUpload.hasOne(AIJob, { foreignKey: "palmUploadId", as: "aiJob", onDelete: "CASCADE" });
   AIJob.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  User.hasMany(PalmOrder, { foreignKey: "userId", as: "palmOrders", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(User, { foreignKey: "userId", as: "user" });
+  PalmUpload.hasOne(PalmOrder, { foreignKey: "palmUploadId", as: "order", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
 

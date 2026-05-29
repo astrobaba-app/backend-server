@@ -95,6 +95,7 @@ const PalmUpload = require("../model/palm/palmUpload");
 const PalmFeature = require("../model/palm/palmFeature");
 const PalmReport = require("../model/palm/palmReport");
 const AIJob = require("../model/palm/aiJob");
+const PalmOrder = require("../model/palm/palmOrder");
 
 
 
@@ -1041,7 +1042,8 @@ async function ensurePalmUploadColumns() {
     const indexes = await queryInterface.showIndex("palm_uploads");
     const hasImageHashIndex = indexes.some((index) => index.name === "palm_uploads_image_hash");
     if (!hasImageHashIndex && (updatedTable.imageHash || updatedTable.image_hash)) {
-      await queryInterface.addIndex("palm_uploads", ["imageHash"], {
+      const hashColumn = updatedTable.imageHash ? "imageHash" : "image_hash";
+      await queryInterface.addIndex("palm_uploads", [hashColumn], {
         name: "palm_uploads_image_hash",
       });
       console.log("Ensured palm_uploads imageHash index exists");
