@@ -17,6 +17,11 @@ const PALM_TRUST_BASE_MIN = 2000;
 const PALM_TRUST_BASE_MAX = 2200;
 const PALM_TRUST_STEPS = [1, 2, 3, 4, 6];
 const CHECKOUT_TOKEN_SECRET = process.env.PALM_CHECKOUT_TOKEN_SECRET || process.env.JWT_SECRET || "palm_checkout_secret";
+const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
+const beLog = (event, payload = {}) => {
+  if (!PALM_DEBUG) return;
+  console.log(`[PalmFlow][BE] ${event}`, payload);
+};
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -173,9 +178,16 @@ const finalizePaidPalmOrder = async ({
   enqueueJob = true,
 }) => {
   const idempotencyKey = `checkout:${checkoutPayload.sessionId}`;
+  beLog("finalize_start", {
+    userId,
+    sessionId: checkoutPayload.sessionId,
+    paymentMethod,
+    imageCount: Array.isArray(checkoutPayload.imageUrls) ? checkoutPayload.imageUrls.length : 0,
+  });
   const existingOrder = await PalmOrder.findOne({ where: { userId, idempotencyKey } });
   if (existingOrder && existingOrder.status === "paid") {
     const job = await ensureQueuedJob({ userId, palmUploadId: existingOrder.palmUploadId });
+    beLog("finalize_idempotent_reuse", { orderId: existingOrder.id, jobId: job.id, sessionId: checkoutPayload.sessionId });
     return { order: existingOrder, job, alreadyPaid: true };
   }
 
@@ -222,6 +234,7 @@ const finalizePaidPalmOrder = async ({
   if (enqueueJob) {
     await enqueuePalmJob(job.id);
   }
+  beLog("finalize_created", { orderId: order.id, jobId: job.id, palmUploadId: palmUpload.id, sessionId: checkoutPayload.sessionId });
   return { order, job, alreadyPaid: false };
 };
 
@@ -265,6 +278,13 @@ const createPalmReadingOrder = async (req, res) => {
       exp: Date.now() + PALM_CHECKOUT_TOKEN_TTL_MS,
     };
     const checkoutToken = signCheckoutToken(checkoutPayload);
+    beLog("checkout_created", {
+      userId,
+      sessionId: checkoutPayload.sessionId,
+      imageCount: uploadedPalmImages.length,
+      ignoredImages: req.ignoredPalmImagesCount || 0,
+      imageFormats: uploadedPalmImages.map((it) => it.format || "unknown"),
+    });
 
     return res.status(201).json({
       success: true,
@@ -288,6 +308,7 @@ const payPalmOrderWithWallet = async (req, res) => {
     const userId = req.user.id;
     const checkoutToken = String(req.body?.checkoutToken || "");
     const checkoutPayload = verifyCheckoutToken(checkoutToken);
+    beLog("wallet_pay_request", { userId, sessionId: checkoutPayload.sessionId });
     if (checkoutPayload.userId !== userId) {
       return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
     }
@@ -330,6 +351,12 @@ const payPalmOrderWithWallet = async (req, res) => {
       });
       await tx.commit();
       await enqueuePalmJob(finalized.job.id);
+      beLog("wallet_pay_success", {
+        userId,
+        sessionId: checkoutPayload.sessionId,
+        orderId: finalized.order.id,
+        jobId: finalized.job.id,
+      });
       return res.status(202).json({
         success: true,
         orderId: finalized.order.id,
@@ -343,6 +370,7 @@ const payPalmOrderWithWallet = async (req, res) => {
       throw error;
     }
   } catch (error) {
+    beLog("wallet_pay_error", { message: error.message, userId: req?.user?.id });
     if (String(error.message || "").includes("checkout_token")) {
       return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
     }
@@ -358,6 +386,7 @@ const createPalmOrderRazorpay = async (req, res) => {
     const userId = req.user.id;
     const checkoutToken = String(req.body?.checkoutToken || "");
     const checkoutPayload = verifyCheckoutToken(checkoutToken);
+    beLog("razorpay_create_request", { userId, sessionId: checkoutPayload.sessionId });
     if (checkoutPayload.userId !== userId) {
       return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
     }
@@ -369,6 +398,7 @@ const createPalmOrderRazorpay = async (req, res) => {
       notes: { userId, checkoutSessionId: checkoutPayload.sessionId, purpose: "palm_report_purchase" },
     };
     const razorpayOrder = await razorpay.orders.create(options);
+    beLog("razorpay_create_success", { userId, sessionId: checkoutPayload.sessionId, razorpayOrderId: razorpayOrder.id });
 
     return res.status(200).json({
       success: true,
@@ -378,6 +408,7 @@ const createPalmOrderRazorpay = async (req, res) => {
       key: process.env.RAZORPAY_KEY_ID,
     });
   } catch (error) {
+    beLog("razorpay_create_error", { message: error.message, userId: req?.user?.id });
     if (String(error.message || "").includes("checkout_token")) {
       return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
     }
@@ -390,6 +421,7 @@ const verifyPalmOrderRazorpay = async (req, res) => {
     const userId = req.user.id;
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature, checkoutToken } = req.body;
     const checkoutPayload = verifyCheckoutToken(String(checkoutToken || ""));
+    beLog("razorpay_verify_request", { userId, sessionId: checkoutPayload.sessionId, razorpayOrderId: razorpay_order_id });
     if (checkoutPayload.userId !== userId) {
       return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
     }
@@ -410,6 +442,12 @@ const verifyPalmOrderRazorpay = async (req, res) => {
       razorpayPaymentId: razorpay_payment_id,
       razorpaySignature: razorpay_signature,
     });
+    beLog("razorpay_verify_success", {
+      userId,
+      sessionId: checkoutPayload.sessionId,
+      orderId: finalized.order.id,
+      jobId: finalized.job.id,
+    });
     return res.status(200).json({
       success: true,
       orderId: finalized.order.id,
@@ -419,6 +457,7 @@ const verifyPalmOrderRazorpay = async (req, res) => {
       alreadyPaid: finalized.alreadyPaid,
     });
   } catch (error) {
+    beLog("razorpay_verify_error", { message: error.message, userId: req?.user?.id });
     if (String(error.message || "").includes("checkout_token")) {
       return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
     }
@@ -489,6 +528,14 @@ const getPalmReadingJob = async (req, res) => {
     const { jobId } = req.params;
     const job = await AIJob.findOne({ where: { id: jobId, userId } });
     if (!job) return res.status(404).json({ success: false, message: "Job not found" });
+    beLog("job_status_fetch", {
+      userId,
+      jobId: job.id,
+      status: job.status,
+      stage: job.stage,
+      progress: job.progress,
+      updatedAt: job.updatedAt,
+    });
 
     // Self-heal: if a paid job is still queued for too long, re-enqueue it.
     if (job.status === "queued") {

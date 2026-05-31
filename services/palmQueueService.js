@@ -12,6 +12,14 @@ let workerStarted = false;
 let processing = false;
 let reconcileRunning = false;
 const RECONCILE_INTERVAL_MS = 60 * 1000;
+const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
+const queueLog = (event, payload = {}) => {
+  if (!PALM_DEBUG) return;
+  console.log(`[PalmFlow][QUEUE] ${event}`, payload);
+};
+const queueInfo = (event, payload = {}) => {
+  console.log(`[PalmQueue][${event}]`, payload);
+};
 
 const hasPaidPalmOrder = async (job) => {
   const paidOrder = await PalmOrder.findOne({
@@ -41,6 +49,8 @@ const enqueuePalmJob = async (jobId) => {
     throw new Error("payment_required_before_processing");
   }
   await redis.rpush(PALM_QUEUE_KEY, jobId);
+  queueLog("enqueue", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
+  queueInfo("ENQUEUE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
   void processNextPalmJob();
 };
 
@@ -48,17 +58,35 @@ const processNextPalmJob = async () => {
   if (processing) return;
   processing = true;
   let activeJob = null;
+  const startedAt = Date.now();
   try {
     const jobId = await redis.lpop(PALM_QUEUE_KEY);
     if (!jobId) return;
-
-    console.log("[PalmQueue] dequeued job", { jobId });
+    const remaining = await redis.llen(PALM_QUEUE_KEY);
+    queueLog("dequeue", { jobId, remainingInQueue: remaining });
+    queueInfo("DEQUEUE", { jobId, remainingInQueue: remaining });
     const job = await AIJob.findByPk(jobId);
-    if (!job || job.status === "completed") return;
+    if (!job) {
+      queueLog("skip_missing_job", { jobId });
+      queueInfo("SKIP_MISSING_JOB", { jobId });
+      return;
+    }
+    if (job.status === "completed") {
+      queueLog("skip_completed", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      queueInfo("SKIP_COMPLETED", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      return;
+    }
+    if (job.status === "processing") {
+      queueLog("skip_already_processing", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      queueInfo("SKIP_ALREADY_PROCESSING", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      return;
+    }
     activeJob = job;
 
     const paid = await hasPaidPalmOrder(job);
     if (!paid) {
+      queueLog("skip_unpaid", { jobId: job.id, palmUploadId: job.palmUploadId, userId: job.userId });
+      queueInfo("SKIP_UNPAID", { jobId: job.id, palmUploadId: job.palmUploadId, userId: job.userId });
       await job.update({
         status: "failed",
         stage: "failed",
@@ -69,7 +97,7 @@ const processNextPalmJob = async () => {
       return;
     }
 
-    console.log("[PalmQueue] job start", {
+    queueInfo("JOB_START", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
       userId: job.userId,
@@ -100,6 +128,7 @@ const processNextPalmJob = async () => {
       progress: 45,
       stageMessage: "Extracting palm lines and mount details using vision AI.",
     });
+    queueLog("stage_vision_started", { jobId: job.id, palmUploadId: upload.id });
 
     // Dedupe optimization: reuse completed report for same image hash.
     if (upload.imageHash) {
@@ -144,10 +173,17 @@ const processNextPalmJob = async () => {
     };
 
     const result = await analyzePalm({ imageUrls: upload.imageUrls, metadata });
-    console.log("[PalmQueue] analyzePalm success", {
+    queueLog("analyze_done", {
+      jobId: job.id,
+      palmUploadId: upload.id,
+      featureKeys: Object.keys(result?.extracted_features || {}).length,
+      elapsedMs: Date.now() - startedAt,
+    });
+    queueInfo("ANALYZE_SUCCESS", {
       jobId: job.id,
       hasFeatures: Boolean(result?.extracted_features),
       hasInsights: Boolean(result?.structured_insights),
+      elapsedMs: Date.now() - startedAt,
     });
 
     await PalmFeature.upsert({
@@ -176,9 +212,19 @@ const processNextPalmJob = async () => {
       stageMessage: "Your premium palm report is ready.",
       completedAt: new Date(),
     });
-    console.log("[PalmQueue] job completed", { jobId: job.id, palmUploadId: job.palmUploadId });
+    queueLog("job_completed", {
+      jobId: job.id,
+      palmUploadId: job.palmUploadId,
+      totalElapsedMs: Date.now() - startedAt,
+    });
+    queueInfo("JOB_COMPLETED", {
+      jobId: job.id,
+      palmUploadId: job.palmUploadId,
+      totalElapsedMs: Date.now() - startedAt,
+    });
   } catch (error) {
-    console.error("[PalmQueue] processing failed", {
+    queueLog("process_error", { jobId: activeJob?.id, message: error.message });
+    console.error("[PalmQueue][PROCESS_ERROR]", {
       jobId: activeJob?.id,
       palmUploadId: activeJob?.palmUploadId,
       message: error.message,

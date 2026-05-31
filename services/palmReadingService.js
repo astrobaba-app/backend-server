@@ -1,6 +1,7 @@
 const axios = require("axios");
 
 const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || "http://localhost:8000/api/v1";
+const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
 
 const checkPalmEngineHealth = async () => {
   const healthUrl = ASTRO_ENGINE_BASE_URL.replace(/\/api\/v1\/?$/, "") + "/health";
@@ -18,10 +19,24 @@ const checkPalmEngineHealth = async () => {
 
 const analyzePalm = async ({ imageUrls, metadata }) => {
   try {
+    if (PALM_DEBUG) {
+      console.log("[PalmFlow][BE] astro_analyze_request", {
+        url: `${ASTRO_ENGINE_BASE_URL}/palm-reading/analyze`,
+        imageCount: Array.isArray(imageUrls) ? imageUrls.length : 0,
+        jobId: metadata?.job_id || null,
+        palmUploadId: metadata?.palm_upload_id || null,
+      });
+    }
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/palm-reading/analyze`, {
       image_urls: imageUrls,
       metadata: metadata || {},
     });
+    if (PALM_DEBUG) {
+      console.log("[PalmFlow][BE] astro_analyze_success", {
+        jobId: metadata?.job_id || null,
+        status: response?.status,
+      });
+    }
     return response.data;
   } catch (error) {
     const status = error?.response?.status || null;
