@@ -23,6 +23,14 @@ const PalmOrder = sequelize.define(
     razorpaySignature: { type: DataTypes.TEXT, allowNull: true },
     idempotencyKey: { type: DataTypes.STRING, allowNull: true },
     expiresAt: { type: DataTypes.DATE, allowNull: true },
+    refundStatus: {
+      type: DataTypes.ENUM("none", "pending", "processing", "completed", "failed"),
+      allowNull: false,
+      defaultValue: "none",
+    },
+    refundReason: { type: DataTypes.STRING, allowNull: true },
+    refundProcessedAt: { type: DataTypes.DATE, allowNull: true },
+    refundRazorpayId: { type: DataTypes.STRING, allowNull: true },
   },
   {
     tableName: "palm_orders",
@@ -32,4 +40,3 @@ const PalmOrder = sequelize.define(
 );
 
 module.exports = PalmOrder;
-

@@ -1053,6 +1053,55 @@ async function ensurePalmUploadColumns() {
   }
 }
 
+async function ensurePalmOrderColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_orders");
+    const operations = [];
+
+    if (!table.refundStatus && !table.refund_status) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "refundStatus", {
+          type: DataTypes.ENUM("none", "pending", "processing", "completed", "failed"),
+          allowNull: false,
+          defaultValue: "none",
+        })
+      );
+    }
+    if (!table.refundReason && !table.refund_reason) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "refundReason", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.refundProcessedAt && !table.refund_processed_at) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "refundProcessedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.refundRazorpayId && !table.refund_razorpay_id) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "refundRazorpayId", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_orders refund columns exist");
+    }
+  } catch (error) {
+    console.log("palm_orders table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -1078,6 +1127,7 @@ const initDB = (callback) => {
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())
     .then(() => ensurePalmUploadColumns())
+    .then(() => ensurePalmOrderColumns())
     .then(() => {
       console.log("All models synced");
       callback();

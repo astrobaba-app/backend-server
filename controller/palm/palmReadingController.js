@@ -8,7 +8,10 @@ const WalletTransaction = require("../../model/wallet/walletTransaction");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const { sequelize } = require("../../dbConnection/dbConfig");
-const { enqueuePalmJob } = require("../../services/palmQueueService");
+const {
+  enqueuePalmJob,
+  QUALITY_REJECT_ERROR_TAG,
+} = require("../../services/palmQueueService");
 const { checkPalmEngineHealth } = require("../../services/palmReadingService");
 
 const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 59);
@@ -472,6 +475,57 @@ const payPalmCheckoutWithWallet = async (req, res) => payPalmOrderWithWallet(req
 const createPalmCheckoutRazorpay = async (req, res) => createPalmOrderRazorpay(req, res);
 const verifyPalmCheckoutRazorpay = async (req, res) => verifyPalmOrderRazorpay(req, res);
 
+const autoRefundWalletForPalmOrder = async (order, reason) => {
+  if (!order || order.paymentMethod !== "wallet" || order.refundStatus === "completed") return;
+  const tx = await sequelize.transaction();
+  try {
+    let wallet = await Wallet.findOne({ where: { userId: order.userId }, transaction: tx });
+    if (!wallet) {
+      wallet = await Wallet.create({ userId: order.userId }, { transaction: tx });
+    }
+    const oldBalance = Number(wallet.balance || 0);
+    const refundAmount = Number(order.amount || 0);
+    const newBalance = oldBalance + refundAmount;
+
+    await wallet.update({ balance: newBalance }, { transaction: tx });
+    await WalletTransaction.create(
+      {
+        userId: order.userId,
+        walletId: wallet.id,
+        amount: refundAmount,
+        type: "credit",
+        status: "completed",
+        paymentMethod: "refund",
+        description: "Palm reading auto-refund after quality rejection",
+        metadata: {
+          palmOrderId: order.id,
+          reason,
+        },
+        balanceBefore: oldBalance,
+        balanceAfter: newBalance,
+      },
+      { transaction: tx }
+    );
+
+    await order.update(
+      {
+        refundStatus: "completed",
+        refundReason: reason || "quality_rejected",
+        refundProcessedAt: new Date(),
+      },
+      { transaction: tx }
+    );
+    await tx.commit();
+  } catch (error) {
+    await tx.rollback();
+    await order.update({
+      refundStatus: "failed",
+      refundReason: reason || "quality_rejected",
+    });
+    throw error;
+  }
+};
+
 const getPalmOrder = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -553,6 +607,23 @@ const getPalmReadingJob = async (req, res) => {
       }
     }
 
+    if (job.status === "failed" && String(job.error || "") === QUALITY_REJECT_ERROR_TAG) {
+      const order = await PalmOrder.findOne({
+        where: { userId, palmUploadId: job.palmUploadId },
+      });
+      if (order) {
+        if (order.paymentMethod === "wallet" && order.refundStatus !== "completed") {
+          await autoRefundWalletForPalmOrder(order, "quality_rejected");
+          await order.reload();
+        } else if (order.paymentMethod === "razorpay" && order.refundStatus === "none") {
+          await order.update({
+            refundStatus: "pending",
+            refundReason: "quality_rejected",
+          });
+        }
+      }
+    }
+
     const response = { success: true, job };
     if (job.status === "completed") {
       const feature = await PalmFeature.findOne({ where: { palmUploadId: job.palmUploadId } });
@@ -565,6 +636,20 @@ const getPalmReadingJob = async (req, res) => {
         finalNarrativeReport: report?.finalNarrative || "",
         confidenceScores: report?.confidenceScores || feature?.confidenceScores || {},
       };
+    }
+    if (job.status === "failed") {
+      const order = await PalmOrder.findOne({
+        where: { userId, palmUploadId: job.palmUploadId },
+      });
+      if (order) {
+        response.order = {
+          id: order.id,
+          paymentMethod: order.paymentMethod,
+          refundStatus: order.refundStatus || "none",
+          refundReason: order.refundReason || null,
+          refundProcessedAt: order.refundProcessedAt || null,
+        };
+      }
     }
     return res.status(200).json(response);
   } catch (error) {
@@ -609,6 +694,9 @@ const getPalmReadingHistory = async (req, res) => {
             amount: item.order.amount,
             paymentMethod: item.order.paymentMethod,
             palmUploadId: item.order.palmUploadId,
+            refundStatus: item.order.refundStatus || "none",
+            refundReason: item.order.refundReason || null,
+            refundProcessedAt: item.order.refundProcessedAt || null,
           }
         : null,
       report: item.report
