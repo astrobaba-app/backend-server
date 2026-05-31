@@ -1059,35 +1059,44 @@ async function ensurePalmOrderColumns() {
     const table = await queryInterface.describeTable("palm_orders");
     const operations = [];
 
-    if (!table.refundStatus && !table.refund_status) {
+    if (!table.maxRetries && !table.max_retries) {
       operations.push(
-        queryInterface.addColumn("palm_orders", "refundStatus", {
-          type: DataTypes.ENUM("none", "pending", "processing", "completed", "failed"),
+        queryInterface.addColumn("palm_orders", "maxRetries", {
+          type: DataTypes.INTEGER,
           allowNull: false,
-          defaultValue: "none",
+          defaultValue: 3,
         })
       );
     }
-    if (!table.refundReason && !table.refund_reason) {
+    if (!table.retriesUsed && !table.retries_used) {
       operations.push(
-        queryInterface.addColumn("palm_orders", "refundReason", {
+        queryInterface.addColumn("palm_orders", "retriesUsed", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+    if (!table.lastFailureReason && !table.last_failure_reason) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "lastFailureReason", {
           type: DataTypes.STRING,
           allowNull: true,
         })
       );
     }
-    if (!table.refundProcessedAt && !table.refund_processed_at) {
+    if (!table.retryExhaustedAt && !table.retry_exhausted_at) {
       operations.push(
-        queryInterface.addColumn("palm_orders", "refundProcessedAt", {
+        queryInterface.addColumn("palm_orders", "retryExhaustedAt", {
           type: DataTypes.DATE,
           allowNull: true,
         })
       );
     }
-    if (!table.refundRazorpayId && !table.refund_razorpay_id) {
+    if (!table.retrySourceOrderId && !table.retry_source_order_id) {
       operations.push(
-        queryInterface.addColumn("palm_orders", "refundRazorpayId", {
-          type: DataTypes.STRING,
+        queryInterface.addColumn("palm_orders", "retrySourceOrderId", {
+          type: DataTypes.UUID,
           allowNull: true,
         })
       );
@@ -1095,7 +1104,7 @@ async function ensurePalmOrderColumns() {
 
     if (operations.length) {
       await Promise.all(operations);
-      console.log("Ensured palm_orders refund columns exist");
+      console.log("Ensured palm_orders retry columns exist");
     }
   } catch (error) {
     console.log("palm_orders table will be created by sequelize.sync()");

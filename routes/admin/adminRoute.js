@@ -52,8 +52,7 @@ const {
 } = require("../../controller/admin/adminForumController");
 const { getPlatformRazorpayTransactions } = require("../../controller/admin/platformTransactionAdminController");
 const {
-  getPalmRefundCandidates,
-  processPalmRazorpayRefund,
+  getPalmFailureCandidates,
   cleanupPalmQueue,
 } = require("../../controller/admin/palmRefundAdminController");
 const {
@@ -378,14 +377,7 @@ router.get(
   "/palm/refunds",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  getPalmRefundCandidates
-);
-
-router.post(
-  "/palm/refunds/:orderId/razorpay",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  processPalmRazorpayRefund
+  getPalmFailureCandidates
 );
 
 router.post(

@@ -4,9 +4,6 @@ const PalmFeature = require("../model/palm/palmFeature");
 const PalmReport = require("../model/palm/palmReport");
 const PalmUpload = require("../model/palm/palmUpload");
 const PalmOrder = require("../model/palm/palmOrder");
-const Wallet = require("../model/wallet/wallet");
-const WalletTransaction = require("../model/wallet/walletTransaction");
-const { sequelize } = require("../dbConnection/dbConfig");
 const { analyzePalm } = require("./palmReadingService");
 
 const PALM_QUEUE_KEY = "queue:palm_reading";
@@ -37,70 +34,32 @@ const extractQualityRejectReasons = (message) => {
   }
 };
 
-const handleQualityRejectCompensation = async ({ job, reasonText }) => {
-  const order = await PalmOrder.findOne({
-    where: { userId: job.userId, palmUploadId: job.palmUploadId },
-  });
-  if (!order) return;
-
-  if (order.status !== "failed") {
-    await order.update({ status: "failed" });
+const getFailureReasonFromMessage = (message) => {
+  const text = String(message || "").toLowerCase();
+  if (/blur/.test(text)) return "Image is blurry";
+  if (/multiple hands/.test(text)) return "Multiple hands detected";
+  if (/cartoon|illustration|ai-generated|fake hand/.test(text)) return "Uploaded image looks invalid";
+  if (/unsupported|format/.test(text)) return "Unsupported image format";
+  if (/low quality|quality/.test(text)) return "Low image quality";
+  if (/unavailable|temporarily|timeout|econnrefused|enotfound|etimedout|429|rate.?limit/.test(text)) {
+    return "Processing service temporarily unavailable";
   }
+  return "Palm analysis failed";
+};
 
-  if (order.paymentMethod === "wallet" && order.refundStatus !== "completed") {
-    const tx = await sequelize.transaction();
-    try {
-      let wallet = await Wallet.findOne({ where: { userId: order.userId }, transaction: tx });
-      if (!wallet) {
-        wallet = await Wallet.create({ userId: order.userId }, { transaction: tx });
-      }
-      const oldBalance = Number(wallet.balance || 0);
-      const refundAmount = Number(order.amount || 0);
-      const newBalance = oldBalance + refundAmount;
-      await wallet.update({ balance: newBalance }, { transaction: tx });
-      await WalletTransaction.create(
-        {
-          userId: order.userId,
-          walletId: wallet.id,
-          amount: refundAmount,
-          type: "credit",
-          status: "completed",
-          paymentMethod: "refund",
-          description: "Palm quality reject auto-refund",
-          metadata: { palmOrderId: order.id, reason: reasonText || "quality_rejected" },
-          balanceBefore: oldBalance,
-          balanceAfter: newBalance,
-        },
-        { transaction: tx }
-      );
-      await order.update(
-        {
-          refundStatus: "completed",
-          refundReason: reasonText || "quality_rejected",
-          refundProcessedAt: new Date(),
-        },
-        { transaction: tx }
-      );
-      await tx.commit();
-      queueInfo("WALLET_REFUND_COMPLETED", { orderId: order.id, jobId: job.id, amount: refundAmount });
-    } catch (error) {
-      await tx.rollback();
-      await order.update({
-        refundStatus: "failed",
-        refundReason: reasonText || "quality_rejected",
-      });
-      queueInfo("WALLET_REFUND_FAILED", { orderId: order.id, jobId: job.id, message: error.message });
-    }
-    return;
-  }
-
-  if (order.paymentMethod === "razorpay" && order.refundStatus === "none") {
-    await order.update({
-      refundStatus: "pending",
-      refundReason: reasonText || "quality_rejected",
-    });
-    queueInfo("RAZORPAY_REFUND_PENDING", { orderId: order.id, jobId: job.id });
-  }
+const getRetrySnapshotForOrder = (order) => {
+  if (!order) return null;
+  const total =
+    order.maxRetries === null || order.maxRetries === undefined
+      ? 3
+      : Number(order.maxRetries);
+  const used = Number(order.retriesUsed || 0);
+  return {
+    sourceOrderId: order.id,
+    totalRetries: total,
+    retriesUsed: used,
+    retriesLeft: Math.max(0, total - used),
+  };
 };
 
 const hasPaidPalmOrder = async (job) => {
@@ -129,6 +88,11 @@ const enqueuePalmJob = async (jobId) => {
       error: "Payment required",
     });
     throw new Error("payment_required_before_processing");
+  }
+  const existingQueue = await redis.lrange(PALM_QUEUE_KEY, 0, -1);
+  if (Array.isArray(existingQueue) && existingQueue.includes(jobId)) {
+    queueInfo("ENQUEUE_SKIPPED_DUPLICATE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+    return;
   }
   await redis.rpush(PALM_QUEUE_KEY, jobId);
   queueLog("enqueue", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
@@ -162,6 +126,7 @@ const cleanupPalmQueueStaleJobs = async () => {
       const shouldRemove =
         !job ||
         job.status === "completed" ||
+        job.status === "failed" ||
         (job.status === "failed" && String(job.error || "") === QUALITY_REJECT_ERROR_TAG);
       if (shouldRemove) {
         removed += await clearPalmJobFromQueue(jobId);
@@ -218,10 +183,17 @@ const processNextPalmJob = async () => {
       return;
     }
 
+    const activeOrder = await PalmOrder.findOne({
+      where: { userId: job.userId, palmUploadId: job.palmUploadId, status: "paid" },
+    });
+    const retrySourceAtStart = activeOrder?.retrySourceOrderId
+      ? await PalmOrder.findByPk(activeOrder.retrySourceOrderId)
+      : activeOrder;
     queueInfo("JOB_START", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
       userId: job.userId,
+      retry: getRetrySnapshotForOrder(retrySourceAtStart),
     });
 
     await job.update({
@@ -333,6 +305,51 @@ const processNextPalmJob = async () => {
       stageMessage: "Your premium palm report is ready.",
       completedAt: new Date(),
     });
+    const paidOrder = await PalmOrder.findOne({
+      where: { userId: job.userId, palmUploadId: job.palmUploadId, status: "paid" },
+    });
+    if (paidOrder) {
+      const retrySourceBeforeSuccess = paidOrder.retrySourceOrderId
+        ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId)
+        : paidOrder;
+      if (retrySourceBeforeSuccess && Number(retrySourceBeforeSuccess.maxRetries ?? 0) > 0) {
+        const total = Number(retrySourceBeforeSuccess.maxRetries ?? 3);
+        await retrySourceBeforeSuccess.update({
+          retriesUsed: total,
+          retryExhaustedAt: new Date(),
+          lastFailureReason: null,
+          status: "paid",
+        });
+      }
+      await paidOrder.update({
+        lastFailureReason: null,
+        retryExhaustedAt: null,
+        status: "paid",
+      });
+      if (paidOrder.retrySourceOrderId) {
+        const sourceOrder = await PalmOrder.findByPk(paidOrder.retrySourceOrderId);
+        if (sourceOrder) {
+          const sourceMax = Number(sourceOrder.maxRetries ?? 3);
+          await sourceOrder.update({
+            retriesUsed: sourceMax,
+            retryExhaustedAt: new Date(),
+            lastFailureReason: null,
+          });
+          queueInfo("RETRY_SOURCE_CONSUMED_ON_SUCCESS", {
+            sourceOrderId: sourceOrder.id,
+            jobId: job.id,
+            before: getRetrySnapshotForOrder(retrySourceBeforeSuccess),
+            after: getRetrySnapshotForOrder(sourceOrder),
+          });
+        }
+      }
+      queueInfo("RETRY_STATUS_AFTER_SUCCESS", {
+        jobId: job.id,
+        retry: getRetrySnapshotForOrder(
+          paidOrder.retrySourceOrderId ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId) : paidOrder
+        ),
+      });
+    }
     queueLog("job_completed", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
@@ -361,6 +378,9 @@ const processNextPalmJob = async () => {
         const rateLimited = /Too Many Requests|429|rate.?limit|temporarily busy/i.test(message);
         const rejectReasons = qualityReject ? extractQualityRejectReasons(message) : [];
         const rejectReasonText = rejectReasons.length ? ` (${rejectReasons.join(", ")})` : "";
+        const friendlyReason = rejectReasons.length
+          ? rejectReasons[0]
+          : getFailureReasonFromMessage(message);
         await activeJob.update({
           status: "failed",
           stage: "failed",
@@ -376,13 +396,34 @@ const processNextPalmJob = async () => {
             : "Palm analysis failed. Please retry with clearer images.",
           error: qualityReject ? QUALITY_REJECT_ERROR_TAG : "Palm processing failed",
         });
-        if (qualityReject) {
-          await handleQualityRejectCompensation({
-            job: activeJob,
-            reasonText: rejectReasons.join(", ") || "quality_rejected",
+        const order = await PalmOrder.findOne({
+          where: { userId: activeJob.userId, palmUploadId: activeJob.palmUploadId, status: "paid" },
+        });
+        if (order) {
+          const sourceOrder = order.retrySourceOrderId
+            ? await PalmOrder.findByPk(order.retrySourceOrderId)
+            : null;
+          const retryOrder = sourceOrder || order;
+          const maxRetries = Number(retryOrder.maxRetries ?? 3);
+          const retriesUsed = Number(retryOrder.retriesUsed || 0) + 1;
+          await retryOrder.update({
+            status: retriesUsed >= maxRetries ? "paid" : "failed",
+            retriesUsed,
+            lastFailureReason: friendlyReason,
+            retryExhaustedAt: retriesUsed >= maxRetries ? new Date() : null,
           });
-          await clearPalmJobFromQueue(activeJob.id);
+          await order.update({ status: "failed", lastFailureReason: friendlyReason });
+          queueInfo("RETRY_STATE_UPDATED", {
+            orderId: retryOrder.id,
+            jobId: activeJob.id,
+            retriesUsed,
+            maxRetries,
+            remainingRetries: Math.max(0, maxRetries - retriesUsed),
+            status: retriesUsed >= maxRetries ? "retry_exhausted" : "retry_available",
+            reason: friendlyReason,
+          });
         }
+        await clearPalmJobFromQueue(activeJob.id);
       }
     } catch (innerError) {
       console.error("[PalmQueue] failed to persist error state:", innerError.message || innerError);
@@ -435,17 +476,8 @@ const reconcilePaidPalmOrders = async () => {
       }
 
       if (job.status === "failed") {
-        if (String(job.error || "") === QUALITY_REJECT_ERROR_TAG) {
-          continue;
-        }
-        await job.update({
-          status: "queued",
-          stage: "queued",
-          progress: 8,
-          stageMessage: "Retrying your paid palm report automatically.",
-          error: null,
-        });
-        await enqueuePalmJob(job.id);
+        // Do not auto-retry failed jobs; prevents repeated OpenAI calls/cost loops.
+        // Keep failed state for admin/user visibility and manual user retries.
         continue;
       }
 
