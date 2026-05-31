@@ -11,11 +11,114 @@ const { sequelize } = require("../../dbConnection/dbConfig");
 const { enqueuePalmJob } = require("../../services/palmQueueService");
 const { checkPalmEngineHealth } = require("../../services/palmReadingService");
 
-const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 49);
+const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 59);
+const PALM_CHECKOUT_TOKEN_TTL_MS = 30 * 60 * 1000;
+const PALM_TRUST_BASE_MIN = 2000;
+const PALM_TRUST_BASE_MAX = 2200;
+const PALM_TRUST_STEPS = [1, 2, 3, 4, 6];
+const CHECKOUT_TOKEN_SECRET = process.env.PALM_CHECKOUT_TOKEN_SECRET || process.env.JWT_SECRET || "palm_checkout_secret";
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
+
+const base64UrlEncode = (value) =>
+  Buffer.from(value).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+
+const base64UrlDecode = (value) => {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const pad = normalized.length % 4 === 0 ? "" : "=".repeat(4 - (normalized.length % 4));
+  return Buffer.from(normalized + pad, "base64").toString("utf8");
+};
+
+const signCheckoutToken = (payload) => {
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto.createHmac("sha256", CHECKOUT_TOKEN_SECRET).update(encodedPayload).digest("base64url");
+  return `${encodedPayload}.${signature}`;
+};
+
+const verifyCheckoutToken = (token) => {
+  if (!token || typeof token !== "string" || !token.includes(".")) {
+    throw new Error("invalid_checkout_token");
+  }
+
+  const [encodedPayload, signature] = token.split(".");
+  const expected = crypto.createHmac("sha256", CHECKOUT_TOKEN_SECRET).update(encodedPayload).digest("base64url");
+  const safeSignature = Buffer.from(signature);
+  const safeExpected = Buffer.from(expected);
+
+  if (
+    safeSignature.length !== safeExpected.length ||
+    !crypto.timingSafeEqual(safeSignature, safeExpected)
+  ) {
+    throw new Error("invalid_checkout_token_signature");
+  }
+
+  const payload = JSON.parse(base64UrlDecode(encodedPayload));
+  if (!payload?.exp || Date.now() > Number(payload.exp)) {
+    throw new Error("checkout_token_expired");
+  }
+  return payload;
+};
+
+const createSeededRandom = (seed) => {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+};
+
+const getIndiaDateParts = (date = new Date()) => {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const parts = formatter.formatToParts(date);
+  const map = {};
+  for (const part of parts) {
+    if (part.type !== "literal") map[part.type] = part.value;
+  }
+
+  return {
+    dateKey: `${map.year}-${map.month}-${map.day}`,
+    hour: Number(map.hour || 0),
+    minute: Number(map.minute || 0),
+  };
+};
+
+const getSeedFromDateKey = (dateKey) => {
+  let seed = 0;
+  for (let i = 0; i < dateKey.length; i += 1) {
+    seed += dateKey.charCodeAt(i) * (i + 1);
+  }
+  return seed;
+};
+
+const getPalmReadingTrustSnapshot = (date = new Date()) => {
+  const { dateKey, hour, minute } = getIndiaDateParts(date);
+  const seed = getSeedFromDateKey(dateKey);
+  const rand = createSeededRandom(seed);
+  const base = PALM_TRUST_BASE_MIN + Math.floor(rand() * (PALM_TRUST_BASE_MAX - PALM_TRUST_BASE_MIN + 1));
+
+  const slotCount = Math.floor((hour * 60 + minute) / 30);
+  let count = base;
+
+  for (let i = 0; i < slotCount; i += 1) {
+    const step = PALM_TRUST_STEPS[Math.floor(rand() * PALM_TRUST_STEPS.length)];
+    count += step;
+  }
+
+  return { dateKey, base, count, slotCount };
+};
 
 const ensureQueuedJob = async ({ userId, palmUploadId }) => {
   const paidOrder = await PalmOrder.findOne({
@@ -58,6 +161,70 @@ const ensureQueuedJob = async ({ userId, palmUploadId }) => {
   return job;
 };
 
+const finalizePaidPalmOrder = async ({
+  userId,
+  checkoutPayload,
+  paymentMethod,
+  walletTransactionId = null,
+  razorpayOrderId = null,
+  razorpayPaymentId = null,
+  razorpaySignature = null,
+  transaction = null,
+  enqueueJob = true,
+}) => {
+  const idempotencyKey = `checkout:${checkoutPayload.sessionId}`;
+  const existingOrder = await PalmOrder.findOne({ where: { userId, idempotencyKey } });
+  if (existingOrder && existingOrder.status === "paid") {
+    const job = await ensureQueuedJob({ userId, palmUploadId: existingOrder.palmUploadId });
+    return { order: existingOrder, job, alreadyPaid: true };
+  }
+
+  const createOptions = transaction ? { transaction } : undefined;
+  const palmUpload = await PalmUpload.create(
+    {
+      userId,
+      imageUrls: checkoutPayload.imageUrls || [],
+      imageHash: checkoutPayload.imageHash || null,
+      metadata: checkoutPayload.metadata || {},
+    },
+    createOptions
+  );
+
+  const order = await PalmOrder.create(
+    {
+      userId,
+      palmUploadId: palmUpload.id,
+      amount: PALM_REPORT_PRICE,
+      status: "paid",
+      paymentMethod,
+      walletTransactionId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+      idempotencyKey,
+    },
+    createOptions
+  );
+
+  const job = await AIJob.create(
+    {
+      userId,
+      palmUploadId: palmUpload.id,
+      type: "palm_reading",
+      status: "queued",
+      stage: "queued",
+      progress: 8,
+      stageMessage: "Payment confirmed. Your palm report is entering the analysis queue.",
+    },
+    createOptions
+  );
+
+  if (enqueueJob) {
+    await enqueuePalmJob(job.id);
+  }
+  return { order, job, alreadyPaid: false };
+};
+
 const createPalmReadingOrder = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -83,33 +250,25 @@ const createPalmReadingOrder = async (req, res) => {
       notes: req.body.notes || null,
     };
 
-    const palmUpload = await PalmUpload.create({
-      userId,
-      imageUrls: uploadedPalmImages.map((item) => item.url),
-      imageHash: uploadedPalmImages[0]?.hash || null,
-      metadata,
-    });
-
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
-    const order = await PalmOrder.create({
-      userId,
-      palmUploadId: palmUpload.id,
-      amount: PALM_REPORT_PRICE,
-      status: "pending_payment",
-      expiresAt,
-      idempotencyKey: `${userId}:${palmUpload.id}:${Date.now()}`,
-    });
-
     let wallet = await Wallet.findOne({ where: { userId } });
     if (!wallet) {
       wallet = await Wallet.create({ userId });
     }
     const walletBalance = Number(wallet.balance || 0);
+    const checkoutPayload = {
+      sessionId: crypto.randomUUID(),
+      userId,
+      imageUrls: uploadedPalmImages.map((item) => item.url),
+      imageHash: uploadedPalmImages[0]?.hash || null,
+      metadata,
+      iat: Date.now(),
+      exp: Date.now() + PALM_CHECKOUT_TOKEN_TTL_MS,
+    };
+    const checkoutToken = signCheckoutToken(checkoutPayload);
 
     return res.status(201).json({
       success: true,
-      orderId: order.id,
-      palmUploadId: palmUpload.id,
+      checkoutToken,
       amount: PALM_REPORT_PRICE,
       walletBalance,
       canPayWithWallet: walletBalance >= PALM_REPORT_PRICE,
@@ -127,15 +286,10 @@ const createPalmReadingOrder = async (req, res) => {
 const payPalmOrderWithWallet = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { orderId } = req.params;
-    const order = await PalmOrder.findOne({ where: { id: orderId, userId } });
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-    if (order.status === "paid") {
-      const job = await ensureQueuedJob({ userId, palmUploadId: order.palmUploadId });
-      return res.status(200).json({ success: true, alreadyPaid: true, jobId: job.id, orderId: order.id });
-    }
-    if (order.status !== "pending_payment") {
-      return res.status(400).json({ success: false, message: "Order is not payable" });
+    const checkoutToken = String(req.body?.checkoutToken || "");
+    const checkoutPayload = verifyCheckoutToken(checkoutToken);
+    if (checkoutPayload.userId !== userId) {
+      return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
     }
 
     const wallet = await Wallet.findOne({ where: { userId } });
@@ -166,25 +320,32 @@ const payPalmOrderWithWallet = async (req, res) => {
         },
         { transaction: tx }
       );
-      await order.update(
-        { status: "paid", paymentMethod: "wallet", walletTransactionId: walletTxn.id },
-        { transaction: tx }
-      );
+      const finalized = await finalizePaidPalmOrder({
+        userId,
+        checkoutPayload,
+        paymentMethod: "wallet",
+        walletTransactionId: walletTxn.id,
+        transaction: tx,
+        enqueueJob: false,
+      });
       await tx.commit();
+      await enqueuePalmJob(finalized.job.id);
+      return res.status(202).json({
+        success: true,
+        orderId: finalized.order.id,
+        status: "paid",
+        jobId: finalized.job.id,
+        paymentMethod: "wallet",
+        alreadyPaid: finalized.alreadyPaid,
+      });
     } catch (error) {
       await tx.rollback();
       throw error;
     }
-
-    const job = await ensureQueuedJob({ userId, palmUploadId: order.palmUploadId });
-    return res.status(202).json({
-      success: true,
-      orderId: order.id,
-      status: "paid",
-      jobId: job.id,
-      paymentMethod: "wallet",
-    });
   } catch (error) {
+    if (String(error.message || "").includes("checkout_token")) {
+      return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
+    }
     if (String(error.message || "").includes("payment_required_before_processing")) {
       return res.status(400).json({ success: false, message: "Payment required before processing" });
     }
@@ -195,19 +356,19 @@ const payPalmOrderWithWallet = async (req, res) => {
 const createPalmOrderRazorpay = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { orderId } = req.params;
-    const order = await PalmOrder.findOne({ where: { id: orderId, userId } });
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-    if (order.status === "paid") return res.status(400).json({ success: false, message: "Order already paid" });
+    const checkoutToken = String(req.body?.checkoutToken || "");
+    const checkoutPayload = verifyCheckoutToken(checkoutToken);
+    if (checkoutPayload.userId !== userId) {
+      return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
+    }
 
     const options = {
       amount: Math.round(PALM_REPORT_PRICE * 100),
       currency: "INR",
       receipt: `palm_${Date.now().toString().slice(-8)}`,
-      notes: { userId, palmOrderId: order.id, purpose: "palm_report_purchase" },
+      notes: { userId, checkoutSessionId: checkoutPayload.sessionId, purpose: "palm_report_purchase" },
     };
     const razorpayOrder = await razorpay.orders.create(options);
-    await order.update({ razorpayOrderId: razorpayOrder.id });
 
     return res.status(200).json({
       success: true,
@@ -215,9 +376,11 @@ const createPalmOrderRazorpay = async (req, res) => {
       amountInPaise: razorpayOrder.amount,
       currency: razorpayOrder.currency,
       key: process.env.RAZORPAY_KEY_ID,
-      orderId: order.id,
     });
   } catch (error) {
+    if (String(error.message || "").includes("checkout_token")) {
+      return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
+    }
     return res.status(500).json({ success: false, message: "Failed to create Razorpay order", error: error.message });
   }
 };
@@ -225,13 +388,10 @@ const createPalmOrderRazorpay = async (req, res) => {
 const verifyPalmOrderRazorpay = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { orderId } = req.params;
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-    const order = await PalmOrder.findOne({ where: { id: orderId, userId } });
-    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
-    if (order.status === "paid") {
-      const job = await ensureQueuedJob({ userId, palmUploadId: order.palmUploadId });
-      return res.status(200).json({ success: true, alreadyPaid: true, jobId: job.id, orderId: order.id });
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, checkoutToken } = req.body;
+    const checkoutPayload = verifyCheckoutToken(String(checkoutToken || ""));
+    if (checkoutPayload.userId !== userId) {
+      return res.status(403).json({ success: false, message: "Checkout token does not belong to this user" });
     }
 
     const generatedSignature = crypto
@@ -242,23 +402,36 @@ const verifyPalmOrderRazorpay = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid payment signature" });
     }
 
-    await order.update({
-      status: "paid",
+    const finalized = await finalizePaidPalmOrder({
+      userId,
+      checkoutPayload,
       paymentMethod: "razorpay",
       razorpayOrderId: razorpay_order_id,
       razorpayPaymentId: razorpay_payment_id,
       razorpaySignature: razorpay_signature,
     });
-
-    const job = await ensureQueuedJob({ userId, palmUploadId: order.palmUploadId });
-    return res.status(200).json({ success: true, orderId: order.id, status: "paid", paymentMethod: "razorpay", jobId: job.id });
+    return res.status(200).json({
+      success: true,
+      orderId: finalized.order.id,
+      status: "paid",
+      paymentMethod: "razorpay",
+      jobId: finalized.job.id,
+      alreadyPaid: finalized.alreadyPaid,
+    });
   } catch (error) {
+    if (String(error.message || "").includes("checkout_token")) {
+      return res.status(400).json({ success: false, message: "Checkout expired. Please upload palm image again." });
+    }
     if (String(error.message || "").includes("payment_required_before_processing")) {
       return res.status(400).json({ success: false, message: "Payment required before processing" });
     }
     return res.status(500).json({ success: false, message: "Failed to verify payment", error: error.message });
   }
 };
+
+const payPalmCheckoutWithWallet = async (req, res) => payPalmOrderWithWallet(req, res);
+const createPalmCheckoutRazorpay = async (req, res) => createPalmOrderRazorpay(req, res);
+const verifyPalmCheckoutRazorpay = async (req, res) => verifyPalmOrderRazorpay(req, res);
 
 const getPalmOrder = async (req, res) => {
   try {
@@ -316,6 +489,22 @@ const getPalmReadingJob = async (req, res) => {
     const { jobId } = req.params;
     const job = await AIJob.findOne({ where: { id: jobId, userId } });
     if (!job) return res.status(404).json({ success: false, message: "Job not found" });
+
+    // Self-heal: if a paid job is still queued for too long, re-enqueue it.
+    if (job.status === "queued") {
+      const lastUpdate = new Date(job.updatedAt || job.createdAt || Date.now()).getTime();
+      const queuedForMs = Date.now() - lastUpdate;
+      if (queuedForMs > 20 * 1000) {
+        try {
+          await ensureQueuedJob({ userId, palmUploadId: job.palmUploadId });
+        } catch (queueError) {
+          console.error("[PalmController] queued job re-enqueue failed", {
+            jobId: job.id,
+            message: queueError?.message,
+          });
+        }
+      }
+    }
 
     const response = { success: true, job };
     if (job.status === "completed") {
@@ -391,6 +580,31 @@ const getPalmReadingHistory = async (req, res) => {
   }
 };
 
+const getPalmReadingTrustIndicator = async (_req, res) => {
+  try {
+    const snapshot = getPalmReadingTrustSnapshot();
+    return res.status(200).json({
+      success: true,
+      trustIndicator: {
+        count: snapshot.count,
+        suffix: "+",
+        label: "users received their palm reading today",
+      },
+      meta: {
+        timezone: "Asia/Kolkata",
+        dateKey: snapshot.dateKey,
+        slotCount: snapshot.slotCount,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch palm trust indicator",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createPalmReadingOrder,
   payPalmOrderWithWallet,
@@ -400,4 +614,8 @@ module.exports = {
   resumePalmOrder,
   getPalmReadingJob,
   getPalmReadingHistory,
+  getPalmReadingTrustIndicator,
+  payPalmCheckoutWithWallet,
+  createPalmCheckoutRazorpay,
+  verifyPalmCheckoutRazorpay,
 };

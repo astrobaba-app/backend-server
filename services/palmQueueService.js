@@ -270,6 +270,11 @@ const reconcilePaidPalmOrders = async () => {
         continue;
       }
 
+      if (job.status === "queued") {
+        await enqueuePalmJob(job.id);
+        continue;
+      }
+
     }
   } catch (error) {
     console.error("[PalmQueue] reconcile failed", { message: error.message, stack: error.stack });

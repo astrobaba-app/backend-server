@@ -14,15 +14,26 @@ const storage = multer.memoryStorage();
 
 const imageFileFilter = (req, file, callback) => {
   const extension = path.extname(file.originalname || "").toLowerCase();
-  const allowedExt = [".jpg", ".jpeg", ".png", ".webp"];
-  const allowedMime = ["image/jpeg", "image/png", "image/webp"];
+  const allowedExt = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+  const allowedMime = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "image/heic-sequence",
+    "image/heif-sequence",
+    "application/octet-stream",
+  ];
 
-  if (allowedExt.includes(extension) && allowedMime.includes(file.mimetype)) {
+  // iOS camera/gallery HEIC uploads may come with non-standard MIME types.
+  // Accept if either extension or MIME indicates a valid image format.
+  if (allowedExt.includes(extension) || allowedMime.includes(file.mimetype)) {
     callback(null, true);
     return;
   }
 
-  callback(new Error("Only JPG, PNG, and WEBP images are allowed"));
+  callback(new Error("Only JPG, JPEG, PNG, WEBP, HEIC, and HEIF images are allowed"));
 };
 
 const upload = multer({
