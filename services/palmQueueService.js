@@ -4,6 +4,9 @@ const PalmFeature = require("../model/palm/palmFeature");
 const PalmReport = require("../model/palm/palmReport");
 const PalmUpload = require("../model/palm/palmUpload");
 const PalmOrder = require("../model/palm/palmOrder");
+const Wallet = require("../model/wallet/wallet");
+const WalletTransaction = require("../model/wallet/walletTransaction");
+const { sequelize } = require("../dbConnection/dbConfig");
 const { analyzePalm } = require("./palmReadingService");
 
 const PALM_QUEUE_KEY = "queue:palm_reading";
@@ -19,6 +22,85 @@ const queueLog = (event, payload = {}) => {
 };
 const queueInfo = (event, payload = {}) => {
   console.log(`[PalmQueue][${event}]`, payload);
+};
+const QUALITY_REJECT_ERROR_TAG = "QUALITY_REJECTED_TERMINAL";
+
+const extractQualityRejectReasons = (message) => {
+  try {
+    const start = message.indexOf("{");
+    if (start === -1) return [];
+    const parsed = JSON.parse(message.slice(start));
+    const reasons = parsed?.detail?.checks?.reject_reasons;
+    return Array.isArray(reasons) ? reasons : [];
+  } catch {
+    return [];
+  }
+};
+
+const handleQualityRejectCompensation = async ({ job, reasonText }) => {
+  const order = await PalmOrder.findOne({
+    where: { userId: job.userId, palmUploadId: job.palmUploadId },
+  });
+  if (!order) return;
+
+  if (order.status !== "failed") {
+    await order.update({ status: "failed" });
+  }
+
+  if (order.paymentMethod === "wallet" && order.refundStatus !== "completed") {
+    const tx = await sequelize.transaction();
+    try {
+      let wallet = await Wallet.findOne({ where: { userId: order.userId }, transaction: tx });
+      if (!wallet) {
+        wallet = await Wallet.create({ userId: order.userId }, { transaction: tx });
+      }
+      const oldBalance = Number(wallet.balance || 0);
+      const refundAmount = Number(order.amount || 0);
+      const newBalance = oldBalance + refundAmount;
+      await wallet.update({ balance: newBalance }, { transaction: tx });
+      await WalletTransaction.create(
+        {
+          userId: order.userId,
+          walletId: wallet.id,
+          amount: refundAmount,
+          type: "credit",
+          status: "completed",
+          paymentMethod: "refund",
+          description: "Palm quality reject auto-refund",
+          metadata: { palmOrderId: order.id, reason: reasonText || "quality_rejected" },
+          balanceBefore: oldBalance,
+          balanceAfter: newBalance,
+        },
+        { transaction: tx }
+      );
+      await order.update(
+        {
+          refundStatus: "completed",
+          refundReason: reasonText || "quality_rejected",
+          refundProcessedAt: new Date(),
+        },
+        { transaction: tx }
+      );
+      await tx.commit();
+      queueInfo("WALLET_REFUND_COMPLETED", { orderId: order.id, jobId: job.id, amount: refundAmount });
+    } catch (error) {
+      await tx.rollback();
+      await order.update({
+        refundStatus: "failed",
+        refundReason: reasonText || "quality_rejected",
+      });
+      queueInfo("WALLET_REFUND_FAILED", { orderId: order.id, jobId: job.id, message: error.message });
+    }
+    return;
+  }
+
+  if (order.paymentMethod === "razorpay" && order.refundStatus === "none") {
+    await order.update({
+      refundStatus: "pending",
+      refundReason: reasonText || "quality_rejected",
+    });
+    queueInfo("RAZORPAY_REFUND_PENDING", { orderId: order.id, jobId: job.id });
+  }
 };
 
 const hasPaidPalmOrder = async (job) => {
@@ -52,6 +134,45 @@ const enqueuePalmJob = async (jobId) => {
   queueLog("enqueue", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
   queueInfo("ENQUEUE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
   void processNextPalmJob();
+};
+
+const clearPalmJobFromQueue = async (jobId) => {
+  try {
+    const removed = await redis.lrem(PALM_QUEUE_KEY, 0, jobId);
+    if (removed > 0) {
+      queueInfo("QUEUE_CLEARED_JOB", { jobId, removed });
+    }
+    return removed;
+  } catch (error) {
+    console.error("[PalmQueue][QUEUE_CLEAR_ERROR]", { jobId, message: error.message });
+    return 0;
+  }
+};
+
+const cleanupPalmQueueStaleJobs = async () => {
+  try {
+    const queuedIds = await redis.lrange(PALM_QUEUE_KEY, 0, -1);
+    if (!Array.isArray(queuedIds) || queuedIds.length === 0) {
+      return { scanned: 0, removed: 0 };
+    }
+
+    let removed = 0;
+    for (const jobId of queuedIds) {
+      const job = await AIJob.findByPk(jobId);
+      const shouldRemove =
+        !job ||
+        job.status === "completed" ||
+        (job.status === "failed" && String(job.error || "") === QUALITY_REJECT_ERROR_TAG);
+      if (shouldRemove) {
+        removed += await clearPalmJobFromQueue(jobId);
+      }
+    }
+    queueInfo("QUEUE_CLEANUP_DONE", { scanned: queuedIds.length, removed });
+    return { scanned: queuedIds.length, removed };
+  } catch (error) {
+    console.error("[PalmQueue][QUEUE_CLEANUP_ERROR]", { message: error.message });
+    return { scanned: 0, removed: 0, error: error.message };
+  }
 };
 
 const processNextPalmJob = async () => {
@@ -238,12 +359,14 @@ const processNextPalmJob = async () => {
         const quota = /insufficient_quota|quota/i.test(message);
         const qualityReject = /rejected_quality_or_fraud|rejected_nsfw|Upload rejected/i.test(message);
         const rateLimited = /Too Many Requests|429|rate.?limit|temporarily busy/i.test(message);
+        const rejectReasons = qualityReject ? extractQualityRejectReasons(message) : [];
+        const rejectReasonText = rejectReasons.length ? ` (${rejectReasons.join(", ")})` : "";
         await activeJob.update({
           status: "failed",
           stage: "failed",
           progress: 100,
           stageMessage: qualityReject
-            ? "Upload rejected by fraud/quality checks. Please upload one clear real human palm image."
+            ? `Upload rejected by quality checks${rejectReasonText}. Please upload one clear, stable palm image.`
             : rateLimited
             ? "Our AI safety service is busy right now. Please retry in a minute."
             : quota
@@ -251,8 +374,15 @@ const processNextPalmJob = async () => {
             : unreachable
             ? "Palm AI engine is temporarily unavailable. Please retry shortly."
             : "Palm analysis failed. Please retry with clearer images.",
-          error: "Palm processing failed",
+          error: qualityReject ? QUALITY_REJECT_ERROR_TAG : "Palm processing failed",
         });
+        if (qualityReject) {
+          await handleQualityRejectCompensation({
+            job: activeJob,
+            reasonText: rejectReasons.join(", ") || "quality_rejected",
+          });
+          await clearPalmJobFromQueue(activeJob.id);
+        }
       }
     } catch (innerError) {
       console.error("[PalmQueue] failed to persist error state:", innerError.message || innerError);
@@ -305,6 +435,9 @@ const reconcilePaidPalmOrders = async () => {
       }
 
       if (job.status === "failed") {
+        if (String(job.error || "") === QUALITY_REJECT_ERROR_TAG) {
+          continue;
+        }
         await job.update({
           status: "queued",
           stage: "queued",
@@ -329,4 +462,11 @@ const reconcilePaidPalmOrders = async () => {
   }
 };
 
-module.exports = { enqueuePalmJob, startPalmQueueWorker, reconcilePaidPalmOrders };
+module.exports = {
+  enqueuePalmJob,
+  clearPalmJobFromQueue,
+  cleanupPalmQueueStaleJobs,
+  startPalmQueueWorker,
+  reconcilePaidPalmOrders,
+  QUALITY_REJECT_ERROR_TAG,
+};
