@@ -10,6 +10,10 @@ const {
   resumePalmOrder,
   getPalmReadingJob,
   getPalmReadingHistory,
+  getPalmReadingTrustIndicator,
+  payPalmCheckoutWithWallet,
+  createPalmCheckoutRazorpay,
+  verifyPalmCheckoutRazorpay,
 } = require("../../controller/palm/palmReadingController");
 
 const router = express.Router();
@@ -18,9 +22,13 @@ router.post("/upload", checkForAuthenticationCookie(), palmImagesUpload, createP
 router.post("/orders/:orderId/pay-wallet", checkForAuthenticationCookie(), payPalmOrderWithWallet);
 router.post("/orders/:orderId/create-razorpay", checkForAuthenticationCookie(), createPalmOrderRazorpay);
 router.post("/orders/:orderId/verify-razorpay", checkForAuthenticationCookie(), verifyPalmOrderRazorpay);
+router.post("/checkout/pay-wallet", checkForAuthenticationCookie(), payPalmCheckoutWithWallet);
+router.post("/checkout/create-razorpay", checkForAuthenticationCookie(), createPalmCheckoutRazorpay);
+router.post("/checkout/verify-razorpay", checkForAuthenticationCookie(), verifyPalmCheckoutRazorpay);
 router.post("/orders/:orderId/resume", checkForAuthenticationCookie(), resumePalmOrder);
 router.get("/orders/:orderId", checkForAuthenticationCookie(), getPalmOrder);
 router.get("/jobs/:jobId", checkForAuthenticationCookie(), getPalmReadingJob);
 router.get("/history", checkForAuthenticationCookie(), getPalmReadingHistory);
+router.get("/trust-indicator", getPalmReadingTrustIndicator);
 
 module.exports = router;
