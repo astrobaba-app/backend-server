@@ -18,6 +18,13 @@ const razorpay = new Razorpay({
 });
 
 const ensureQueuedJob = async ({ userId, palmUploadId }) => {
+  const paidOrder = await PalmOrder.findOne({
+    where: { userId, palmUploadId, status: "paid" },
+  });
+  if (!paidOrder) {
+    throw new Error("payment_required_before_processing");
+  }
+
   const existing = await AIJob.findOne({ where: { userId, palmUploadId } });
   if (existing) {
     if (existing.status === "completed") return existing;
@@ -178,6 +185,9 @@ const payPalmOrderWithWallet = async (req, res) => {
       paymentMethod: "wallet",
     });
   } catch (error) {
+    if (String(error.message || "").includes("payment_required_before_processing")) {
+      return res.status(400).json({ success: false, message: "Payment required before processing" });
+    }
     return res.status(500).json({ success: false, message: "Failed to pay with wallet", error: error.message });
   }
 };
@@ -243,6 +253,9 @@ const verifyPalmOrderRazorpay = async (req, res) => {
     const job = await ensureQueuedJob({ userId, palmUploadId: order.palmUploadId });
     return res.status(200).json({ success: true, orderId: order.id, status: "paid", paymentMethod: "razorpay", jobId: job.id });
   } catch (error) {
+    if (String(error.message || "").includes("payment_required_before_processing")) {
+      return res.status(400).json({ success: false, message: "Payment required before processing" });
+    }
     return res.status(500).json({ success: false, message: "Failed to verify payment", error: error.message });
   }
 };
@@ -290,6 +303,9 @@ const resumePalmOrder = async (req, res) => {
       stage: job.stage,
     });
   } catch (error) {
+    if (String(error.message || "").includes("payment_required_before_processing")) {
+      return res.status(400).json({ success: false, message: "Payment required before processing" });
+    }
     return res.status(500).json({ success: false, message: "Failed to resume paid order", error: error.message });
   }
 };

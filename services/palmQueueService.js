@@ -13,7 +13,33 @@ let processing = false;
 let reconcileRunning = false;
 const RECONCILE_INTERVAL_MS = 60 * 1000;
 
+const hasPaidPalmOrder = async (job) => {
+  const paidOrder = await PalmOrder.findOne({
+    where: {
+      userId: job.userId,
+      palmUploadId: job.palmUploadId,
+      status: "paid",
+    },
+  });
+  return Boolean(paidOrder);
+};
+
 const enqueuePalmJob = async (jobId) => {
+  const job = await AIJob.findByPk(jobId);
+  if (!job) {
+    throw new Error("palm_job_not_found");
+  }
+  const paid = await hasPaidPalmOrder(job);
+  if (!paid) {
+    await job.update({
+      status: "failed",
+      stage: "failed",
+      progress: 100,
+      stageMessage: "Payment required before palm processing.",
+      error: "Payment required",
+    });
+    throw new Error("payment_required_before_processing");
+  }
   await redis.rpush(PALM_QUEUE_KEY, jobId);
   void processNextPalmJob();
 };
@@ -30,6 +56,19 @@ const processNextPalmJob = async () => {
     const job = await AIJob.findByPk(jobId);
     if (!job || job.status === "completed") return;
     activeJob = job;
+
+    const paid = await hasPaidPalmOrder(job);
+    if (!paid) {
+      await job.update({
+        status: "failed",
+        stage: "failed",
+        progress: 100,
+        stageMessage: "Payment required before palm processing.",
+        error: "Payment required",
+      });
+      return;
+    }
+
     console.log("[PalmQueue] job start", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
