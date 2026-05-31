@@ -3,14 +3,43 @@ const AIJob = require("../model/palm/aiJob");
 const PalmFeature = require("../model/palm/palmFeature");
 const PalmReport = require("../model/palm/palmReport");
 const PalmUpload = require("../model/palm/palmUpload");
+const PalmOrder = require("../model/palm/palmOrder");
 const { analyzePalm } = require("./palmReadingService");
 
 const PALM_QUEUE_KEY = "queue:palm_reading";
 const WORKER_INTERVAL_MS = 800;
 let workerStarted = false;
 let processing = false;
+let reconcileRunning = false;
+const RECONCILE_INTERVAL_MS = 60 * 1000;
+
+const hasPaidPalmOrder = async (job) => {
+  const paidOrder = await PalmOrder.findOne({
+    where: {
+      userId: job.userId,
+      palmUploadId: job.palmUploadId,
+      status: "paid",
+    },
+  });
+  return Boolean(paidOrder);
+};
 
 const enqueuePalmJob = async (jobId) => {
+  const job = await AIJob.findByPk(jobId);
+  if (!job) {
+    throw new Error("palm_job_not_found");
+  }
+  const paid = await hasPaidPalmOrder(job);
+  if (!paid) {
+    await job.update({
+      status: "failed",
+      stage: "failed",
+      progress: 100,
+      stageMessage: "Payment required before palm processing.",
+      error: "Payment required",
+    });
+    throw new Error("payment_required_before_processing");
+  }
   await redis.rpush(PALM_QUEUE_KEY, jobId);
   void processNextPalmJob();
 };
@@ -27,6 +56,19 @@ const processNextPalmJob = async () => {
     const job = await AIJob.findByPk(jobId);
     if (!job || job.status === "completed") return;
     activeJob = job;
+
+    const paid = await hasPaidPalmOrder(job);
+    if (!paid) {
+      await job.update({
+        status: "failed",
+        stage: "failed",
+        progress: 100,
+        stageMessage: "Payment required before palm processing.",
+        error: "Payment required",
+      });
+      return;
+    }
+
     console.log("[PalmQueue] job start", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
@@ -180,7 +222,60 @@ const startPalmQueueWorker = () => {
   setInterval(() => {
     void processNextPalmJob();
   }, WORKER_INTERVAL_MS);
+  setInterval(() => {
+    void reconcilePaidPalmOrders();
+  }, RECONCILE_INTERVAL_MS);
   console.log("[PalmQueue] Worker started");
 };
 
-module.exports = { enqueuePalmJob, startPalmQueueWorker };
+const reconcilePaidPalmOrders = async () => {
+  if (reconcileRunning) return;
+  reconcileRunning = true;
+  try {
+    const orders = await PalmOrder.findAll({
+      where: { status: "paid" },
+      order: [["updatedAt", "DESC"]],
+      limit: 200,
+    });
+
+    for (const order of orders) {
+      const uploadId = order.palmUploadId;
+      const report = await PalmReport.findOne({ where: { palmUploadId: uploadId } });
+      if (report?.finalNarrative) continue;
+
+      const job = await AIJob.findOne({ where: { userId: order.userId, palmUploadId: uploadId } });
+      if (!job) {
+        const created = await AIJob.create({
+          userId: order.userId,
+          palmUploadId: uploadId,
+          type: "palm_reading",
+          status: "queued",
+          stage: "queued",
+          progress: 8,
+          stageMessage: "Recovering your paid palm report.",
+        });
+        await enqueuePalmJob(created.id);
+        continue;
+      }
+
+      if (job.status === "failed") {
+        await job.update({
+          status: "queued",
+          stage: "queued",
+          progress: 8,
+          stageMessage: "Retrying your paid palm report automatically.",
+          error: null,
+        });
+        await enqueuePalmJob(job.id);
+        continue;
+      }
+
+    }
+  } catch (error) {
+    console.error("[PalmQueue] reconcile failed", { message: error.message, stack: error.stack });
+  } finally {
+    reconcileRunning = false;
+  }
+};
+
+module.exports = { enqueuePalmJob, startPalmQueueWorker, reconcilePaidPalmOrders };
