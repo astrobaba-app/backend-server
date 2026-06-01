@@ -870,6 +870,23 @@ async function ensureAstrologerEarningColumns() {
   }
 }
 
+async function ensureAstrologerAuthColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("astrologers");
+
+    if (table.email && table.email.allowNull === false) {
+      await sequelize.query(
+        'ALTER TABLE "astrologers" ALTER COLUMN "email" DROP NOT NULL'
+      );
+      console.log("Ensured astrologers.email is nullable for OTP-only auth");
+    }
+  } catch (error) {
+    console.log("astrologers table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureJobApplicationColumns() {
   const queryInterface = sequelize.getQueryInterface();
 
@@ -1132,6 +1149,7 @@ const initDB = (callback) => {
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
+    .then(() => ensureAstrologerAuthColumns())
     .then(() => ensureJobApplicationColumns())
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())
