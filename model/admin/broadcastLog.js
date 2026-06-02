@@ -35,7 +35,7 @@ const BroadcastLog = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0,
-      comment: "Number of in-app notification records created",
+      comment: "Number of users eligible for push at broadcast time",
     },
     pushSuccessCount: {
       type: DataTypes.INTEGER,
@@ -48,6 +48,12 @@ const BroadcastLog = sequelize.define(
       allowNull: false,
       defaultValue: 0,
       comment: "FCM push notifications that failed",
+    },
+    pushPendingCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Push-eligible users without delivered push yet; resent when they register a token",
     },
   },
   {
