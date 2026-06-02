@@ -5,7 +5,7 @@ const { createChatCompletion } = require("../../services/openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+//  helpers 
 
 const getUserRequestWithKundli = async (userId, userRequestId) => {
   return UserRequest.findOne({
@@ -22,7 +22,6 @@ const getUserRequestWithKundli = async (userId, userRequestId) => {
 
 const todayDateString = () => new Date().toISOString().slice(0, 10);
 
-// Simple in-memory per-day cache:  key = `${userId}:${userRequestId}:${date}`
 const reportCache = new Map();
 
 const getCacheKey = (userId, userRequestId, date) =>
@@ -37,10 +36,9 @@ const pruneOldCacheEntries = () => {
   }
 };
 
-// Run a prune every 30 minutes so the map doesn't grow unbounded
 setInterval(pruneOldCacheEntries, 30 * 60 * 1000);
 
-// ── checkKundliStatus ────────────────────────────────────────────────────────
+// ── checkKundliStatus 
 
 const checkKundliStatus = async (req, res) => {
   try {
@@ -90,8 +88,7 @@ const checkKundliStatus = async (req, res) => {
   }
 };
 
-// ── generateDailyKundliReport ────────────────────────────────────────────────
-
+// ─ generateDailyKundliReport 
 const generateDailyKundliReport = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -106,7 +103,7 @@ const generateDailyKundliReport = async (req, res) => {
 
     const today = todayDateString();
 
-    // ── check cache ──────────────────────────────────────────────────────
+    // check cache 
     const cacheKey = getCacheKey(userId, userRequestId, today);
     const cached = reportCache.get(cacheKey);
     if (cached) {
@@ -117,7 +114,7 @@ const generateDailyKundliReport = async (req, res) => {
       });
     }
 
-    // ── fetch kundli ─────────────────────────────────────────────────────
+    //  fetch kundli    
     const userRequest = await getUserRequestWithKundli(userId, userRequestId);
     if (!userRequest) {
       return res.status(404).json({
@@ -128,8 +125,7 @@ const generateDailyKundliReport = async (req, res) => {
 
     const kundli = userRequest.kundli;
 
-    // ── extract lagna chart ──────────────────────────────────────────────
-    // charts contains divisional charts; D1 (lagna) is the primary one
+    //  extract lagna chart 
     const lagnaChart =
       kundli.charts?.D1 ||
       kundli.charts?.d1 ||
@@ -137,7 +133,7 @@ const generateDailyKundliReport = async (req, res) => {
       kundli.charts ||
       null;
 
-    // ── get fresh transit ────────────────────────────────────────────────
+    // get fresh transit
     let transit = null;
     try {
       transit = await getTransitChart(userRequest, new Date());
@@ -153,7 +149,7 @@ const generateDailyKundliReport = async (req, res) => {
       transit = kundli.horoscope?.transit || null;
     }
 
-    // ── build context for AI ─────────────────────────────────────────────
+    //  build context for AI 
     const birthDetails = {
       fullName: userRequest.fullName,
       dateOfBirth: userRequest.dateOfbirth,
@@ -180,7 +176,7 @@ const generateDailyKundliReport = async (req, res) => {
     const dashaInfo = kundli.dasha || null;
     const planetaryPositions = kundli.planetary || null;
 
-    // ── call OpenAI ──────────────────────────────────────────────────────
+    // call OpenAI 
     const systemPrompt = `You are Graho's expert Vedic astrologer AI. You produce personalised daily kundli predictions.
 
 RULES:
@@ -258,7 +254,7 @@ RULES:
       report.dayOfWeek ||
       new Date().toLocaleDateString("en-US", { weekday: "long" });
 
-    // ── cache & respond ──────────────────────────────────────────────────
+    // cache & respon
     reportCache.set(cacheKey, report);
 
     return res.status(200).json({
