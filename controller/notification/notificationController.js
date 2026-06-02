@@ -188,6 +188,11 @@ const registerDeviceToken = async (req, res) => {
             deviceId
           );
 
+    const pendingPushResult =
+      actorType === "user"
+        ? await notificationService.sendPendingPushToUser(actorId)
+        : null;
+
     res.status(200).json({
       success: true,
       message: "Device token registered successfully",
@@ -195,6 +200,7 @@ const registerDeviceToken = async (req, res) => {
         id: savedToken.id,
         deviceType: savedToken.deviceType,
         actorType,
+        pendingPush: pendingPushResult,
       },
     });
   } catch (error) {

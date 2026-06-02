@@ -555,6 +555,83 @@ async function ensureUserPreferenceColumns() {
   }
 }
 
+async function ensureNotificationPushColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("notifications");
+    const operations = [];
+
+    if (!table.pushDeliveredAt && !table.push_delivered_at) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushDeliveredAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pushAttemptCount && !table.push_attempt_count) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushAttemptCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (!table.pushLastAttemptAt && !table.push_last_attempt_at) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushLastAttemptAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pushLastError && !table.push_last_error) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushLastError", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured notification push delivery columns exist");
+    }
+  } catch (error) {
+    console.log("notifications table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureBroadcastLogDeliveryColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("broadcast_logs");
+    const operations = [];
+
+    if (!table.pushPendingCount && !table.push_pending_count) {
+      operations.push(
+        queryInterface.addColumn("broadcast_logs", "pushPendingCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured broadcast log delivery columns exist");
+    }
+  } catch (error) {
+    console.log("broadcast_logs table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureForumPostModerationColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -1146,6 +1223,8 @@ const initDB = (callback) => {
     .then(() => ensureWalletColumns())
     .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
+    .then(() => ensureNotificationPushColumns())
+    .then(() => ensureBroadcastLogDeliveryColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())

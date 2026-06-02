@@ -948,27 +948,38 @@ const broadcastNotification = async (req, res) => {
       });
     }
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title,
-      message,
-      data: data || {},
-      actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
-
-    // Persist broadcast log so admin can review history
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
-    await BroadcastLog.create({
+    const broadcastLog = await BroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",
       title,
       message,
       actionUrl: actionUrl || null,
+      totalUsers: 0,
+      pushSuccessCount: 0,
+      pushFailureCount: 0,
+      pushPendingCount: 0,
+    });
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title,
+      message,
+      data: {
+        ...(data || {}),
+        broadcastLogId: broadcastLog.id,
+      },
+      actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    // Persist broadcast counts so admin can review history
+    await broadcastLog.update({
       totalUsers: result.totalSent || 0,
       pushSuccessCount: result.pushSuccessCount || 0,
       pushFailureCount: result.pushFailureCount || 0,
+      pushPendingCount: result.pushPendingCount || 0,
     });
 
     res.status(200).json({
@@ -978,6 +989,7 @@ const broadcastNotification = async (req, res) => {
         totalUsers: result.totalSent || 0,
         pushSuccessCount: result.pushSuccessCount || 0,
         pushFailureCount: result.pushFailureCount || 0,
+        pushPendingCount: result.pushPendingCount || 0,
       },
     });
   } catch (error) {
@@ -1037,17 +1049,6 @@ const resendBroadcast = async (req, res) => {
       return res.status(404).json({ success: false, message: "Broadcast log not found" });
     }
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title: log.title,
-      message: log.message,
-      data: {},
-      actionUrl: log.actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
-
-    // Save a new log entry for the resend
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
     const newLog = await BroadcastLog.create({
       adminId: req.user.id,
@@ -1055,9 +1056,31 @@ const resendBroadcast = async (req, res) => {
       title: log.title,
       message: log.message,
       actionUrl: log.actionUrl,
+      totalUsers: 0,
+      pushSuccessCount: 0,
+      pushFailureCount: 0,
+      pushPendingCount: 0,
+    });
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title: log.title,
+      message: log.message,
+      data: {
+        broadcastLogId: newLog.id,
+        sourceBroadcastLogId: log.id,
+      },
+      actionUrl: log.actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    // Save counts for the resend
+    await newLog.update({
       totalUsers: result.totalSent || 0,
       pushSuccessCount: result.pushSuccessCount || 0,
       pushFailureCount: result.pushFailureCount || 0,
+      pushPendingCount: result.pushPendingCount || 0,
     });
 
     res.status(200).json({
@@ -1068,6 +1091,7 @@ const resendBroadcast = async (req, res) => {
         totalUsers: result.totalSent || 0,
         pushSuccessCount: result.pushSuccessCount || 0,
         pushFailureCount: result.pushFailureCount || 0,
+        pushPendingCount: result.pushPendingCount || 0,
       },
     });
   } catch (error) {
