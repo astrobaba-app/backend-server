@@ -9,6 +9,10 @@ const WORKER_INTERVAL_MS = 3000;
 let isProcessing = false;
 let workerStarted = false;
 
+const isJobApplicationEmailQueueEnabled = () => {
+  return String(process.env.JOB_APPLICATION_EMAIL_QUEUE_ENABLED || "false").toLowerCase() === "true";
+};
+
 const processNextQueuedJobApplicationEmail = async () => {
   if (isProcessing) {
     return;
@@ -80,12 +84,19 @@ const enqueueJobApplicationConfirmationEmail = async (applicationId) => {
     }
   );
 
-  setImmediate(() => {
-    void processNextQueuedJobApplicationEmail();
-  });
+  if (isJobApplicationEmailQueueEnabled()) {
+    setImmediate(() => {
+      void processNextQueuedJobApplicationEmail();
+    });
+  }
 };
 
 const startJobApplicationEmailQueueWorker = () => {
+  if (!isJobApplicationEmailQueueEnabled()) {
+    console.log("Job application email queue worker disabled by JOB_APPLICATION_EMAIL_QUEUE_ENABLED=false");
+    return;
+  }
+
   if (workerStarted) {
     return;
   }

@@ -529,6 +529,11 @@ const runForumAIModerationCycle = async () => {
 };
 
 const startForumAIModerationWorker = () => {
+  if (String(process.env.FORUM_AI_MODERATION_WORKER_ENABLED || "false").toLowerCase() !== "true") {
+    console.log("[ForumAI] Moderation worker disabled by FORUM_AI_MODERATION_WORKER_ENABLED=false");
+    return;
+  }
+
   if (moderationTimer) {
     return;
   }
