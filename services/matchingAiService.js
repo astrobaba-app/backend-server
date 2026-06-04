@@ -24,8 +24,8 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
 
     const { kutas, total_points, max_points } = ashtakootData;
 
-    // Build a compact context object for the AI
-    const context = {
+    // Build a compact payload for the AI without shadowing the logging context.
+    const aiContext = {
       couple: {
         boyName,
         girlName,
@@ -56,7 +56,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
   - Tone: warm, conservative, reassuring, realistic, and practical. Avoid dramatic or fatalistic language.
   - Clearly treat all insights as traditional Vedic beliefs, not guarantees or professional advice. Avoid any strong medical, financial, or legal claims.
 
-  Ashtakoot data (JSON): ${JSON.stringify(context, null, 2)}
+  Ashtakoot data (JSON): ${JSON.stringify(aiContext, null, 2)}
 
   Return ONLY a JSON object (no markdown, no comments) with this exact structure:
 {

@@ -28,6 +28,20 @@ const toAmount = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const toEnvPrice = (value, fallback) => {
+  const parsed = parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const AI_CHAT_PRICE_PER_MINUTE = toEnvPrice(
+  process.env.AI_CHAT_PRICE_PER_MINUTE,
+  10
+);
+const AI_VOICE_PRICE_PER_MINUTE = toEnvPrice(
+  process.env.AI_VOICE_PRICE_PER_MINUTE,
+  15
+);
+
 const buildWalletPayload = (wallet) => {
   const { balance, signupBonusBalance, rechargeBalance } =
     getWalletBalanceBreakdown(wallet || {});
@@ -552,6 +566,17 @@ const deductForAIUsage = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Type must be 'chat' or 'voice'",
+      });
+    }
+
+    const expectedRate =
+      type === "chat" ? AI_CHAT_PRICE_PER_MINUTE : AI_VOICE_PRICE_PER_MINUTE;
+    const isValidMultiple =
+      Math.abs(parsedAmount / expectedRate - Math.round(parsedAmount / expectedRate)) < 1e-6;
+    if (!isValidMultiple) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid amount for ${type}. Expected multiples of ${expectedRate} per minute.`,
       });
     }
 

@@ -12,10 +12,23 @@ let cronJobs = {
 
 let isInitialized = false;
 
+const isHoroscopeSchedulerEnabled = () => {
+  return String(process.env.HOROSCOPE_SCHEDULER_ENABLED || "false").toLowerCase() === "true";
+};
+
+const shouldGenerateInitialHoroscopes = () => {
+  return String(process.env.HOROSCOPE_GENERATE_INITIAL_ON_STARTUP || "false").toLowerCase() === "true";
+};
+
 /**
  * Initialize all horoscope cron jobs
  */
 function initializeScheduler() {
+  if (!isHoroscopeSchedulerEnabled()) {
+    console.log('[HoroscopeScheduler] Disabled by HOROSCOPE_SCHEDULER_ENABLED=false');
+    return;
+  }
+
   if (isInitialized) {
     console.log('[HoroscopeScheduler] Already initialized');
     return;
@@ -104,8 +117,11 @@ function initializeScheduler() {
     console.log('[HoroscopeScheduler] - Yearly: 0 0 1 1 * (January 1st at midnight)');
     console.log('[HoroscopeScheduler] - Cleanup: 0 2 * * * (Every day at 2 AM)');
 
-    // Optional: Generate initial horoscopes on startup
-    generateInitialHoroscopes();
+    if (shouldGenerateInitialHoroscopes()) {
+      generateInitialHoroscopes();
+    } else {
+      console.log('[HoroscopeScheduler] Initial generation disabled by HOROSCOPE_GENERATE_INITIAL_ON_STARTUP=false');
+    }
 
   } catch (error) {
     console.error('[HoroscopeScheduler] Initialization failed:', error?.message);

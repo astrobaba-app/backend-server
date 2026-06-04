@@ -71,6 +71,27 @@ const Notification = sequelize.define(
       allowNull: true,
       comment: "Notification expiry for time-sensitive notifications",
     },
+    pushDeliveredAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When the push notification was successfully delivered to FCM",
+    },
+    pushAttemptCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Number of push delivery attempts made for this notification",
+    },
+    pushLastAttemptAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Most recent push delivery attempt time",
+    },
+    pushLastError: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      comment: "Most recent push delivery error, if any",
+    },
   },
   {
     tableName: "notifications",

@@ -297,11 +297,6 @@ initDB(() => {
     startForumDuplicateWorker();
     startJobApplicationEmailQueueWorker();
     startPalmQueueWorker();
-    console.log("Horoscope scheduler initialized");
-    console.log("Forum AI moderation worker initialized");
-    console.log("Forum duplicate worker initialized");
-    console.log("Job application email queue worker initialized");
-    console.log("Palm reading queue worker initialized");
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });

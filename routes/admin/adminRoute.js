@@ -50,6 +50,11 @@ const {
   updateForumReportStatus,
   updateForumUserRestriction,
 } = require("../../controller/admin/adminForumController");
+const { getPlatformRazorpayTransactions } = require("../../controller/admin/platformTransactionAdminController");
+const {
+  getPalmFailureCandidates,
+  cleanupPalmQueue,
+} = require("../../controller/admin/palmRefundAdminController");
 const {
   createJob,
   getAdminJobs,
@@ -115,6 +120,13 @@ router.get(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getOpenAIRequestLogs
+);
+
+router.get(
+  "/platform-transactions",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getPlatformRazorpayTransactions
 );
 
 // Master admin only routes
@@ -359,6 +371,20 @@ router.patch(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   rejectJobApplication
+);
+
+router.get(
+  "/palm/refunds",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getPalmFailureCandidates
+);
+
+router.post(
+  "/palm/queue/cleanup",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  cleanupPalmQueue
 );
 
 module.exports = router;

@@ -593,6 +593,11 @@ const runForumDuplicateCycle = async () => {
 };
 
 const startForumDuplicateWorker = () => {
+  if (String(process.env.FORUM_DUPLICATE_WORKER_ENABLED || "false").toLowerCase() !== "true") {
+    console.log("[ForumDuplicate] Worker disabled by FORUM_DUPLICATE_WORKER_ENABLED=false");
+    return;
+  }
+
   if (duplicateTimer) {
     return;
   }

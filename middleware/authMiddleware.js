@@ -6,7 +6,6 @@ function checkForAuthenticationCookie() {
   return (req, res, next) => {
     try {
       let token;
-
       if (req.headers.cookie) {
         const parsedCookies = parse(req.headers.cookie);
         token = parsedCookies.token;
