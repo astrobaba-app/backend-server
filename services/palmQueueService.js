@@ -7,10 +7,16 @@ const PalmOrder = require("../model/palm/palmOrder");
 const { analyzePalm } = require("./palmReadingService");
 
 const PALM_QUEUE_KEY = "queue:palm_reading";
-const WORKER_INTERVAL_MS = 800;
+const parsePositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const WORKER_INTERVAL_MS = parsePositiveInt(process.env.PALM_QUEUE_WORKER_INTERVAL_MS, 5000);
+const REDIS_LIMIT_BACKOFF_MS = parsePositiveInt(process.env.PALM_QUEUE_REDIS_LIMIT_BACKOFF_MS, 15 * 60 * 1000);
 let workerStarted = false;
 let processing = false;
 let reconcileRunning = false;
+let redisBackoffUntil = 0;
 const RECONCILE_INTERVAL_MS = 60 * 1000;
 const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
 const queueLog = (event, payload = {}) => {
@@ -21,6 +27,50 @@ const queueInfo = (event, payload = {}) => {
   console.log(`[PalmQueue][${event}]`, payload);
 };
 const QUALITY_REJECT_ERROR_TAG = "QUALITY_REJECTED_TERMINAL";
+
+const isPalmQueueWorkerEnabled = () => {
+  return String(process.env.PALM_QUEUE_WORKER_ENABLED || "true").toLowerCase() !== "false";
+};
+
+const isPalmQueueIdlePollingEnabled = () => {
+  return String(process.env.PALM_QUEUE_IDLE_POLL_ENABLED || "false").toLowerCase() === "true";
+};
+
+const isPalmQueueReconcileEnabled = () => {
+  return String(process.env.PALM_QUEUE_RECONCILE_ENABLED || "false").toLowerCase() === "true";
+};
+
+const shouldProcessFailedPalmJobs = () => {
+  return String(process.env.PALM_QUEUE_PROCESS_FAILED_JOBS || "false").toLowerCase() === "true";
+};
+
+const isRedisRequestLimitError = (error) => {
+  const message = `${error?.message || ""} ${error?.raw?.message || ""}`;
+  return /max requests limit exceeded|ERR max requests limit exceeded/i.test(message);
+};
+
+const isRedisBackoffActive = () => {
+  if (!redisBackoffUntil) return false;
+  if (Date.now() >= redisBackoffUntil) {
+    redisBackoffUntil = 0;
+    return false;
+  }
+  return true;
+};
+
+const activateRedisBackoff = (error) => {
+  if (!isRedisRequestLimitError(error)) return false;
+  const nextBackoffUntil = Date.now() + REDIS_LIMIT_BACKOFF_MS;
+  const shouldLog = nextBackoffUntil > redisBackoffUntil;
+  redisBackoffUntil = Math.max(redisBackoffUntil, nextBackoffUntil);
+  if (shouldLog) {
+    console.error("[PalmQueue][REDIS_BACKOFF]", {
+      message: error.message,
+      retryAfterMs: REDIS_LIMIT_BACKOFF_MS,
+    });
+  }
+  return true;
+};
 
 const extractQualityRejectReasons = (message) => {
   try {
@@ -74,6 +124,9 @@ const hasPaidPalmOrder = async (job) => {
 };
 
 const enqueuePalmJob = async (jobId) => {
+  if (isRedisBackoffActive()) {
+    throw new Error("palm_queue_redis_temporarily_unavailable");
+  }
   const job = await AIJob.findByPk(jobId);
   if (!job) {
     throw new Error("palm_job_not_found");
@@ -89,18 +142,28 @@ const enqueuePalmJob = async (jobId) => {
     });
     throw new Error("payment_required_before_processing");
   }
-  const existingQueue = await redis.lrange(PALM_QUEUE_KEY, 0, -1);
-  if (Array.isArray(existingQueue) && existingQueue.includes(jobId)) {
-    queueInfo("ENQUEUE_SKIPPED_DUPLICATE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
-    return;
+  try {
+    const existingQueue = await redis.lrange(PALM_QUEUE_KEY, 0, -1);
+    if (Array.isArray(existingQueue) && existingQueue.includes(jobId)) {
+      queueInfo("ENQUEUE_SKIPPED_DUPLICATE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      return;
+    }
+    await redis.rpush(PALM_QUEUE_KEY, jobId);
+  } catch (error) {
+    if (activateRedisBackoff(error)) {
+      throw new Error("palm_queue_redis_temporarily_unavailable");
+    }
+    throw error;
   }
-  await redis.rpush(PALM_QUEUE_KEY, jobId);
   queueLog("enqueue", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
   queueInfo("ENQUEUE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
-  void processNextPalmJob();
+  if (isPalmQueueWorkerEnabled()) {
+    void processNextPalmJob();
+  }
 };
 
 const clearPalmJobFromQueue = async (jobId) => {
+  if (isRedisBackoffActive()) return 0;
   try {
     const removed = await redis.lrem(PALM_QUEUE_KEY, 0, jobId);
     if (removed > 0) {
@@ -108,12 +171,16 @@ const clearPalmJobFromQueue = async (jobId) => {
     }
     return removed;
   } catch (error) {
+    activateRedisBackoff(error);
     console.error("[PalmQueue][QUEUE_CLEAR_ERROR]", { jobId, message: error.message });
     return 0;
   }
 };
 
 const cleanupPalmQueueStaleJobs = async () => {
+  if (isRedisBackoffActive()) {
+    return { scanned: 0, removed: 0, error: "palm_queue_redis_temporarily_unavailable" };
+  }
   try {
     const queuedIds = await redis.lrange(PALM_QUEUE_KEY, 0, -1);
     if (!Array.isArray(queuedIds) || queuedIds.length === 0) {
@@ -135,19 +202,23 @@ const cleanupPalmQueueStaleJobs = async () => {
     queueInfo("QUEUE_CLEANUP_DONE", { scanned: queuedIds.length, removed });
     return { scanned: queuedIds.length, removed };
   } catch (error) {
+    activateRedisBackoff(error);
     console.error("[PalmQueue][QUEUE_CLEANUP_ERROR]", { message: error.message });
     return { scanned: 0, removed: 0, error: error.message };
   }
 };
 
 const processNextPalmJob = async () => {
+  if (!isPalmQueueWorkerEnabled() || isRedisBackoffActive()) return;
   if (processing) return;
   processing = true;
   let activeJob = null;
+  let shouldCheckNext = false;
   const startedAt = Date.now();
   try {
     const jobId = await redis.lpop(PALM_QUEUE_KEY);
     if (!jobId) return;
+    shouldCheckNext = true;
     const remaining = await redis.llen(PALM_QUEUE_KEY);
     queueLog("dequeue", { jobId, remainingInQueue: remaining });
     queueInfo("DEQUEUE", { jobId, remainingInQueue: remaining });
@@ -160,6 +231,11 @@ const processNextPalmJob = async () => {
     if (job.status === "completed") {
       queueLog("skip_completed", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
       queueInfo("SKIP_COMPLETED", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      return;
+    }
+    if (job.status === "failed" && !shouldProcessFailedPalmJobs()) {
+      queueLog("skip_failed", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
+      queueInfo("SKIP_FAILED", { jobId, palmUploadId: job.palmUploadId, userId: job.userId });
       return;
     }
     if (job.status === "processing") {
@@ -361,6 +437,9 @@ const processNextPalmJob = async () => {
       totalElapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
+    if (activateRedisBackoff(error) && !activeJob) {
+      return;
+    }
     queueLog("process_error", { jobId: activeJob?.id, message: error.message });
     console.error("[PalmQueue][PROCESS_ERROR]", {
       jobId: activeJob?.id,
@@ -430,22 +509,40 @@ const processNextPalmJob = async () => {
     }
   } finally {
     processing = false;
+    if (shouldCheckNext && isPalmQueueWorkerEnabled() && !isRedisBackoffActive()) {
+      setImmediate(() => {
+        void processNextPalmJob();
+      });
+    }
   }
 };
 
 const startPalmQueueWorker = () => {
   if (workerStarted) return;
+  if (!isPalmQueueWorkerEnabled()) {
+    console.log("[PalmQueue] Worker disabled by PALM_QUEUE_WORKER_ENABLED=false");
+    return;
+  }
   workerStarted = true;
-  setInterval(() => {
-    void processNextPalmJob();
-  }, WORKER_INTERVAL_MS);
-  setInterval(() => {
-    void reconcilePaidPalmOrders();
-  }, RECONCILE_INTERVAL_MS);
-  console.log("[PalmQueue] Worker started");
+  if (isPalmQueueIdlePollingEnabled()) {
+    setInterval(() => {
+      void processNextPalmJob();
+    }, WORKER_INTERVAL_MS);
+  }
+  if (isPalmQueueReconcileEnabled()) {
+    setInterval(() => {
+      void reconcilePaidPalmOrders();
+    }, RECONCILE_INTERVAL_MS);
+  }
+  console.log("[PalmQueue] Worker started", {
+    mode: isPalmQueueIdlePollingEnabled() ? "polling" : "payment_triggered",
+    idlePollingEnabled: isPalmQueueIdlePollingEnabled(),
+    reconcileEnabled: isPalmQueueReconcileEnabled(),
+  });
 };
 
 const reconcilePaidPalmOrders = async () => {
+  if (!isPalmQueueWorkerEnabled() || isRedisBackoffActive()) return;
   if (reconcileRunning) return;
   reconcileRunning = true;
   try {
