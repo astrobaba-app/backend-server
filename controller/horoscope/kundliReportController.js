@@ -31,6 +31,11 @@ const buildUserDetails = (userRequest) => {
   };
 };
 
+const normalizeReportType = (reportType) => {
+  const normalized = String(reportType || "yearly").toLowerCase();
+  return normalized === "monthly" ? "monthly" : "yearly";
+};
+
 const sanitizeFileNameChunk = (value, fallback) => {
   const normalized = String(value || "")
     .trim()
@@ -86,7 +91,8 @@ const ensureStoredKundliPdf = async ({ reportRecord, pdfBuffer, userDetails, use
   return getStoredPdfMetadata(reportRecord);
 };
 
-const getOrCreateStoredReport = async ({ userId, userRequestId, kundliData, userDetails }) => {
+const getOrCreateStoredReport = async ({ userId, userRequestId, kundliData, userDetails, reportType }) => {
+  const normalizedReportType = normalizeReportType(reportType);
   let reportRecord = await KundliReport.findOne({
     where: {
       userId,
@@ -94,7 +100,7 @@ const getOrCreateStoredReport = async ({ userId, userRequestId, kundliData, user
     },
   });
 
-  if (reportRecord) {
+  if (reportRecord && reportRecord.reportData?.reportType === normalizedReportType) {
     return {
       reportData: reportRecord.reportData,
       generatedAt: reportRecord.generatedAt,
@@ -103,15 +109,31 @@ const getOrCreateStoredReport = async ({ userId, userRequestId, kundliData, user
     };
   }
 
-  console.log("[Kundli Report] Generating AI-enhanced content for:", userDetails.fullName);
-  const reportData = await generateKundliReportContent(kundliData, userDetails);
+  console.log(
+    "[Kundli Report] Generating AI-enhanced content for:",
+    userDetails.fullName,
+    `reportType=${normalizedReportType}`
+  );
 
-  reportRecord = await KundliReport.create({
-    userId,
-    userRequestId,
-    reportData,
-    generatedAt: new Date(),
-  });
+  const reportData = await generateKundliReportContent(kundliData, userDetails, normalizedReportType);
+
+  if (reportRecord) {
+    await reportRecord.update({
+      reportData,
+      generatedAt: new Date(),
+      pdfUrl: null,
+      pdfPublicId: null,
+      pdfFileName: null,
+      pdfUploadedAt: null,
+    });
+  } else {
+    reportRecord = await KundliReport.create({
+      userId,
+      userRequestId,
+      reportData,
+      generatedAt: new Date(),
+    });
+  }
 
   return {
     reportData: reportRecord.reportData,
@@ -191,8 +213,20 @@ const getUserKundlisForReport = async (req, res) => {
 const generateKundliReport = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { userRequestId } = req.body;
+    const { userRequestId, reportType } = req.body;
+    if (!reportType) {
+  return res.status(400).json({
+    success: false,
+    message: "reportType is required",
+  });
+}
 
+if (!["monthly", "yearly"].includes(reportType)) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid report type",
+  });
+}
     if (!userRequestId) {
       return res.status(400).json({
         success: false,
@@ -218,6 +252,7 @@ const generateKundliReport = async (req, res) => {
       userRequestId,
       kundliData,
       userDetails,
+      reportType,
     });
 
     // Return the report content. If already generated earlier, return cached content.
@@ -237,13 +272,18 @@ const generateKundliReport = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error generating kundli report:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to generate report",
-      error: error.message,
-    });
-  }
+  console.error("========== KUNDLI REPORT ERROR ==========");
+  console.error(error);
+  console.error(error.stack);
+
+  return res.status(500).json({
+    success: false,
+    message: error.message,
+    stack: process.env.NODE_ENV !== "production"
+      ? error.stack
+      : undefined,
+  });
+}
 };
 
 /**
@@ -314,8 +354,20 @@ const getGeneratedKundliReport = async (req, res) => {
 const downloadKundliReportPDF = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { userRequestId } = req.body;
+    const { userRequestId, reportType } = req.body;
+    if (!reportType) {
+  return res.status(400).json({
+    success: false,
+    message: "reportType is required",
+  });
+}
 
+if (!["monthly", "yearly"].includes(reportType)) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid report type",
+  });
+}
     if (!userRequestId) {
       return res.status(400).json({
         success: false,
@@ -342,6 +394,7 @@ const downloadKundliReportPDF = async (req, res) => {
       userRequestId,
       kundliData,
       userDetails,
+      reportType,
     });
 
     // Generate PDF
@@ -382,8 +435,20 @@ const downloadKundliReportPDF = async (req, res) => {
 const previewKundliReportPDF = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { userRequestId } = req.body;
+    const { userRequestId, reportType } = req.body;
+    if (!reportType) {
+  return res.status(400).json({
+    success: false,
+    message: "reportType is required",
+  });
+}
 
+if (!["monthly", "yearly"].includes(reportType)) {
+  return res.status(400).json({
+    success: false,
+    message: "Invalid report type",
+  });
+}
     if (!userRequestId) {
       return res.status(400).json({
         success: false,
@@ -410,6 +475,7 @@ const previewKundliReportPDF = async (req, res) => {
       userRequestId,
       kundliData,
       userDetails,
+      reportType,
     });
 
     // Generate PDF
