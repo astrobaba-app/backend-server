@@ -17,10 +17,12 @@ const razorpay = new Razorpay({
 });
 
 // Log Razorpay initialization status (without exposing full credentials)
-console.log('[Razorpay] Initialization status:', {
+console.log("[Razorpay] Initialization status:", {
   keyIdPresent: !!process.env.RAZORPAY_KEY_ID,
   keySecretPresent: !!process.env.RAZORPAY_KEY_SECRET,
-  keyIdPrefix: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 8) + '...' : 'NOT SET'
+  keyIdPrefix: process.env.RAZORPAY_KEY_ID
+    ? process.env.RAZORPAY_KEY_ID.substring(0, 8) + "..."
+    : "NOT SET",
 });
 
 const toAmount = (value) => {
@@ -57,10 +59,12 @@ const buildWalletPayload = (wallet) => {
   };
 };
 
-
 const getWalletBalance = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId =
+      req.user.role === "astrologer" && req.query.userId
+        ? req.query.userId
+        : req.user.id;
 
     let wallet = await Wallet.findOne({ where: { userId } });
 
@@ -83,19 +87,18 @@ const getWalletBalance = async (req, res) => {
   }
 };
 
-
 const createRechargeOrder = async (req, res) => {
   try {
     const userId = req.user.id;
     const { amount, couponCode } = req.body;
 
-    console.log('=== CREATE RECHARGE ORDER START ===');
-    console.log('User ID:', userId);
-    console.log('Amount:', amount);
-    console.log('Coupon Code:', couponCode);
+    console.log("=== CREATE RECHARGE ORDER START ===");
+    console.log("User ID:", userId);
+    console.log("Amount:", amount);
+    console.log("Coupon Code:", couponCode);
 
     if (!amount || amount < 1) {
-      console.log('ERROR: Invalid amount', amount);
+      console.log("ERROR: Invalid amount", amount);
       return res.status(400).json({
         success: false,
         message: "Amount must be at least ₹1",
@@ -160,7 +163,10 @@ const createRechargeOrder = async (req, res) => {
       if (coupon.discountType === "percentage") {
         discountAmount = (amount * parseFloat(coupon.discountValue)) / 100;
         if (coupon.maxDiscount) {
-          discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+          discountAmount = Math.min(
+            discountAmount,
+            parseFloat(coupon.maxDiscount),
+          );
         }
       } else {
         discountAmount = parseFloat(coupon.discountValue);
@@ -184,11 +190,16 @@ const createRechargeOrder = async (req, res) => {
 
     // Create Razorpay order with final amount
     const timestamp = Date.now().toString().slice(-8);
-    const userIdShort = userId.toString().length > 10 ? 
-      crypto.createHash('md5').update(userId.toString()).digest('hex').slice(0, 8) : 
-      userId.toString();
+    const userIdShort =
+      userId.toString().length > 10
+        ? crypto
+            .createHash("md5")
+            .update(userId.toString())
+            .digest("hex")
+            .slice(0, 8)
+        : userId.toString();
     const receipt = `rcpt_${userIdShort}_${timestamp}`;
-    
+
     const options = {
       amount: Math.round(finalAmount * 100), // Final amount in paise
       currency: "INR",
@@ -203,9 +214,12 @@ const createRechargeOrder = async (req, res) => {
       },
     };
 
-    console.log('Creating Razorpay order with options:', JSON.stringify(options, null, 2));
+    console.log(
+      "Creating Razorpay order with options:",
+      JSON.stringify(options, null, 2),
+    );
     const razorpayOrder = await razorpay.orders.create(options);
-    console.log('Razorpay order created successfully:', razorpayOrder.id);
+    console.log("Razorpay order created successfully:", razorpayOrder.id);
 
     // Create pending transaction
     const transaction = await WalletTransaction.create({
@@ -216,7 +230,7 @@ const createRechargeOrder = async (req, res) => {
       status: "pending",
       paymentMethod: "razorpay",
       razorpayOrderId: razorpayOrder.id,
-      description: couponCode 
+      description: couponCode
         ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
         : `Wallet recharge of ₹${amount}`,
       balanceBefore: wallet.balance,
@@ -235,8 +249,8 @@ const createRechargeOrder = async (req, res) => {
       });
     }
 
-    console.log('Transaction created in DB:', transaction.id);
-    console.log('=== CREATE RECHARGE ORDER SUCCESS ===');
+    console.log("Transaction created in DB:", transaction.id);
+    console.log("=== CREATE RECHARGE ORDER SUCCESS ===");
 
     res.status(201).json({
       success: true,
@@ -250,11 +264,13 @@ const createRechargeOrder = async (req, res) => {
         currency: razorpayOrder.currency,
         transactionId: transaction.id,
         key: process.env.RAZORPAY_KEY_ID,
-        couponApplied: appliedCoupon ? {
-          code: appliedCoupon.code,
-          discount: parseFloat(discountAmount),
-        } : null,
-      }
+        couponApplied: appliedCoupon
+          ? {
+              code: appliedCoupon.code,
+              discount: parseFloat(discountAmount),
+            }
+          : null,
+      },
     });
   } catch (error) {
     console.error("=== CREATE RECHARGE ORDER ERROR ===");
@@ -267,20 +283,20 @@ const createRechargeOrder = async (req, res) => {
   }
 };
 
-
 const verifyRecharge = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
+      req.body;
 
-    console.log('=== VERIFY RECHARGE START ===');
-    console.log('User ID:', userId);
-    console.log('Order ID:', razorpay_order_id);
-    console.log('Payment ID:', razorpay_payment_id);
-    console.log('Signature received:', razorpay_signature ? 'Yes' : 'No');
+    console.log("=== VERIFY RECHARGE START ===");
+    console.log("User ID:", userId);
+    console.log("Order ID:", razorpay_order_id);
+    console.log("Payment ID:", razorpay_payment_id);
+    console.log("Signature received:", razorpay_signature ? "Yes" : "No");
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      console.log('ERROR: Missing verification parameters');
+      console.log("ERROR: Missing verification parameters");
       return res.status(400).json({
         success: false,
         message: "Missing payment verification parameters",
@@ -288,15 +304,21 @@ const verifyRecharge = async (req, res) => {
     }
 
     // Verify signature
-    console.log('Verifying signature...');
+    console.log("Verifying signature...");
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    console.log('Generated signature:', generatedSignature.substring(0, 10) + '...');
-    console.log('Received signature:', razorpay_signature.substring(0, 10) + '...');
-    console.log('Signatures match:', generatedSignature === razorpay_signature);
+    console.log(
+      "Generated signature:",
+      generatedSignature.substring(0, 10) + "...",
+    );
+    console.log(
+      "Received signature:",
+      razorpay_signature.substring(0, 10) + "...",
+    );
+    console.log("Signatures match:", generatedSignature === razorpay_signature);
 
     if (generatedSignature !== razorpay_signature) {
       // Log invalid signature attempt
@@ -312,7 +334,7 @@ const verifyRecharge = async (req, res) => {
       });
     }
 
-    console.log('✓ Signature verified successfully');
+    console.log("✓ Signature verified successfully");
 
     // Find transaction
     const transaction = await WalletTransaction.findOne({
@@ -332,7 +354,9 @@ const verifyRecharge = async (req, res) => {
 
     // Idempotency check - if already completed, return success with existing data
     if (transaction.status === "completed") {
-      const wallet = await Wallet.findOne({ where: { id: transaction.walletId } });
+      const wallet = await Wallet.findOne({
+        where: { id: transaction.walletId },
+      });
       return res.status(200).json({
         success: true,
         message: "Transaction already completed",
@@ -346,7 +370,9 @@ const verifyRecharge = async (req, res) => {
     }
 
     // Get wallet
-    const wallet = await Wallet.findOne({ where: { id: transaction.walletId } });
+    const wallet = await Wallet.findOne({
+      where: { id: transaction.walletId },
+    });
 
     if (!wallet) {
       console.error("Wallet not found", {
@@ -365,15 +391,17 @@ const verifyRecharge = async (req, res) => {
 
     try {
       // Update wallet balance
-      const newBalance = toAmount(wallet.balance) + toAmount(transaction.amount);
-      const newTotalRecharge = toAmount(wallet.totalRecharge) + toAmount(transaction.amount);
+      const newBalance =
+        toAmount(wallet.balance) + toAmount(transaction.amount);
+      const newTotalRecharge =
+        toAmount(wallet.totalRecharge) + toAmount(transaction.amount);
 
       await wallet.update(
         {
           balance: newBalance,
           totalRecharge: newTotalRecharge,
         },
-        { transaction: dbTransaction }
+        { transaction: dbTransaction },
       );
 
       // Update transaction
@@ -384,7 +412,7 @@ const verifyRecharge = async (req, res) => {
           razorpaySignature: razorpay_signature,
           balanceAfter: newBalance,
         },
-        { transaction: dbTransaction }
+        { transaction: dbTransaction },
       );
 
       await dbTransaction.commit();
@@ -429,7 +457,10 @@ const verifyRecharge = async (req, res) => {
       });
     } catch (dbError) {
       await dbTransaction.rollback();
-      console.error("Database transaction error during wallet recharge", dbError);
+      console.error(
+        "Database transaction error during wallet recharge",
+        dbError,
+      );
       throw dbError;
     }
   } catch (error) {
@@ -453,23 +484,24 @@ const getTransactionHistory = async (req, res) => {
 
     const offset = (page - 1) * limit;
 
-    const { rows: transactions, count } = await WalletTransaction.findAndCountAll({
-      where,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [["createdAt", "DESC"]],
-      attributes: [
-        "id",
-        "amount",
-        "type",
-        "status",
-        "paymentMethod",
-        "description",
-        "balanceBefore",
-        "balanceAfter",
-        "createdAt",
-      ],
-    });
+    const { rows: transactions, count } =
+      await WalletTransaction.findAndCountAll({
+        where,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        order: [["createdAt", "DESC"]],
+        attributes: [
+          "id",
+          "amount",
+          "type",
+          "status",
+          "paymentMethod",
+          "description",
+          "balanceBefore",
+          "balanceAfter",
+          "createdAt",
+        ],
+      });
 
     res.status(200).json({
       success: true,
@@ -490,7 +522,6 @@ const getTransactionHistory = async (req, res) => {
     });
   }
 };
-
 
 const deductFromWallet = async (userId, amount, description = "Payment") => {
   const wallet = await Wallet.findOne({ where: { userId } });
@@ -543,26 +574,35 @@ const deductForAIUsage = async (req, res) => {
     const parsedAmount = toAmount(amount);
     const parsedMinutes = toAmount(minutes);
 
-    console.log('=== AI WALLET DEDUCTION START ===');
-    console.log('[PRODUCTION DEBUG] Timestamp:', new Date().toISOString());
-    console.log('[PRODUCTION DEBUG] User ID:', userId);
-    console.log('[PRODUCTION DEBUG] User object:', JSON.stringify(req.user));
-    console.log('[PRODUCTION DEBUG] Amount:', amount, 'Type:', typeof amount);
-    console.log('[PRODUCTION DEBUG] Type:', type);
-    console.log('[PRODUCTION DEBUG] Minutes:', minutes);
-    console.log('[PRODUCTION DEBUG] Request body:', JSON.stringify(req.body));
-    console.log('[PRODUCTION DEBUG] Request headers:', JSON.stringify(req.headers));
+    console.log("=== AI WALLET DEDUCTION START ===");
+    console.log("[PRODUCTION DEBUG] Timestamp:", new Date().toISOString());
+    console.log("[PRODUCTION DEBUG] User ID:", userId);
+    console.log("[PRODUCTION DEBUG] User object:", JSON.stringify(req.user));
+    console.log("[PRODUCTION DEBUG] Amount:", amount, "Type:", typeof amount);
+    console.log("[PRODUCTION DEBUG] Type:", type);
+    console.log("[PRODUCTION DEBUG] Minutes:", minutes);
+    console.log("[PRODUCTION DEBUG] Request body:", JSON.stringify(req.body));
+    console.log(
+      "[PRODUCTION DEBUG] Request headers:",
+      JSON.stringify(req.headers),
+    );
 
     if (!parsedAmount || parsedAmount <= 0) {
-      console.error('[PRODUCTION DEBUG] Invalid amount validation failed:', { amount, type: typeof amount });
+      console.error("[PRODUCTION DEBUG] Invalid amount validation failed:", {
+        amount,
+        type: typeof amount,
+      });
       return res.status(400).json({
         success: false,
         message: "Invalid amount",
       });
     }
 
-    if (!type || !['chat', 'voice'].includes(type)) {
-      console.error('[PRODUCTION DEBUG] Invalid type validation failed:', { type, validTypes: ['chat', 'voice'] });
+    if (!type || !["chat", "voice"].includes(type)) {
+      console.error("[PRODUCTION DEBUG] Invalid type validation failed:", {
+        type,
+        validTypes: ["chat", "voice"],
+      });
       return res.status(400).json({
         success: false,
         message: "Type must be 'chat' or 'voice'",
@@ -581,39 +621,39 @@ const deductForAIUsage = async (req, res) => {
     }
 
     // Get wallet
-    console.log('[PRODUCTION DEBUG] Fetching wallet for userId:', userId);
+    console.log("[PRODUCTION DEBUG] Fetching wallet for userId:", userId);
     const wallet = await Wallet.findOne({ where: { userId } });
 
     if (!wallet) {
-      console.error('[PRODUCTION DEBUG] Wallet not found for userId:', userId);
+      console.error("[PRODUCTION DEBUG] Wallet not found for userId:", userId);
       return res.status(404).json({
         success: false,
         message: "Wallet not found",
       });
     }
 
-    console.log('[PRODUCTION DEBUG] Wallet found:', {
+    console.log("[PRODUCTION DEBUG] Wallet found:", {
       walletId: wallet.id,
       balance: wallet.balance,
       balanceType: typeof wallet.balance,
       parsedBalance: parseFloat(wallet.balance),
-      totalSpent: wallet.totalSpent
+      totalSpent: wallet.totalSpent,
     });
 
     // Check sufficient balance
     const currentBalance = parseFloat(wallet.balance);
-    console.log('[PRODUCTION DEBUG] Balance check:', {
+    console.log("[PRODUCTION DEBUG] Balance check:", {
       currentBalance,
       requiredAmount: parsedAmount,
-      hasSufficientBalance: currentBalance >= parsedAmount
+      hasSufficientBalance: currentBalance >= parsedAmount,
     });
 
     if (currentBalance < parsedAmount) {
-      console.error('[PRODUCTION DEBUG] Insufficient balance for AI usage:', {
+      console.error("[PRODUCTION DEBUG] Insufficient balance for AI usage:", {
         userId,
         currentBalance,
         requiredAmount: parsedAmount,
-        deficit: parsedAmount - currentBalance
+        deficit: parsedAmount - currentBalance,
       });
       return res.status(400).json({
         success: false,
@@ -624,7 +664,7 @@ const deductForAIUsage = async (req, res) => {
 
     // Use transaction for atomicity
     const sequelize = require("../../dbConnection/dbConfig").sequelize;
-    console.log('[PRODUCTION DEBUG] Starting database transaction');
+    console.log("[PRODUCTION DEBUG] Starting database transaction");
     const dbTransaction = await sequelize.transaction();
 
     try {
@@ -633,7 +673,7 @@ const deductForAIUsage = async (req, res) => {
       });
       const newTotalSpent = toAmount(wallet.totalSpent) + debitPlan.debitAmount;
 
-      console.log('[PRODUCTION DEBUG] Calculating new balances:', {
+      console.log("[PRODUCTION DEBUG] Calculating new balances:", {
         balanceBefore: debitPlan.previousBalance,
         amount: parsedAmount,
         newBalance: debitPlan.nextBalance,
@@ -642,23 +682,23 @@ const deductForAIUsage = async (req, res) => {
         rechargeConsumed: debitPlan.rechargeConsumed,
         signupBonusConsumed: debitPlan.signupBonusConsumed,
         currentTotalSpent: wallet.totalSpent,
-        newTotalSpent
+        newTotalSpent,
       });
 
       // Update wallet
-      console.log('[PRODUCTION DEBUG] Updating wallet in database');
+      console.log("[PRODUCTION DEBUG] Updating wallet in database");
       await wallet.update(
         {
           balance: debitPlan.nextBalance,
           signupBonusBalance: debitPlan.nextSignupBonusBalance,
           totalSpent: newTotalSpent,
         },
-        { transaction: dbTransaction }
+        { transaction: dbTransaction },
       );
-      console.log('[PRODUCTION DEBUG] Wallet updated successfully');
+      console.log("[PRODUCTION DEBUG] Wallet updated successfully");
 
       // Create transaction record
-      console.log('[PRODUCTION DEBUG] Creating transaction record');
+      console.log("[PRODUCTION DEBUG] Creating transaction record");
       const transaction = await WalletTransaction.create(
         {
           userId,
@@ -677,26 +717,28 @@ const deductForAIUsage = async (req, res) => {
             signupBonusConsumed: debitPlan.signupBonusConsumed,
           },
         },
-        { transaction: dbTransaction }
+        { transaction: dbTransaction },
       );
-      console.log('[PRODUCTION DEBUG] Transaction record created:', {
+      console.log("[PRODUCTION DEBUG] Transaction record created:", {
         transactionId: transaction.id,
         amount: transaction.amount,
-        description: transaction.description
+        description: transaction.description,
       });
 
-      console.log('[PRODUCTION DEBUG] Committing database transaction');
+      console.log("[PRODUCTION DEBUG] Committing database transaction");
       await dbTransaction.commit();
-      console.log('[PRODUCTION DEBUG] Database transaction committed successfully');
+      console.log(
+        "[PRODUCTION DEBUG] Database transaction committed successfully",
+      );
 
-      console.log('[PRODUCTION DEBUG] AI wallet deduction successful:', {
+      console.log("[PRODUCTION DEBUG] AI wallet deduction successful:", {
         userId,
         amount: parsedAmount,
         type,
         minutes: parsedMinutes,
         balanceBefore: debitPlan.previousBalance,
         newBalance: debitPlan.nextBalance,
-        transactionId: transaction.id
+        transactionId: transaction.id,
       });
 
       const responseData = {
@@ -713,19 +755,27 @@ const deductForAIUsage = async (req, res) => {
           signupBonusConsumed: debitPlan.signupBonusConsumed,
         },
       };
-      console.log('[PRODUCTION DEBUG] Sending success response:', JSON.stringify(responseData));
+      console.log(
+        "[PRODUCTION DEBUG] Sending success response:",
+        JSON.stringify(responseData),
+      );
       res.status(200).json(responseData);
-      console.log('[PRODUCTION DEBUG] === AI WALLET DEDUCTION SUCCESS ===');
+      console.log("[PRODUCTION DEBUG] === AI WALLET DEDUCTION SUCCESS ===");
     } catch (dbError) {
-      console.error('[PRODUCTION DEBUG] Database error, rolling back transaction');
+      console.error(
+        "[PRODUCTION DEBUG] Database error, rolling back transaction",
+      );
       await dbTransaction.rollback();
-      console.error('[PRODUCTION DEBUG] Database error during AI wallet deduction:', {
-        error: dbError.message,
-        stack: dbError.stack,
-        userId,
-        amount,
-        type
-      });
+      console.error(
+        "[PRODUCTION DEBUG] Database error during AI wallet deduction:",
+        {
+          error: dbError.message,
+          stack: dbError.stack,
+          userId,
+          amount,
+          type,
+        },
+      );
       throw dbError;
     }
   } catch (error) {
@@ -734,7 +784,7 @@ const deductForAIUsage = async (req, res) => {
       message: error.message,
       stack: error.stack,
       userId: req.user?.id,
-      body: req.body
+      body: req.body,
     });
     res.status(500).json({
       success: false,

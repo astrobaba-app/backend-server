@@ -55,15 +55,15 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
       signPoints.map((sp) => sp.points ?? 0);
 
     return {
-      sav:     getPointsArray(sarvashtakavarga.sign_points || []),
-      sun:     getPointsArray(individualCharts.Sun?.sign_points || []),
-      moon:    getPointsArray(individualCharts.Moon?.sign_points || []),
-      mars:    getPointsArray(individualCharts.Mars?.sign_points || []),
+      sav: getPointsArray(sarvashtakavarga.sign_points || []),
+      sun: getPointsArray(individualCharts.Sun?.sign_points || []),
+      moon: getPointsArray(individualCharts.Moon?.sign_points || []),
+      mars: getPointsArray(individualCharts.Mars?.sign_points || []),
       mercury: getPointsArray(individualCharts.Mercury?.sign_points || []),
       jupiter: getPointsArray(individualCharts.Jupiter?.sign_points || []),
-      venus:   getPointsArray(individualCharts.Venus?.sign_points || []),
-      saturn:  getPointsArray(individualCharts.Saturn?.sign_points || []),
-      asc:     getPointsArray(individualCharts.Ascendant?.sign_points || []),
+      venus: getPointsArray(individualCharts.Venus?.sign_points || []),
+      saturn: getPointsArray(individualCharts.Saturn?.sign_points || []),
+      asc: getPointsArray(individualCharts.Ascendant?.sign_points || []),
     };
   } catch (err) {
     console.error("buildAshtakvargaPayload error:", err);
@@ -71,7 +71,9 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
   }
 }
 
-const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
+const {
+  generateFreeReportNarratives,
+} = require("../../services/freeReportAiService");
 
 const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
@@ -93,7 +95,9 @@ const UNKNOWN_WHATSAPP_TOB_TOKENS = new Set([
 const DEFAULT_WHATSAPP_AI_ASTROLOGER_ID =
   process.env.WHATSAPP_AI_ASTROLOGER_ID || "ai-astrologer-devansh";
 const WHATSAPP_FAST_FORMAT_MODEL =
-  process.env.OPENAI_CHAT_MODEL_FAST || process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+  process.env.OPENAI_CHAT_MODEL_FAST ||
+  process.env.OPENAI_CHAT_MODEL ||
+  "gpt-4o-mini";
 const WHATSAPP_FAST_FORMAT_TIMEOUT_MS = 1800;
 
 const normalizeMobileNumber = (rawMobile) => {
@@ -154,7 +158,12 @@ const extractWhatsappApiKey = (req) => {
   const authorizationApiKey = normalizeApiKeyCandidate(authorizationHeader);
 
   // Prefer dedicated WhatsApp header first to avoid collisions with generic x-api-key.
-  return headerWhatsappApiKey || headerGenericApiKey || authorizationApiKey || bodyApiKey;
+  return (
+    headerWhatsappApiKey ||
+    headerGenericApiKey ||
+    authorizationApiKey ||
+    bodyApiKey
+  );
 };
 
 const normalizeText = (value) =>
@@ -187,7 +196,10 @@ const resolveWhatsappTob = ({ rawTob, aiTob }) => {
   const normalizedRawTob = normalizeText(rawTob);
   const normalizedAiTob = normalizeText(aiTob);
 
-  if (isUnknownWhatsappTob(normalizedRawTob) || isUnknownWhatsappTob(normalizedAiTob)) {
+  if (
+    isUnknownWhatsappTob(normalizedRawTob) ||
+    isUnknownWhatsappTob(normalizedAiTob)
+  ) {
     return UNKNOWN_WHATSAPP_TOB_DEFAULT;
   }
 
@@ -235,7 +247,16 @@ const normalizeGenderForKundli = (value) => {
 
   if (["m", "male", "man", "boy"].includes(normalized)) return "male";
   if (["f", "female", "woman", "girl"].includes(normalized)) return "female";
-  if (["other", "others", "non-binary", "nonbinary", "nb", "transgender"].includes(normalized)) {
+  if (
+    [
+      "other",
+      "others",
+      "non-binary",
+      "nonbinary",
+      "nb",
+      "transgender",
+    ].includes(normalized)
+  ) {
     return "other";
   }
 
@@ -267,12 +288,17 @@ const formatWhatsappKundliInputWithOpenAI = async ({
         },
         {
           role: "user",
-          content: JSON.stringify({ user_gender, user_dob, user_tob, user_pob }),
+          content: JSON.stringify({
+            user_gender,
+            user_dob,
+            user_tob,
+            user_pob,
+          }),
         },
       ],
     }, context),
     WHATSAPP_FAST_FORMAT_TIMEOUT_MS,
-    "OpenAI formatter timeout"
+    "OpenAI formatter timeout",
   );
 
   const parsed = parseAiJsonContent(completion?.choices?.[0]?.message?.content);
@@ -313,7 +339,9 @@ const getFormattedWhatsappKundliInput = async ({
     aiFormatted = null;
   }
 
-  const mergedGender = normalizeGenderForKundli(aiFormatted?.gender || rawGender);
+  const mergedGender = normalizeGenderForKundli(
+    aiFormatted?.gender || rawGender,
+  );
   const mergedDob = normalizeText(aiFormatted?.dob || rawDob);
   const mergedTob = resolveWhatsappTob({ rawTob, aiTob: aiFormatted?.tob });
   const mergedPlace = normalizeText(aiFormatted?.place_of_birth || rawPob);
@@ -350,7 +378,9 @@ const derivePlaceCityAndState = ({ place, state }) => {
 
   const city = placeSegments[0] || "";
   const derivedState = normalizedState || placeSegments[1] || "";
-  const normalizedPlaceOfBirth = derivedState ? `${city}, ${derivedState}` : city;
+  const normalizedPlaceOfBirth = derivedState
+    ? `${city}, ${derivedState}`
+    : city;
 
   return {
     city,
@@ -359,7 +389,13 @@ const derivePlaceCityAndState = ({ place, state }) => {
   };
 };
 
-const validateKundliPayload = ({ dob, tob, placeOfBirth, latitude, longitude }) => {
+const validateKundliPayload = ({
+  dob,
+  tob,
+  placeOfBirth,
+  latitude,
+  longitude,
+}) => {
   if (!KUNDLI_DOB_REGEX.test(dob)) {
     return "dob must be in YYYY-MM-DD format";
   }
@@ -449,11 +485,10 @@ const runWhatsappSessionQuestionInBackground = async ({
   await sendMessage(delegatedRequest, delegatedResponse);
 };
 
-
-
 const createKundli = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId =
+      req.user.role === "astrologer" ? req.body.ownerUserId : req.user.id;
     const {
       fullName,
       dateOfbirth,
@@ -465,12 +500,13 @@ const createKundli = async (req, res) => {
     } = req.body;
     console.log("Creating kundli for user:", req.body);
     console.log("User ID:", latitude, longitude);
-   console.log("User ID:", placeOfBirth);
+    console.log("User ID:", placeOfBirth);
     // Validate required fields
     if (!timeOfbirth || !placeOfBirth || !gender) {
       return res.status(400).json({
         success: false,
-        message: "All birth details are required (timeOfbirth, placeOfBirth, gender)",
+        message:
+          "All birth details are required (timeOfbirth, placeOfBirth, gender)",
       });
     }
 
@@ -516,9 +552,9 @@ const createKundli = async (req, res) => {
       getAscendantReport(userRequest),
       getGemstoneRemedies(userRequest),
       getRudrakshaSuggestion(userRequest),
-        getAshtakavarga(userRequest),
-        getTransitChart(userRequest),
-        getCompleteHoroscope(userRequest),
+      getAshtakavarga(userRequest),
+      getTransitChart(userRequest),
+      getCompleteHoroscope(userRequest),
     ]);
 
     // Extract values or set to null if failed
@@ -526,7 +562,10 @@ const createKundli = async (req, res) => {
       if (result.status === "fulfilled") {
         return result.value;
       } else {
-        console.error(`${name} failed:`, result.reason?.message || result.reason);
+        console.error(
+          `${name} failed:`,
+          result.reason?.message || result.reason,
+        );
         return null;
       }
     };
@@ -535,14 +574,23 @@ const createKundli = async (req, res) => {
     console.log("[KundliController] Yogini Dasha settled result:", yogini);
 
     const basicDetailsVal = extractValue(basicDetails, "Basic Details");
-    const astroDetailsVal = extractValue(astroDetails, "Astro Details (House Cusps)");
+    const astroDetailsVal = extractValue(
+      astroDetails,
+      "Astro Details (House Cusps)",
+    );
     const panchangVal = extractValue(panchang, "Panchang");
     const planetaryVal = extractValue(planetary, "Planetary Positions");
     const chartsVal = extractValue(charts, "Charts");
     const dashaVal = extractValue(dasha, "Vimshottari Dasha");
     const yoginiVal = extractValue(yogini, "Yogini Dasha");
-    const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik Analysis");
-    const personalityVal = extractValue(personality, "Personality/Ascendant Report");
+    const manglikAnalysisVal = extractValue(
+      manglikAnalysis,
+      "Manglik Analysis",
+    );
+    const personalityVal = extractValue(
+      personality,
+      "Personality/Ascendant Report",
+    );
 
     const remedies = {
       gemstones: extractValue(gemstoneRemedies, "Gemstone Remedies"),
@@ -556,7 +604,7 @@ const createKundli = async (req, res) => {
     // Prepare compact Ashtakavarga structure expected by frontend
     const ashtakvargaPayload = buildAshtakvargaPayload(
       ashtakvargaData,
-      basicDetailsVal?.ascendant?.longitude ?? 0
+      basicDetailsVal?.ascendant?.longitude ?? 0,
     );
 
     // Prepare yogas list from complete horoscope if available
@@ -573,7 +621,8 @@ const createKundli = async (req, res) => {
 
     // Step 3: Create kundli record
     // Merge transit data into horoscope object (safe: keeps existing `horoscope` shape)
-    const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
+    const finalHoroscope =
+      horoscope && typeof horoscope === "object" ? { ...horoscope } : {};
     if (transitVal) {
       finalHoroscope.transit = transitVal;
     }
@@ -618,17 +667,18 @@ const createKundli = async (req, res) => {
       .then((aiFreeReport) => {
         if (aiFreeReport) {
           // Update the kundli record with AI report when ready
-          return Kundli.update(
-            { aiFreeReport },
-            { where: { id: kundli.id } }
-          );
+          return Kundli.update({ aiFreeReport }, { where: { id: kundli.id } });
         }
       })
       .catch((err) => {
-        console.error("[KundliController] Background AI Free Report generation failed:", err?.message || err);
+        console.error(
+          "[KundliController] Background AI Free Report generation failed:",
+          err?.message || err,
+        );
       });
 
-    const responseStatusCode = req.responseFormat === "whatsapp-minimal" ? 200 : 201;
+    const responseStatusCode =
+      req.responseFormat === "whatsapp-minimal" ? 200 : 201;
 
     // WhatsApp flow requests a compact payload for low-overhead integrations.
     if (req.responseFormat === "whatsapp-minimal") {
@@ -689,20 +739,24 @@ const createKundliFromWhatsapp = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
-        success: false,
-        message: "WhatsApp API key validation failed",
-        reason: apiKeyValidation.reason,
-      });
+      return res
+        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
+        .json({
+          success: false,
+          message: "WhatsApp API key validation failed",
+          reason: apiKeyValidation.reason,
+        });
     }
 
     const name = normalizeText(
       requestBody.name ||
         requestBody.fullName ||
         requestBody.userName ||
-        requestBody.user_name
+        requestBody.user_name,
     );
-    const rawGender = normalizeText(requestBody.gender || requestBody.user_gender);
+    const rawGender = normalizeText(
+      requestBody.gender || requestBody.user_gender,
+    );
     const rawDob =
       requestBody.dob ||
       requestBody.dateOfbirth ||
@@ -843,7 +897,9 @@ const createKundliFromWhatsapp = async (req, res) => {
     };
 
     const requestedAiAstrologerId = normalizeText(
-      requestBody.aiAstrologerId || requestBody.ai_astrologer_id || requestBody.astrologerId
+      requestBody.aiAstrologerId ||
+        requestBody.ai_astrologer_id ||
+        requestBody.astrologerId,
     );
 
     const delegatedRequest = {
@@ -881,18 +937,24 @@ const formatWhatsappKundliInputFast = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
-        success: false,
-        message: "WhatsApp API key validation failed",
-        reason: apiKeyValidation.reason,
-      });
+      return res
+        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
+        .json({
+          success: false,
+          message: "WhatsApp API key validation failed",
+          reason: apiKeyValidation.reason,
+        });
     }
 
-    const rawGender = normalizeText(requestBody.user_gender || requestBody.gender);
+    const rawGender = normalizeText(
+      requestBody.user_gender || requestBody.gender,
+    );
     const rawDob = normalizeText(requestBody.user_dob || requestBody.dob);
     const rawTob = normalizeText(requestBody.user_tob || requestBody.tob);
     const rawPob = normalizeText(
-      requestBody.user_pob || requestBody.place_of_birth || requestBody.placeOfBirth
+      requestBody.user_pob ||
+        requestBody.place_of_birth ||
+        requestBody.placeOfBirth,
     );
     const rawState = normalizeText(requestBody.state);
 
@@ -964,7 +1026,10 @@ const askQuestionInWhatsappSession = async (req, res) => {
 
   res.json = (payload) => {
     const payloadWithData =
-      payload && typeof payload === "object" && !Array.isArray(payload) && !payload.data
+      payload &&
+      typeof payload === "object" &&
+      !Array.isArray(payload) &&
+      !payload.data
         ? {
             ...payload,
             data: {
@@ -990,11 +1055,13 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
-        success: false,
-        message: "WhatsApp API key validation failed",
-        reason: apiKeyValidation.reason,
-      });
+      return res
+        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
+        .json({
+          success: false,
+          message: "WhatsApp API key validation failed",
+          reason: apiKeyValidation.reason,
+        });
     }
 
     const sessionIdRaw = getFirstProvidedBodyValue(requestBody, [
@@ -1013,7 +1080,8 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const sessionId = normalizeText(sessionIdRaw);
     const question = normalizeText(questionRaw);
     resolvedSessionId = sessionId || null;
-    const hasTemplatePlaceholder = (value) => /^\$[a-zA-Z_]/.test(String(value || "").trim());
+    const hasTemplatePlaceholder = (value) =>
+      /^\$[a-zA-Z_]/.test(String(value || "").trim());
     const waitForReply =
       requestBody.waitForReply === true || requestBody.wait_for_reply === true;
     const runAsync =
@@ -1060,13 +1128,14 @@ const askQuestionInWhatsappSession = async (req, res) => {
           },
         },
         returning: true,
-      }
+      },
     );
 
     if (!updatedCount) {
       return res.status(400).json({
         success: false,
-        message: "WhatsApp chat limit exhausted. Please recharge or contact support.",
+        message:
+          "WhatsApp chat limit exhausted. Please recharge or contact support.",
       });
     }
 
@@ -1085,7 +1154,10 @@ const askQuestionInWhatsappSession = async (req, res) => {
             question,
           });
         } catch (backgroundError) {
-          console.error("Background WhatsApp question processing error:", backgroundError);
+          console.error(
+            "Background WhatsApp question processing error:",
+            backgroundError,
+          );
         }
       });
 
@@ -1119,7 +1191,6 @@ const askQuestionInWhatsappSession = async (req, res) => {
   }
 };
 
-
 const getKundli = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1137,7 +1208,7 @@ const getKundli = async (req, res) => {
       });
     }
 
-    const kundli = await Kundli.findOne({ 
+    const kundli = await Kundli.findOne({
       where: { requestId: userRequestId },
       include: [{ model: UserRequest, as: "userRequest" }],
     });
@@ -1173,8 +1244,8 @@ const getAllUserRequests = async (req, res) => {
 
     const userRequests = await UserRequest.findAll({
       where: { userId },
-    //   include: [{ model: Kundli, as: "kundli" }],
-       attributes: [
+      //   include: [{ model: Kundli, as: "kundli" }],
+      attributes: [
         "id",
         "fullName",
         "dateOfbirth",
@@ -1199,14 +1270,13 @@ const getAllUserRequests = async (req, res) => {
   }
 };
 
-
 const getAllKundlis = async (req, res) => {
   try {
     const userId = req.user.id;
 
     const userRequests = await UserRequest.findAll({
       where: { userId },
-       attributes: [
+      attributes: [
         "id",
         "fullName",
         "dateOfbirth",
@@ -1293,9 +1363,9 @@ const checkAiReportStatus = async (req, res) => {
       });
     }
 
-    const kundli = await Kundli.findOne({ 
+    const kundli = await Kundli.findOne({
       where: { requestId: userRequestId },
-      attributes: ['id', 'aiFreeReport'],
+      attributes: ["id", "aiFreeReport"],
     });
 
     if (!kundli) {
@@ -1320,7 +1390,6 @@ const checkAiReportStatus = async (req, res) => {
   }
 };
 
-
 /**
  * PUT /kundli/:userRequestId/refresh-ashtakvarga
  * Re-fetches Ashtakavarga from the Python engine and overwrites the stored
@@ -1336,12 +1405,18 @@ const refreshAshtakvarga = async (req, res) => {
       where: { id: userRequestId, userId },
     });
     if (!userRequest) {
-      return res.status(404).json({ success: false, message: "User request not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "User request not found" });
     }
 
-    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+    });
     if (!kundli) {
-      return res.status(404).json({ success: false, message: "Kundli not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Kundli not found" });
     }
 
     // Re-fetch from astro engine (basic details for ascendant + ashtakavarga)
@@ -1350,29 +1425,49 @@ const refreshAshtakvarga = async (req, res) => {
       getAshtakavarga(userRequest),
     ]);
 
-    const basicDetailsVal = basicDetailsResult.status === "fulfilled" ? basicDetailsResult.value : null;
-    const ashtakvargaData = ashtakvargaResult.status === "fulfilled" ? ashtakvargaResult.value : null;
+    const basicDetailsVal =
+      basicDetailsResult.status === "fulfilled"
+        ? basicDetailsResult.value
+        : null;
+    const ashtakvargaData =
+      ashtakvargaResult.status === "fulfilled" ? ashtakvargaResult.value : null;
 
     if (!basicDetailsVal?.ascendant?.longitude) {
-      console.error("[refreshAshtakvarga] Could not get ascendant longitude", basicDetailsVal);
+      console.error(
+        "[refreshAshtakvarga] Could not get ascendant longitude",
+        basicDetailsVal,
+      );
     }
     if (!ashtakvargaData?.sarvashtakavarga) {
-      console.error("[refreshAshtakvarga] Could not get ashtakvarga data", ashtakvargaData);
-      return res.status(500).json({ success: false, message: "Failed to fetch Ashtakavarga from astro engine" });
+      console.error(
+        "[refreshAshtakvarga] Could not get ashtakvarga data",
+        ashtakvargaData,
+      );
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "Failed to fetch Ashtakavarga from astro engine",
+        });
     }
 
     const freshPayload = buildAshtakvargaPayload(
       ashtakvargaData,
-      basicDetailsVal?.ascendant?.longitude ?? 0
+      basicDetailsVal?.ascendant?.longitude ?? 0,
     );
 
     if (!freshPayload) {
-      return res.status(500).json({ success: false, message: "Failed to build Ashtakavarga payload" });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "Failed to build Ashtakavarga payload",
+        });
     }
 
     await Kundli.update(
       { ashtakvarga: freshPayload },
-      { where: { requestId: userRequestId } }
+      { where: { requestId: userRequestId } },
     );
 
     // Return full updated kundli
@@ -1388,7 +1483,13 @@ const refreshAshtakvarga = async (req, res) => {
     });
   } catch (error) {
     console.error("refreshAshtakvarga error:", error);
-    res.status(500).json({ success: false, message: "Failed to refresh Ashtakavarga", error: error.message });
+    res
+      .status(500)
+      .json({
+        success: false,
+        message: "Failed to refresh Ashtakavarga",
+        error: error.message,
+      });
   }
 };
 
@@ -1415,7 +1516,9 @@ const generateKundliShareLink = async (req, res) => {
       });
     }
 
-    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+    });
     if (!kundli) {
       return res.status(404).json({
         success: false,
@@ -1427,7 +1530,9 @@ const generateKundliShareLink = async (req, res) => {
       await kundli.update({ isPublic: true });
     }
 
-    const frontendBaseUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+    const frontendBaseUrl = (
+      process.env.FRONTEND_URL || "http://localhost:3000"
+    ).replace(/\/+$/, "");
     const shareUrl = `${frontendBaseUrl}/kundliReport?id=${encodeURIComponent(userRequestId)}`;
 
     return res.status(200).json({
