@@ -21,8 +21,8 @@ async function enhanceHoroscopeWithAI({ zodiacSign, period, horoscopeData, conte
       return null;
     }
 
-    // Build context for AI
-    const context = {
+    // Build payload for AI without shadowing the logging context.
+    const aiContext = {
       zodiacSign,
       period,
       date: horoscopeData.date || horoscopeData.start_date || horoscopeData.month || horoscopeData.year,
@@ -46,8 +46,8 @@ async function enhanceHoroscopeWithAI({ zodiacSign, period, horoscopeData, conte
 Context:
 - Zodiac Sign: ${zodiacSign}
 - Period: ${period}
-- Date: ${context.date}
-- Moon Phase: ${context.moonPhase || 'N/A'}
+- Date: ${aiContext.date}
+- Moon Phase: ${aiContext.moonPhase || 'N/A'}
 
 For each section below, create a 6-7 line narrative that:
 1. Is warm, personal, and directly addresses the reader
@@ -57,15 +57,15 @@ For each section below, create a 6-7 line narrative that:
 5. Uses conversational, easy-to-understand language
 
 Sections to enhance:
-1. Overview: ${JSON.stringify(context.predictions.overview)}
-2. Love & Relationships: ${JSON.stringify(context.predictions.love)}
-3. Personal Life: ${JSON.stringify(context.predictions.personal)}
-4. Career & Finance: ${JSON.stringify(context.predictions.career)} + ${JSON.stringify(context.predictions.finance)}
-5. Health & Wellness: ${JSON.stringify(context.predictions.health)}
-6. Emotions & Mind: ${JSON.stringify(context.predictions.emotions)}
-7. Lucky Insights: ${JSON.stringify(context.luckyElements)}
-8. Travel & Movement: ${JSON.stringify(context.predictions.travel)}
-9. Remedies: ${JSON.stringify(context.remedies)}
+1. Overview: ${JSON.stringify(aiContext.predictions.overview)}
+2. Love & Relationships: ${JSON.stringify(aiContext.predictions.love)}
+3. Personal Life: ${JSON.stringify(aiContext.predictions.personal)}
+4. Career & Finance: ${JSON.stringify(aiContext.predictions.career)} + ${JSON.stringify(aiContext.predictions.finance)}
+5. Health & Wellness: ${JSON.stringify(aiContext.predictions.health)}
+6. Emotions & Mind: ${JSON.stringify(aiContext.predictions.emotions)}
+7. Lucky Insights: ${JSON.stringify(aiContext.luckyElements)}
+8. Travel & Movement: ${JSON.stringify(aiContext.predictions.travel)}
+9. Remedies: ${JSON.stringify(aiContext.remedies)}
 
 Return ONLY a JSON object with this exact structure (no markdown, no explanation):
 {
