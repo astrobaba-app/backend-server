@@ -1,7 +1,7 @@
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
 const SharedKundliDeletion = require("../../model/horoscope/sharedKundliDeletion");
-const OpenAI = require("openai");
+const { createChatCompletion } = require("../../services/openaiClient");
 const { Op, literal } = require("sequelize");
 const { randomUUID } = require("crypto");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
@@ -99,10 +99,6 @@ const WHATSAPP_FAST_FORMAT_MODEL =
   process.env.OPENAI_CHAT_MODEL ||
   "gpt-4o-mini";
 const WHATSAPP_FAST_FORMAT_TIMEOUT_MS = 1800;
-
-const openAiClient = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -272,13 +268,14 @@ const formatWhatsappKundliInputWithOpenAI = async ({
   user_dob,
   user_tob,
   user_pob,
+  context = {},
 }) => {
-  if (!openAiClient) {
+  if (!process.env.OPENAI_API_KEY) {
     return null;
   }
 
   const completion = await withTimeout(
-    openAiClient.chat.completions.create({
+    createChatCompletion({
       model: WHATSAPP_FAST_FORMAT_MODEL,
       response_format: { type: "json_object" },
       temperature: 0,
@@ -299,7 +296,7 @@ const formatWhatsappKundliInputWithOpenAI = async ({
           }),
         },
       ],
-    }),
+    }, context),
     WHATSAPP_FAST_FORMAT_TIMEOUT_MS,
     "OpenAI formatter timeout",
   );
@@ -322,6 +319,7 @@ const getFormattedWhatsappKundliInput = async ({
   user_dob,
   user_tob,
   user_pob,
+  context = {},
 }) => {
   const rawGender = normalizeText(user_gender);
   const rawDob = normalizeText(user_dob);
@@ -335,6 +333,7 @@ const getFormattedWhatsappKundliInput = async ({
       user_dob: rawDob,
       user_tob: rawTob,
       user_pob: rawPob,
+      context,
     });
   } catch (_) {
     aiFormatted = null;
@@ -663,6 +662,7 @@ const createKundli = async (req, res) => {
         yogas,
         horoscope: finalHoroscope,
       },
+      context: { req, userId: userRequest.userId, feature: "free_report_ai" },
     })
       .then((aiFreeReport) => {
         if (aiFreeReport) {
@@ -810,6 +810,7 @@ const createKundliFromWhatsapp = async (req, res) => {
         user_dob: rawDob,
         user_tob: rawTob,
         user_pob: rawPlaceOfBirth,
+        context: { req, feature: "whatsapp_kundli_format" },
       });
     } catch (formatError) {
       return res.status(mapErrorStatus(formatError, 400)).json({
@@ -975,6 +976,7 @@ const formatWhatsappKundliInputFast = async (req, res) => {
       user_dob: rawDob,
       user_tob: rawTob,
       user_pob: rawPob,
+      context: { req, feature: "whatsapp_kundli_format" },
     });
 
     const { city, state, placeOfBirth } = derivePlaceCityAndState({

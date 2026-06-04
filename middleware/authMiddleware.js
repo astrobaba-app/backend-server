@@ -6,7 +6,6 @@ function checkForAuthenticationCookie() {
   return (req, res, next) => {
     try {
       let token;
-
       if (req.headers.cookie) {
         const parsedCookies = parse(req.headers.cookie);
         token = parsedCookies.token;
@@ -18,18 +17,32 @@ function checkForAuthenticationCookie() {
         }
       }
       if (!token) {
+        console.warn("[Auth] Missing token", {
+          method: req.method,
+          path: req.originalUrl,
+          ip: req.ip,
+        });
         return res.status(401).json({ error: "No token found. Please login." });
       }
 
       const userPayload = validateToken(token);
       if (!userPayload) {
+        console.warn("[Auth] Invalid/expired token", {
+          method: req.method,
+          path: req.originalUrl,
+          ip: req.ip,
+        });
         return res.status(401).json({ error: "Invalid or expired token." });
       }
 
       req.user = userPayload;
       next();
     } catch (error) {
-      console.error("Auth error:", error.message);
+      console.error("[Auth] middleware error:", {
+        method: req.method,
+        path: req.originalUrl,
+        message: error.message,
+      });
       return res.status(500).json({ error: "Authentication failed." });
     }
   };

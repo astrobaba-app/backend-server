@@ -1,8 +1,8 @@
 const crypto = require("crypto");
-const OpenAI = require("openai");
 const { Op } = require("sequelize");
 const ForumPost = require("../model/forum/forumPost");
 const notificationService = require("./notificationService");
+const { createEmbeddings } = require("./openaiClient");
 
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
 const DUPLICATE_INTERVAL_MS = Number.parseInt(process.env.FORUM_DUPLICATE_INTERVAL_MS || "55000", 10);
@@ -17,21 +17,8 @@ const LEXICAL_TITLE_THRESHOLD = Number.parseFloat(process.env.FORUM_DUPLICATE_LE
 const LEXICAL_TOKEN_THRESHOLD = Number.parseFloat(process.env.FORUM_DUPLICATE_LEXICAL_TOKEN_THRESHOLD || "0.5");
 const LEXICAL_CONTENT_THRESHOLD = Number.parseFloat(process.env.FORUM_DUPLICATE_LEXICAL_CONTENT_THRESHOLD || "0.68");
 
-let openaiClient = null;
 let duplicateTimer = null;
 let running = false;
-
-const getOpenAIClient = () => {
-  if (!process.env.OPENAI_API_KEY) {
-    return null;
-  }
-
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-
-  return openaiClient;
-};
 
 const normalizeText = (value) =>
   String(value || "")
@@ -146,16 +133,15 @@ const parseEmbedding = (value) => {
 };
 
 const getTextEmbedding = async (text) => {
-  const openai = getOpenAIClient();
-  if (!openai) {
+  if (!process.env.OPENAI_API_KEY) {
     return null;
   }
 
   try {
-    const response = await openai.embeddings.create({
+    const response = await createEmbeddings({
       model: EMBEDDING_MODEL,
       input: text,
-    });
+    }, { feature: "forum_duplicate" });
 
     return response.data?.[0]?.embedding || null;
   } catch (error) {
@@ -165,16 +151,15 @@ const getTextEmbedding = async (text) => {
 };
 
 const getTextEmbeddingsBatch = async (texts = []) => {
-  const openai = getOpenAIClient();
-  if (!openai || !Array.isArray(texts) || texts.length === 0) {
+  if (!process.env.OPENAI_API_KEY || !Array.isArray(texts) || texts.length === 0) {
     return [];
   }
 
   try {
-    const response = await openai.embeddings.create({
+    const response = await createEmbeddings({
       model: EMBEDDING_MODEL,
       input: texts,
-    });
+    }, { feature: "forum_duplicate" });
 
     return (response.data || []).map((item) => item.embedding || null);
   } catch (error) {
@@ -608,6 +593,11 @@ const runForumDuplicateCycle = async () => {
 };
 
 const startForumDuplicateWorker = () => {
+  if (String(process.env.FORUM_DUPLICATE_WORKER_ENABLED || "false").toLowerCase() !== "true") {
+    console.log("[ForumDuplicate] Worker disabled by FORUM_DUPLICATE_WORKER_ENABLED=false");
+    return;
+  }
+
   if (duplicateTimer) {
     return;
   }

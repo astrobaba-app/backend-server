@@ -9,6 +9,7 @@ const BroadcastLog = require("../model/admin/broadcastLog");
 // AI Chat models
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
 const AiChatSession = require("../model/aiChat/aiChatSession");
+const OpenAIRequestLog = require("../model/ai/openAiRequestLog");
 
 // Assistant models
 const AssistantChat = require("../model/assistant/assistantChat");
@@ -90,6 +91,11 @@ const AppleAuth = require("../model/user/appleAuth");
 // Wallet models
 const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
+const PalmUpload = require("../model/palm/palmUpload");
+const PalmFeature = require("../model/palm/palmFeature");
+const PalmReport = require("../model/palm/palmReport");
+const AIJob = require("../model/palm/aiJob");
+const PalmOrder = require("../model/palm/palmOrder");
 
 
 
@@ -549,6 +555,83 @@ async function ensureUserPreferenceColumns() {
   }
 }
 
+async function ensureNotificationPushColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("notifications");
+    const operations = [];
+
+    if (!table.pushDeliveredAt && !table.push_delivered_at) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushDeliveredAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pushAttemptCount && !table.push_attempt_count) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushAttemptCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (!table.pushLastAttemptAt && !table.push_last_attempt_at) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushLastAttemptAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.pushLastError && !table.push_last_error) {
+      operations.push(
+        queryInterface.addColumn("notifications", "pushLastError", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured notification push delivery columns exist");
+    }
+  } catch (error) {
+    console.log("notifications table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureBroadcastLogDeliveryColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("broadcast_logs");
+    const operations = [];
+
+    if (!table.pushPendingCount && !table.push_pending_count) {
+      operations.push(
+        queryInterface.addColumn("broadcast_logs", "pushPendingCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured broadcast log delivery columns exist");
+    }
+  } catch (error) {
+    console.log("broadcast_logs table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureForumPostModerationColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -864,6 +947,23 @@ async function ensureAstrologerEarningColumns() {
   }
 }
 
+async function ensureAstrologerAuthColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("astrologers");
+
+    if (table.email && table.email.allowNull === false) {
+      await sequelize.query(
+        'ALTER TABLE "astrologers" ALTER COLUMN "email" DROP NOT NULL'
+      );
+      console.log("Ensured astrologers.email is nullable for OTP-only auth");
+    }
+  } catch (error) {
+    console.log("astrologers table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureJobApplicationColumns() {
   const queryInterface = sequelize.getQueryInterface();
 
@@ -968,6 +1068,143 @@ async function ensureKundliReportPdfColumns() {
   }
 }
 
+async function ensurePalmJobColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("ai_jobs");
+    const operations = [];
+
+    if (!table.stage) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "stage", {
+          type: DataTypes.STRING,
+          allowNull: false,
+          defaultValue: "queued",
+        })
+      );
+    }
+
+    if (!table.progress) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "progress", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 5,
+        })
+      );
+    }
+
+    if (!table.stageMessage && !table.stage_message) {
+      operations.push(
+        queryInterface.addColumn("ai_jobs", "stageMessage", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured ai_jobs stage columns exist");
+    }
+  } catch (error) {
+    console.log("ai_jobs table will be created by sequelize.sync()");
+  }
+}
+
+async function ensurePalmUploadColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_uploads");
+    const operations = [];
+
+    if (!table.imageHash && !table.image_hash) {
+      operations.push(
+        queryInterface.addColumn("palm_uploads", "imageHash", {
+          type: DataTypes.STRING(64),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_uploads optimization columns exist");
+    }
+
+    const updatedTable = await queryInterface.describeTable("palm_uploads");
+    const indexes = await queryInterface.showIndex("palm_uploads");
+    const hasImageHashIndex = indexes.some((index) => index.name === "palm_uploads_image_hash");
+    if (!hasImageHashIndex && (updatedTable.imageHash || updatedTable.image_hash)) {
+      const hashColumn = updatedTable.imageHash ? "imageHash" : "image_hash";
+      await queryInterface.addIndex("palm_uploads", [hashColumn], {
+        name: "palm_uploads_image_hash",
+      });
+      console.log("Ensured palm_uploads imageHash index exists");
+    }
+  } catch (error) {
+    console.log("palm_uploads table will be created by sequelize.sync()");
+  }
+}
+
+async function ensurePalmOrderColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_orders");
+    const operations = [];
+
+    if (!table.maxRetries && !table.max_retries) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "maxRetries", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 3,
+        })
+      );
+    }
+    if (!table.retriesUsed && !table.retries_used) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "retriesUsed", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+    if (!table.lastFailureReason && !table.last_failure_reason) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "lastFailureReason", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.retryExhaustedAt && !table.retry_exhausted_at) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "retryExhaustedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.retrySourceOrderId && !table.retry_source_order_id) {
+      operations.push(
+        queryInterface.addColumn("palm_orders", "retrySourceOrderId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_orders retry columns exist");
+    }
+  } catch (error) {
+    console.log("palm_orders table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -986,11 +1223,17 @@ const initDB = (callback) => {
     .then(() => ensureWalletColumns())
     .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
+    .then(() => ensureNotificationPushColumns())
+    .then(() => ensureBroadcastLogDeliveryColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
+    .then(() => ensureAstrologerAuthColumns())
     .then(() => ensureJobApplicationColumns())
     .then(() => ensureKundliReportPdfColumns())
+    .then(() => ensurePalmJobColumns())
+    .then(() => ensurePalmUploadColumns())
+    .then(() => ensurePalmOrderColumns())
     .then(() => {
       console.log("All models synced");
       callback();

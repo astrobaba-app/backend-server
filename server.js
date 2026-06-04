@@ -10,6 +10,7 @@ const { initializeChatSocket } = require("./services/chatSocket");
 const { initializeLiveStreamSocket } = require("./services/liveStreamSocket");
 const { startForumAIModerationWorker } = require("./services/forumAIModerationService");
 const { startForumDuplicateWorker } = require("./services/forumDuplicateService");
+const { assertDeveloperIdentity } = require("./services/developerIdentityService");
 const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
@@ -17,6 +18,8 @@ const {
 const PORT = process.env.PORT || 6001;
 const app = express();
 const server = http.createServer(app);
+
+assertDeveloperIdentity();
 
 let allowedOrigins = [
   process.env.FRONTEND_URL, 
@@ -172,6 +175,9 @@ const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
 const forumRoute = require("./routes/forum/forumRoute");
 const jobRoute = require("./routes/job/jobRoute");
+const palmReadingRoute = require("./routes/palm/palmReadingRoute");
+const internalLogRoute = require("./routes/internal/logRoute");
+const { startPalmQueueWorker } = require("./services/palmQueueService");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -203,6 +209,8 @@ app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
 app.use("/api/forum", forumRoute);
 app.use("/api/jobs", jobRoute);
+app.use("/api/palm-reading", palmReadingRoute);
+app.use("/api/internal", internalLogRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });
@@ -286,10 +294,7 @@ initDB(() => {
     startForumAIModerationWorker();
     startForumDuplicateWorker();
     startJobApplicationEmailQueueWorker();
-    console.log("Horoscope scheduler initialized");
-    console.log("Forum AI moderation worker initialized");
-    console.log("Forum duplicate worker initialized");
-    console.log("Job application email queue worker initialized");
+    startPalmQueueWorker();
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });

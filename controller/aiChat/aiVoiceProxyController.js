@@ -1,5 +1,6 @@
 require("dotenv").config();
 const WebSocket = require('ws');
+const { logOpenAIRequest } = require("../../services/openaiRequestLogService");
 
 const REALTIME_MODEL = process.env.OPENAI_REALTIME_MODEL;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -16,6 +17,7 @@ const handleVoiceWebSocket = (ws, req) => {
   let isOpenAIReady = false;
   let isSessionConfigured = false;
   const messageQueue = [];
+  const openaiConnectStartedAt = Date.now();
 
   try {
     // Connect to OpenAI Realtime API
@@ -33,6 +35,15 @@ const handleVoiceWebSocket = (ws, req) => {
     // OpenAI connection opened
     openaiWs.on('open', () => {
       console.log('✅ Connected to OpenAI Realtime API');
+
+      logOpenAIRequest({
+        context: { req, userId: req.user?.id, feature: "ai_voice_realtime" },
+        openaiEndpoint: "/v1/realtime",
+        requestType: "realtime.connect",
+        model: REALTIME_MODEL,
+        status: "success",
+        durationMs: Date.now() - openaiConnectStartedAt,
+      });
       
       // Send initial configuration
       const sessionConfig = {
@@ -182,6 +193,16 @@ const handleVoiceWebSocket = (ws, req) => {
     openaiWs.on('error', (error) => {
       console.error('❌ OpenAI WebSocket error:', error.message);
       console.error('Error code:', error.code);
+
+      logOpenAIRequest({
+        context: { req, userId: req.user?.id, feature: "ai_voice_realtime" },
+        openaiEndpoint: "/v1/realtime",
+        requestType: "realtime.connect",
+        model: REALTIME_MODEL,
+        status: "error",
+        durationMs: Date.now() - openaiConnectStartedAt,
+        error,
+      });
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ 
           type: 'error', 

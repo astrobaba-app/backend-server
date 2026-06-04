@@ -1,18 +1,8 @@
-const OpenAI = require("openai");
 const { buildInsightPayload } = require("./astroInsightEngineService");
+const { createChatCompletion } = require("./openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
-let openaiClient = null;
-
-function getOpenAIClient() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-  }
-  return openaiClient;
-}
 
 function normalizeDateOnly(value = new Date()) {
   const date = new Date(value);
@@ -194,6 +184,7 @@ async function generateFreeReportNarratives({
   planetary,
   ashtakvarga,
   yogas,
+  context = {},
 }) {
   try {
     const insightPayload = buildInsightPayloadForReport({
@@ -214,7 +205,7 @@ async function generateFreeReportNarratives({
       return fallbackNarrativeFromInsight(insightPayload);
     }
 
-    const openai = getOpenAIClient();
+    const loggingContext = { feature: "free_report_ai", ...context };
     const systemPrompt = `You are Graho's Vedic astrology report writer.
 - Use ONLY the structured payload provided.
 - Do not invent placements.
@@ -273,7 +264,7 @@ Return JSON with EXACT keys:
 Payload:
 ${JSON.stringify(insightPayload)}`;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await createChatCompletion({
       model: CHAT_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
@@ -282,7 +273,7 @@ ${JSON.stringify(insightPayload)}`;
       temperature: 0.45,
       max_tokens: 2500,
       response_format: { type: "json_object" },
-    });
+    }, loggingContext);
 
     const content = completion.choices[0]?.message?.content;
     if (!content) {

@@ -131,9 +131,24 @@ class PushNotificationService {
         )
       );
 
-      const successCount = results.filter(
-        (r) => r.status === "fulfilled" && r.value.success
-      ).length;
+      const deliveredUserIds = [];
+      const failedUserIds = [];
+
+      results.forEach((result, index) => {
+        const userId = userIds[index];
+        const delivered =
+          result.status === "fulfilled" &&
+          result.value.success &&
+          (result.value.successCount ?? 0) > 0;
+
+        if (delivered) {
+          deliveredUserIds.push(userId);
+        } else {
+          failedUserIds.push(userId);
+        }
+      });
+
+      const successCount = deliveredUserIds.length;
 
       console.log(`[FCM] Sent to ${successCount}/${userIds.length} users`);
 
@@ -141,7 +156,10 @@ class PushNotificationService {
         success: true,
         totalUsers: userIds.length,
         successCount,
-        failureCount: userIds.length - successCount,
+        failureCount: failedUserIds.length,
+        attemptedUserIds: userIds,
+        deliveredUserIds,
+        failedUserIds,
       };
     } catch (error) {
       console.error("[FCM] Error sending to multiple users:", error);
@@ -171,12 +189,17 @@ class PushNotificationService {
 
       console.log(`[FCM] Broadcasting to ${userIds.length} users`);
 
-      return await this.sendToMultipleUsers(userIds, {
+      const result = await this.sendToMultipleUsers(userIds, {
         title,
         body,
         data,
         imageUrl,
       });
+
+      return {
+        ...result,
+        activeUserIds: userIds,
+      };
     } catch (error) {
       console.error("[FCM] Error broadcasting to all:", error);
       throw error;

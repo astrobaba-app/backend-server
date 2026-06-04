@@ -81,6 +81,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
     const freeReport = await generateFreeReportNarratives({
       userRequest,
       kundli: kundliData,
+      context: { userId: userRequest.userId, feature: "kundli_report_ai" },
     });
 
     const careerBucket = getBucket(payload, "career");

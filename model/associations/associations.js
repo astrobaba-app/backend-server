@@ -48,6 +48,11 @@ const ForumPostReport = require("../forum/forumPostReport");
 const ForumPostAppeal = require("../forum/forumPostAppeal");
 const Job = require("../job/job");
 const JobApplication = require("../job/jobApplication");
+const PalmUpload = require("../palm/palmUpload");
+const PalmFeature = require("../palm/palmFeature");
+const PalmReport = require("../palm/palmReport");
+const AIJob = require("../palm/aiJob");
+const PalmOrder = require("../palm/palmOrder");
 
 
   // User has many UserRequests
@@ -846,4 +851,19 @@ const JobApplication = require("../job/jobApplication");
     foreignKey: "sessionId",
     as: "session",
   });
+
+  User.hasMany(PalmUpload, { foreignKey: "userId", as: "palmUploads", onDelete: "CASCADE" });
+  PalmUpload.belongsTo(User, { foreignKey: "userId", as: "user" });
+  PalmUpload.hasOne(PalmFeature, { foreignKey: "palmUploadId", as: "features", onDelete: "CASCADE" });
+  PalmFeature.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  PalmUpload.hasOne(PalmReport, { foreignKey: "palmUploadId", as: "report", onDelete: "CASCADE" });
+  PalmReport.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  User.hasMany(AIJob, { foreignKey: "userId", as: "aiJobs", onDelete: "CASCADE" });
+  AIJob.belongsTo(User, { foreignKey: "userId", as: "user" });
+  PalmUpload.hasOne(AIJob, { foreignKey: "palmUploadId", as: "aiJob", onDelete: "CASCADE" });
+  AIJob.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  User.hasMany(PalmOrder, { foreignKey: "userId", as: "palmOrders", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(User, { foreignKey: "userId", as: "user" });
+  PalmUpload.hasOne(PalmOrder, { foreignKey: "palmUploadId", as: "order", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
 

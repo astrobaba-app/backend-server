@@ -2,6 +2,7 @@ const Admin = require("../../model/admin/admin");
 const Astrologer = require("../../model/astrologer/astrologer");
 const User = require("../../model/user/userAuth");
 const BroadcastLog = require("../../model/admin/broadcastLog");
+const OpenAIRequestLog = require("../../model/ai/openAiRequestLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { literal, Op } = require("sequelize");
@@ -947,27 +948,38 @@ const broadcastNotification = async (req, res) => {
       });
     }
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title,
-      message,
-      data: data || {},
-      actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
-
-    // Persist broadcast log so admin can review history
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
-    await BroadcastLog.create({
+    const broadcastLog = await BroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",
       title,
       message,
       actionUrl: actionUrl || null,
+      totalUsers: 0,
+      pushSuccessCount: 0,
+      pushFailureCount: 0,
+      pushPendingCount: 0,
+    });
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title,
+      message,
+      data: {
+        ...(data || {}),
+        broadcastLogId: broadcastLog.id,
+      },
+      actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    // Persist broadcast counts so admin can review history
+    await broadcastLog.update({
       totalUsers: result.totalSent || 0,
       pushSuccessCount: result.pushSuccessCount || 0,
       pushFailureCount: result.pushFailureCount || 0,
+      pushPendingCount: result.pushPendingCount || 0,
     });
 
     res.status(200).json({
@@ -977,6 +989,7 @@ const broadcastNotification = async (req, res) => {
         totalUsers: result.totalSent || 0,
         pushSuccessCount: result.pushSuccessCount || 0,
         pushFailureCount: result.pushFailureCount || 0,
+        pushPendingCount: result.pushPendingCount || 0,
       },
     });
   } catch (error) {
@@ -1036,17 +1049,6 @@ const resendBroadcast = async (req, res) => {
       return res.status(404).json({ success: false, message: "Broadcast log not found" });
     }
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title: log.title,
-      message: log.message,
-      data: {},
-      actionUrl: log.actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
-
-    // Save a new log entry for the resend
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
     const newLog = await BroadcastLog.create({
       adminId: req.user.id,
@@ -1054,9 +1056,31 @@ const resendBroadcast = async (req, res) => {
       title: log.title,
       message: log.message,
       actionUrl: log.actionUrl,
+      totalUsers: 0,
+      pushSuccessCount: 0,
+      pushFailureCount: 0,
+      pushPendingCount: 0,
+    });
+
+    const result = await notificationService.broadcastToAll({
+      type: "admin_broadcast",
+      title: log.title,
+      message: log.message,
+      data: {
+        broadcastLogId: newLog.id,
+        sourceBroadcastLogId: log.id,
+      },
+      actionUrl: log.actionUrl,
+      priority: "high",
+      sendPush: true,
+    });
+
+    // Save counts for the resend
+    await newLog.update({
       totalUsers: result.totalSent || 0,
       pushSuccessCount: result.pushSuccessCount || 0,
       pushFailureCount: result.pushFailureCount || 0,
+      pushPendingCount: result.pushPendingCount || 0,
     });
 
     res.status(200).json({
@@ -1067,6 +1091,7 @@ const resendBroadcast = async (req, res) => {
         totalUsers: result.totalSent || 0,
         pushSuccessCount: result.pushSuccessCount || 0,
         pushFailureCount: result.pushFailureCount || 0,
+        pushPendingCount: result.pushPendingCount || 0,
       },
     });
   } catch (error) {
@@ -1391,6 +1416,93 @@ const disableTwoFactor = async (req, res) => {
   }
 };
 
+const getOpenAIRequestLogs = async (req, res) => {
+  try {
+    const dialect = OpenAIRequestLog?.sequelize?.getDialect?.();
+    const likeOperator = dialect === "postgres" ? Op.iLike : Op.like;
+
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+    const offset = (page - 1) * limit;
+
+    const {
+      developerName,
+      model,
+      status,
+      feature,
+      gitBranch,
+      from,
+      to,
+    } = req.query;
+
+    const where = {};
+
+    if (developerName) {
+      where.developerName = { [likeOperator]: `%${developerName}%` };
+    }
+
+    if (model) {
+      where.model = { [likeOperator]: `%${model}%` };
+    }
+
+    if (feature) {
+      where.feature = { [likeOperator]: `%${feature}%` };
+    }
+
+    if (gitBranch) {
+      where.gitBranch = { [likeOperator]: `%${gitBranch}%` };
+    }
+
+    if (status) {
+      where.status = String(status).toLowerCase() === "error" ? "error" : "success";
+    }
+
+    if (from || to) {
+      const createdAt = {};
+      if (from) {
+        const fromDate = new Date(from);
+        if (!Number.isNaN(fromDate.getTime())) {
+          createdAt[Op.gte] = fromDate;
+        }
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (!Number.isNaN(toDate.getTime())) {
+          createdAt[Op.lte] = toDate;
+        }
+      }
+      if (Object.keys(createdAt).length > 0) {
+        where.createdAt = createdAt;
+      }
+    }
+
+    const { rows: logs, count } = await OpenAIRequestLog.findAndCountAll({
+      where,
+      order: [["createdAt", "DESC"]],
+      limit,
+      offset,
+    });
+
+    return res.status(200).json({
+      success: true,
+      logs,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    });
+  } catch (error) {
+    console.error("Get OpenAI request logs error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch OpenAI request logs",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   register,
   login,
@@ -1416,4 +1528,5 @@ module.exports = {
   enableTwoFactor,
   verifyTwoFactor,
   disableTwoFactor,
+  getOpenAIRequestLogs,
 };
