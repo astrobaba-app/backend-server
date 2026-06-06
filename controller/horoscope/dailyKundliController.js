@@ -1,6 +1,6 @@
 const Kundli = require("../../model/horoscope/kundli");
 const UserRequest = require("../../model/user/userRequest");
-const { getTransitChart } = require("../../services/astroEngineService");
+const { generateInsightForKundli } = require("../../services/astroInsightEngineService");
 const { createChatCompletion } = require("../../services/openaiClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
@@ -38,7 +38,7 @@ const pruneOldCacheEntries = () => {
 
 setInterval(pruneOldCacheEntries, 30 * 60 * 1000);
 
-// ── checkKundliStatus 
+// ── checkKundliStatus ────────────────────────────────────────────────
 
 const checkKundliStatus = async (req, res) => {
   try {
@@ -88,7 +88,8 @@ const checkKundliStatus = async (req, res) => {
   }
 };
 
-// ─ generateDailyKundliReport 
+// ── generateDailyKundliReport ────────────────────────────────────────
+
 const generateDailyKundliReport = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -103,7 +104,7 @@ const generateDailyKundliReport = async (req, res) => {
 
     const today = todayDateString();
 
-    // check cache 
+    // check cache
     const cacheKey = getCacheKey(userId, userRequestId, today);
     const cached = reportCache.get(cacheKey);
     if (cached) {
@@ -114,7 +115,7 @@ const generateDailyKundliReport = async (req, res) => {
       });
     }
 
-    //  fetch kundli    
+    // fetch kundli
     const userRequest = await getUserRequestWithKundli(userId, userRequestId);
     if (!userRequest) {
       return res.status(404).json({
@@ -123,112 +124,59 @@ const generateDailyKundliReport = async (req, res) => {
       });
     }
 
-    const kundli = userRequest.kundli;
+    const insightPayload = await generateInsightForKundli({
+      userRequest,
+      kundli: userRequest.kundli,
+      date: today,
+      freshTransit: false,
+      includeNarrative: false,
+    });
 
-    //  extract lagna chart 
-    const lagnaChart =
-      kundli.charts?.D1 ||
-      kundli.charts?.d1 ||
-      kundli.charts?.lagna ||
-      kundli.charts ||
-      null;
+    console.log("[DailyKundli] Insight Engine ready — confidence:",
+      insightPayload.confidenceScore, "theme:", insightPayload.mainTheme);
 
-    // get fresh transit
-    let transit = null;
-    try {
-      transit = await getTransitChart(userRequest, new Date());
-      console.log("transit", JSON.stringify(transit, null, 2));
-    } catch (transitError) {
-      console.warn(
-        "[DailyKundli] Fresh transit fetch failed, falling back to stored:",
-        transitError.message
-      );
-    }
-
-    if (!transit) {
-      transit = kundli.horoscope?.transit || null;
-    }
-
-    //  build context for AI 
-    const birthDetails = {
-      fullName: userRequest.fullName,
-      dateOfBirth: userRequest.dateOfbirth,
-      timeOfBirth: userRequest.timeOfbirth,
-      placeOfBirth: userRequest.placeOfBirth,
+    const llm = insightPayload.llmPayload;
+    const gptData = {
+      date: today,
+      ascendant: llm.natal_summary?.ascendant,
+      moon_sign: llm.natal_summary?.moon_sign,
+      dasha: `${llm.current_dasha?.mahadasha}-${llm.current_dasha?.antardasha}`,
+      top_areas: llm.top_buckets.map((b) => `${b.label}:${b.status}(${b.score})`),
+      transits: {
+        moon: llm.transit_summary?.moon_house_from_lagna,
+        saturn: llm.transit_summary?.saturn_house_from_lagna,
+        jupiter: llm.transit_summary?.jupiter_house_from_lagna,
+        rahu: llm.transit_summary?.rahu_house_from_lagna,
+      },
+      remedies: llm.remedies?.slice(0, 4),
     };
 
-    const ascendant =
-      kundli.basicDetails?.ascendant ||
-      kundli.astroDetails?.ascendant ||
-      kundli.horoscope?.birth_chart?.ascendant ||
-      null;
+    console.log("[DailyKundli] GPT payload:", JSON.stringify(gptData));
 
-    const moonSign =
-      kundli.basicDetails?.moon_sign ||
-      kundli.horoscope?.moon_sign ||
-      null;
-
-    const sunSign =
-      kundli.basicDetails?.sun_sign ||
-      kundli.horoscope?.sun_sign ||
-      null;
-
-    const dashaInfo = kundli.dasha || null;
-    const planetaryPositions = kundli.planetary || null;
-
-    // call OpenAI 
-    const systemPrompt = `You are Graho's expert Vedic astrologer AI. You produce personalised daily kundli predictions.
-
-RULES:
-- Use ONLY the astrological data provided (lagna chart, transits, dasha, planetary positions).
-- Do NOT invent planetary placements.
-- Avoid deterministic claims — use supportive, practical language.
-- No medical diagnosis, financial buy/sell advice, or fear-based dosha claims.
-- Keep each prediction section to 2-3 sentences maximum.
-- Return valid JSON only, no markdown.`;
+    const systemPrompt = `You are a Vedic astrologer. Given pre-analysed insights (natal summary, dasha, transit houses, life-area scores), write a daily prediction. Rules: use only the data given, no invented placements, supportive language, no medical/financial advice. Return valid JSON only.`;
 
     const userPrompt = JSON.stringify({
-      task: "Generate a daily kundli prediction report for today",
-      today: today,
-      birth_details: birthDetails,
-      ascendant: ascendant,
-      moon_sign: moonSign,
-      sun_sign: sunSign,
-      lagna_chart: lagnaChart,
-      transit: transit,
-      dasha: dashaInfo,
-      planetary_positions: planetaryPositions,
-      required_output_format: {
+      task: "daily_prediction",
+      ...gptData,
+      format: {
         date: today,
-        dayOfWeek: new Date().toLocaleDateString("en-US", { weekday: "long" }),
-        overallEnergy: "High | Medium | Low",
-        luckyNumber: "a single number between 1-9",
-        luckyColor: "a color name",
-        luckyDirection: "North | South | East | West | Northeast | Northwest | Southeast | Southwest",
-        auspiciousTime: "time range e.g. 06:30 AM - 08:45 AM",
-        moonPhase: "current moon phase name",
-        planetaryHighlights: [
-          {
-            planet: "planet name",
-            sign: "sign name",
-            influence: "1-2 sentence influence description",
-          },
-        ],
-        predictions: {
-          health: "2-3 sentences",
-          finance: "2-3 sentences",
-          relationships: "2-3 sentences",
-          career: "2-3 sentences",
-        },
-        remedies: ["remedy 1", "remedy 2", "remedy 3", "remedy 4"],
+        dayOfWeek: "",
+        overallEnergy: "High|Medium|Low",
+        luckyNumber: 0,
+        luckyColor: "",
+        luckyDirection: "",
+        auspiciousTime: "",
+        planetaryHighlights: [{ planet: "", sign: "", influence: "" }],
+        predictions: { health: "", finance: "", relationships: "", career: "" },
+        remedies: ["", "", "", ""],
       },
     });
 
     const completion = await createChatCompletion(
       {
         model: CHAT_MODEL,
-        temperature: 0.6,
-        max_tokens: 900,
+        temperature: 0.5,
+        max_tokens: 700,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -254,7 +202,7 @@ RULES:
       report.dayOfWeek ||
       new Date().toLocaleDateString("en-US", { weekday: "long" });
 
-    // cache & respon
+    // cache & respond
     reportCache.set(cacheKey, report);
 
     return res.status(200).json({
