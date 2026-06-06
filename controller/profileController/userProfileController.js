@@ -1,6 +1,18 @@
 const User = require("../../model/user/userAuth");
 const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
 
+const isOnboardingProfileComplete = (user) =>
+  Boolean(
+    user.fullName &&
+      user.gender &&
+      user.dateOfbirth &&
+      user.timeOfbirth &&
+      user.placeOfBirth &&
+      user.latitude !== null &&
+      user.latitude !== undefined &&
+      user.longitude !== null &&
+      user.longitude !== undefined
+  );
 
 const getProfile = async (req, res) => {
   try {
@@ -183,6 +195,10 @@ const updateProfile = async (req, res) => {
 
       user.forumIdentityMode = forumIdentityMode;
     }
+
+    if (!user.isOnboarded && isOnboardingProfileComplete(user)) {
+      user.isOnboarded = true;
+    }
     
     await user.save();
 
@@ -208,6 +224,7 @@ const updateProfile = async (req, res) => {
         pushNotifications: user.pushNotifications,
         emailUpdates: user.emailUpdates,
         smsAlerts: user.smsAlerts,
+        isOnboarded: user.isOnboarded,
         forumIdentityMode: user.forumIdentityMode,
         forumAnonymousHandle: user.forumAnonymousHandle,
         forumAnonymousHash: user.forumAnonymousHash,

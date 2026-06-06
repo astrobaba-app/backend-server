@@ -50,6 +50,11 @@ const User = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+    isOnboarded: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     otp: {
       type: DataTypes.STRING,
       allowNull: true,

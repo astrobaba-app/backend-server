@@ -19,9 +19,6 @@ const {
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
-const {
-  handleNewUserOnboarding,
-} = require("../../services/newUserOnboardingService");
 
 
 // Demo credentials – no real SMS is sent for this number
@@ -202,18 +199,9 @@ const verifyOtp = async (req, res) => {
         console.error("Failed to apply signup bonus:", error);
         // Don't fail the registration if bonus fails
       }
-
-      try {
-        await handleNewUserOnboarding({
-          mobile: user.mobile,
-          email: user.email,
-        });
-      } catch (error) {
-        console.error("Failed during new user onboarding notifications:", error);
-      }
     }
 
-    // Check if this is a new user (no fullName means not completed profile)
+    // Keep the existing onboarding response contract unchanged.
     const profileIncomplete = !user.fullName;
 
     return res.status(200).json({
@@ -230,6 +218,7 @@ const verifyOtp = async (req, res) => {
         mobile: user.mobile,
         gender: user.gender,
         dateOfbirth: user.dateOfbirth,
+        isOnboarded: user.isOnboarded,
       },
     });
   } catch (error) {

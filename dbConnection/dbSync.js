@@ -546,10 +546,33 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+
+    if (!table.isOnboarded && !table.is_onboarded) {
+      operations.push(
+        queryInterface.addColumn("users", "isOnboarded", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured user preference columns exist");
     }
+    await sequelize.query(`
+      UPDATE "users"
+      SET "isOnboarded" = true
+      WHERE "isOnboarded" = false
+        AND "fullName" IS NOT NULL
+        AND "gender" IS NOT NULL
+        AND "dateOfbirth" IS NOT NULL
+        AND "timeOfbirth" IS NOT NULL
+        AND "placeOfBirth" IS NOT NULL
+        AND "latitude" IS NOT NULL
+        AND "longitude" IS NOT NULL
+    `);
   } catch (error) {
     console.log("users table will be created by sequelize.sync()");
   }
