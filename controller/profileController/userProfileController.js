@@ -1,5 +1,8 @@
 const User = require("../../model/user/userAuth");
 const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
+const {
+  normalizeIndianMobile,
+} = require("../../services/firebasePhoneAuthService");
 
 const isOnboardingProfileComplete = (user) =>
   Boolean(
@@ -47,6 +50,7 @@ const updateProfile = async (req, res) => {
     const {
       fullName,
       email,
+      mobile,
       gender,
       dateOfbirth,
       timeOfbirth,
@@ -95,6 +99,33 @@ const updateProfile = async (req, res) => {
     // Update fields if provided
     if (fullName !== undefined) user.fullName = fullName;
     if (email !== undefined) user.email = email;
+    if (mobile !== undefined) {
+      if (mobile === null || mobile === "") {
+        user.mobile = null;
+      } else {
+        const normalizedMobile = normalizeIndianMobile(mobile);
+
+        if (!normalizedMobile) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid mobile number format",
+          });
+        }
+
+        const existingMobileUser = await User.findOne({
+          where: { mobile: normalizedMobile },
+        });
+
+        if (existingMobileUser && existingMobileUser.id !== user.id) {
+          return res.status(409).json({
+            success: false,
+            message: "Mobile number is already linked to another account",
+          });
+        }
+
+        user.mobile = normalizedMobile;
+      }
+    }
     if (gender !== undefined) user.gender = gender;
     
     // Validate and update dateOfbirth
