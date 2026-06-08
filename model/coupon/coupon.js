@@ -81,6 +81,11 @@ const Coupon = sequelize.define(
       defaultValue: "all",
       comment: "Who can use this coupon",
     },
+    assignmentRequired: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      comment: "If true, only users assigned by admin can use this coupon",
+    },
     createdBy: {
       type: DataTypes.UUID,
       allowNull: true,

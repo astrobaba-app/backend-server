@@ -2,6 +2,7 @@ const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
+const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const { Op } = require("sequelize");
@@ -122,6 +123,19 @@ const createRechargeOrder = async (req, res) => {
           success: false,
           message: "Invalid or expired coupon code",
         });
+      }
+
+      if (coupon.assignmentRequired) {
+        const assignment = await CouponUserAssignment.findOne({
+          where: { couponId: coupon.id, userId },
+        });
+
+        if (!assignment) {
+          return res.status(403).json({
+            success: false,
+            message: "This coupon is not assigned to your account",
+          });
+        }
       }
 
       // Check minimum recharge amount

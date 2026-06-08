@@ -27,6 +27,7 @@ const Notification = require("../notification/notification");
 const AstrologerWebPushSubscription = require("../notification/astrologerWebPushSubscription");
 const Coupon = require("../coupon/coupon");
 const CouponUsage = require("../coupon/couponUsage");
+const CouponUserAssignment = require("../coupon/couponUserAssignment");
 const Follow = require("../follow/follow");
 const AssistantPlan = require("../assistant/assistantPlan");
 const AssistantChat = require("../assistant/assistantChat");
@@ -478,6 +479,39 @@ const PalmOrder = require("../palm/palmOrder");
     foreignKey: "userId",
     as: "couponUsages",
     onDelete: "CASCADE",
+  });
+
+  Coupon.hasMany(CouponUserAssignment, {
+    foreignKey: "couponId",
+    as: "assignments",
+    onDelete: "CASCADE",
+  });
+
+  CouponUserAssignment.belongsTo(Coupon, {
+    foreignKey: "couponId",
+    as: "coupon",
+  });
+
+  User.hasMany(CouponUserAssignment, {
+    foreignKey: "userId",
+    as: "couponAssignments",
+    onDelete: "CASCADE",
+  });
+
+  CouponUserAssignment.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Admin.hasMany(CouponUserAssignment, {
+    foreignKey: "assignedBy",
+    as: "couponAssignments",
+    onDelete: "SET NULL",
+  });
+
+  CouponUserAssignment.belongsTo(Admin, {
+    foreignKey: "assignedBy",
+    as: "admin",
   });
 
   // Forum associations

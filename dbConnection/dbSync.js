@@ -41,6 +41,7 @@ const ChatSession = require("../model/chat/chatSession");
 // Coupon models
 const Coupon = require("../model/coupon/coupon");
 const CouponUsage = require("../model/coupon/couponUsage");
+const CouponUserAssignment = require("../model/coupon/couponUserAssignment");
 
 // Follow models
 const Follow = require("../model/follow/follow");
@@ -181,6 +182,25 @@ async function ensureChatSessionColumns() {
   if (operations.length) {
     await Promise.all(operations);
     console.log("Ensured chat_sessions metadata columns exist");
+  }
+}
+
+async function ensureCouponAssignmentColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("coupons");
+    if (!table.assignmentRequired && !table.assignment_required) {
+      await queryInterface.addColumn("coupons", "assignmentRequired", {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: "If true, only users assigned by admin can use this coupon",
+      });
+      console.log("Ensured coupons assignmentRequired column exists");
+    }
+  } catch (error) {
+    console.log("coupons table will be created by sequelize.sync()");
   }
 }
 
@@ -1244,6 +1264,7 @@ const initDB = (callback) => {
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureWalletColumns())
+    .then(() => ensureCouponAssignmentColumns())
     .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureNotificationPushColumns())
