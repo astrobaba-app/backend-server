@@ -177,6 +177,7 @@ const forumRoute = require("./routes/forum/forumRoute");
 const jobRoute = require("./routes/job/jobRoute");
 const palmReadingRoute = require("./routes/palm/palmReadingRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
+const tempOtpRoute = require("./routes/internal/tempOtpRoute");
 const { startPalmQueueWorker } = require("./services/palmQueueService");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
@@ -211,6 +212,7 @@ app.use("/api/forum", forumRoute);
 app.use("/api/jobs", jobRoute);
 app.use("/api/palm-reading", palmReadingRoute);
 app.use("/api/internal", internalLogRoute);
+app.use("/api/internal/temp-otp", tempOtpRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });

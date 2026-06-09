@@ -5,9 +5,23 @@ const DeviceToken = require("../model/user/deviceToken");
 const pushNotificationService = require("./pushNotificationService");
 const { Op, literal } = require("sequelize");
 
-const PENDING_PUSH_LIMIT = 20;
 const MAX_PUSH_ATTEMPTS = 3;
-const PENDING_PUSH_MAX_AGE_DAYS = 7;
+const DEFAULT_PENDING_PUSH_LIMIT = 3;
+const DEFAULT_PENDING_PUSH_MAX_AGE_HOURS = 3;
+
+const getPositiveIntegerEnv = (name, fallback) => {
+  const value = Number.parseInt(process.env[name], 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+};
+
+const PENDING_PUSH_LIMIT = getPositiveIntegerEnv(
+  "PENDING_PUSH_LIMIT",
+  DEFAULT_PENDING_PUSH_LIMIT
+);
+const PENDING_PUSH_MAX_AGE_HOURS = getPositiveIntegerEnv(
+  "PENDING_PUSH_MAX_AGE_HOURS",
+  DEFAULT_PENDING_PUSH_MAX_AGE_HOURS
+);
 
 class NotificationService {
   /**
@@ -196,8 +210,16 @@ class NotificationService {
 
   async sendPendingPushToUser(userId, limit = PENDING_PUSH_LIMIT) {
     try {
-      const maxAge = new Date();
-      maxAge.setDate(maxAge.getDate() - PENDING_PUSH_MAX_AGE_DAYS);
+      const requestedLimit = Number.parseInt(limit, 10);
+      const effectiveLimit = Math.min(
+        Number.isInteger(requestedLimit) && requestedLimit > 0
+          ? requestedLimit
+          : PENDING_PUSH_LIMIT,
+        PENDING_PUSH_LIMIT
+      );
+      const maxAge = new Date(
+        Date.now() - PENDING_PUSH_MAX_AGE_HOURS * 60 * 60 * 1000
+      );
 
       const pendingNotifications = await Notification.findAll({
         where: {
@@ -218,7 +240,7 @@ class NotificationService {
           [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date() } }],
         },
         order: [["createdAt", "DESC"]],
-        limit,
+        limit: effectiveLimit,
       });
 
       if (!pendingNotifications.length) {
