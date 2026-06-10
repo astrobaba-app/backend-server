@@ -149,6 +149,31 @@ function clearUserInactivityAutoEnd(sessionId) {
   }
 }
 
+function emitChatEnded(io, session, payload = {}) {
+  if (!io || !session) return;
+
+  const endedPayload = {
+    sessionId: session.id,
+    ...payload,
+  };
+
+  io
+    .to(getSessionRoom(session.id))
+    .to(getUserRoom(session.userId))
+    .to(getAstrologerRoom(session.astrologerId))
+    .emit("chat:ended", endedPayload);
+}
+
+function emitChatMessage(io, session, payload) {
+  if (!io || !session || !payload) return;
+
+  io
+    .to(getSessionRoom(session.id))
+    .to(getUserRoom(session.userId))
+    .to(getAstrologerRoom(session.astrologerId))
+    .emit("message:new", payload);
+}
+
 async function autoEndSessionForUserInactivity(io, sessionId) {
   clearUserInactivityAutoEnd(sessionId);
 
@@ -160,13 +185,17 @@ async function autoEndSessionForUserInactivity(io, sessionId) {
       return;
     }
 
-    await completeChatSessionWithBilling(session, io);
+    const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
 
-    io.to(getSessionRoom(session.id)).emit("chat:ended", {
-      sessionId: session.id,
+    emitChatEnded(io, session, {
       endedBy: "system",
       reason: "user_inactive_timeout",
+      currentMinutes: billing.currentMinutes,
+      currentCost: billing.currentCost,
+      totalMinutes: billing.totalMinutes,
+      totalCost: billing.totalCost,
+      billedAmount: billing.billedAmount,
     });
 
     io.to(getUserRoom(session.userId)).emit("chat:updated", {
@@ -211,10 +240,14 @@ async function endSessionForInsufficientBalance(io, session) {
   clearUserInactivityAutoEnd(session.id);
 
   if (io) {
-    io.to(getSessionRoom(session.id)).emit("chat:ended", {
-      sessionId: session.id,
+    emitChatEnded(io, session, {
       endedBy: "system",
       reason: "insufficient_balance",
+      currentMinutes: billing.currentMinutes,
+      currentCost: billing.currentCost,
+      totalMinutes: billing.totalMinutes,
+      totalCost: billing.totalCost,
+      billedAmount: billing.billedAmount,
     });
 
     io.to(getUserRoom(session.userId)).emit("chat:updated", {
@@ -331,8 +364,7 @@ async function createAndBroadcastMessage({
   const sessionPayloadForUser = mapSession(session, "user");
   const sessionPayloadForAstrologer = mapSession(session, "astrologer");
 
-  const room = getSessionRoom(session.id);
-  io.to(room).emit("message:new", {
+  emitChatMessage(io, session, {
     sessionId: session.id,
     message: messagePayload,
   });
@@ -583,6 +615,87 @@ function initializeChatSocket(io) {
         }
       }
     );
+
+    socket.on("end_chat", async ({ sessionId, reason }, callback) => {
+      try {
+        if (!sessionId) {
+          if (callback) callback({ success: false, error: "Missing session id" });
+          return;
+        }
+
+        const session = await ChatSession.findByPk(sessionId);
+        if (!session) {
+          if (callback) callback({ success: false, error: "Chat session not found" });
+          return;
+        }
+
+        if (
+          (!isAstrologer && session.userId !== authId) ||
+          (isAstrologer && session.astrologerId !== authId)
+        ) {
+          if (callback) callback({ success: false, error: "Not part of this session" });
+          return;
+        }
+
+        if (session.status !== "active") {
+          if (callback) {
+            callback({
+              success: true,
+              message: "Chat session already ended",
+              session: mapSession(session, isAstrologer ? "astrologer" : "user"),
+            });
+          }
+          return;
+        }
+
+        const endReason = isAstrologer
+          ? reason || "astrologer_left_chat"
+          : reason || "user_ended_chat";
+        const billing = await completeChatSessionWithBilling(session, io);
+        await session.reload();
+        clearUserInactivityAutoEnd(session.id);
+
+        emitChatEnded(io, session, {
+          endedBy: isAstrologer ? "astrologer" : "user",
+          reason: endReason,
+          currentMinutes: billing.currentMinutes,
+          currentCost: billing.currentCost,
+          totalMinutes: billing.totalMinutes,
+          totalCost: billing.totalCost,
+          billedAmount: billing.billedAmount,
+        });
+
+        io.to(getUserRoom(session.userId)).emit("chat:updated", {
+          sessionId: session.id,
+          session: mapSession(session, "user"),
+        });
+
+        io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+          sessionId: session.id,
+          session: mapSession(session, "astrologer"),
+        });
+
+        queueArchiveAndDeleteSession(session.id, {
+          endReason,
+          billedAmount: billing.billedAmount,
+        });
+
+        if (callback) {
+          callback({
+            success: true,
+            message: "Chat session ended",
+            session: {
+              ...session.toJSON(),
+              billedAmount: billing.billedAmount,
+              billedMinutes: billing.currentMinutes,
+            },
+          });
+        }
+      } catch (error) {
+        console.error("end_chat error:", error);
+        if (callback) callback({ success: false, error: "Failed to end chat" });
+      }
+    });
 
     socket.on("mark_read", async ({ sessionId }) => {
       try {

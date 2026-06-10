@@ -552,7 +552,7 @@ const getUserCallHistory = async (req, res) => {
 // Get call history (Astrologer)
 const getAstrologerCallHistory = async (req, res) => {
   try {
-    const astrologerId = req.astrologer.id;
+    const astrologerId = req.user.id;
     const { page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
