@@ -162,9 +162,15 @@ WEB_PUSH_SUBJECT=mailto:hello@graho.in
 # Temporary MSG91 OTP test route
 MSG91_AUTH_KEY=YOUR_MSG91_AUTH_KEY
 MSG91_OTP_TEMPLATE_ID=YOUR_MSG91_OTP_TEMPLATE_ID
+OTP_QUEUE_WORKER_ENABLED=true
 TEMP_MSG91_OTP_ENABLED=false
 TEMP_MSG91_OTP_API_KEY=YOUR_RANDOM_INTERNAL_TEST_KEY
 ```
+
+User and astrologer OTP sends use backend-generated 4-digit OTPs, Redis storage,
+a Redis queue, and MSG91 delivery from an on-demand OTP worker. The worker wakes
+when an OTP is queued, drains pending OTP jobs, then goes idle without polling
+Redis. Each phone number is limited to 5 OTP requests per 1 hour.
 
 ## Temporary MSG91 OTP Route
 

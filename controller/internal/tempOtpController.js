@@ -1,4 +1,4 @@
-const { normalizeIndianMobile } = require("../../services/firebasePhoneAuthService");
+const { normalizeIndianMobile } = require("../../services/phoneNumberService");
 const { sendMsg91Otp } = require("../../services/msg91OtpService");
 
 const isEnabled = () =>

@@ -12,9 +12,12 @@ const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologe
 const Follow = require("../../model/follow/follow");
 const notificationService = require("../../services/notificationService");
 const {
-  verifyFirebasePhoneToken,
   normalizeIndianMobile,
-} = require("../../services/firebasePhoneAuthService");
+} = require("../../services/phoneNumberService");
+const {
+  createAndQueueOtp,
+  verifyQueuedOtp,
+} = require("../../services/otpQueueService");
 
 const REGISTRATION_VERIFIED_TTL_SECONDS = 20 * 60;
 
@@ -45,18 +48,23 @@ const sendRegistrationOTP = async (req, res) => {
       });
     }
 
+    await createAndQueueOtp({
+      actorType: "astrologer",
+      mobile: normalizedPhoneNumber,
+    });
+
     res.status(200).json({
       success: true,
       accountExists: Boolean(astrologer),
       isApproved: astrologer ? astrologer.isApproved : false,
-      message: "Use Firebase phone authentication to receive OTP",
+      message: "OTP sent successfully",
       phoneNumber: normalizedPhoneNumber,
     });
   } catch (error) {
     console.error("Send registration OTP error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to send OTP",
+      message: error.statusCode === 429 ? error.message : "Failed to send OTP",
       error: error.message,
     });
   }
@@ -65,40 +73,29 @@ const sendRegistrationOTP = async (req, res) => {
 // Verify OTP
 const verifyOTP = async (req, res) => {
   try {
-    const { phoneNumber, firebaseIdToken } = req.body;
+    const { phoneNumber } = req.body;
+    const otp = String(req.body.otp || "").trim();
 
-    if (!phoneNumber || !firebaseIdToken) {
+    const normalizedPhoneNumber = normalizeIndianMobile(phoneNumber);
+    if (!normalizedPhoneNumber || !otp) {
       return res.status(400).json({
         success: false,
-        message: "Phone number and firebaseIdToken are required",
+        message: "Phone number and OTP are required",
       });
     }
 
-    const verificationResult = await verifyFirebasePhoneToken(
-      firebaseIdToken,
-      phoneNumber
-    );
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 4-digit OTP",
+      });
+    }
 
-    // Legacy Redis OTP verification retained for rollback/reference.
-    // const { otp } = req.body;
-    // const otpKey = `astrologer:otp:${phoneNumber}`;
-    // const storedData = await redis.get(otpKey);
-    // if (!storedData) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "OTP not found or expired. Please request a new OTP",
-    //   });
-    // }
-    // const otpData = typeof storedData === "string" ? JSON.parse(storedData) : storedData;
-    // if (otpData.otp !== otp) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Invalid OTP",
-    //   });
-    // }
-    // await redis.del(otpKey);
-
-    const normalizedPhoneNumber = verificationResult.mobile;
+    await verifyQueuedOtp({
+      actorType: "astrologer",
+      mobile: normalizedPhoneNumber,
+      otp,
+    });
     const astrologer = await Astrologer.findOne({
       where: { phoneNumber: normalizedPhoneNumber },
     });

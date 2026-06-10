@@ -14,6 +14,7 @@ const { assertDeveloperIdentity } = require("./services/developerIdentityService
 const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
+const { startOtpQueueWorker } = require("./services/otpQueueService");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -296,6 +297,7 @@ initDB(() => {
     startForumAIModerationWorker();
     startForumDuplicateWorker();
     startJobApplicationEmailQueueWorker();
+    startOtpQueueWorker();
     startPalmQueueWorker();
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });

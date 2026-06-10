@@ -2,7 +2,7 @@ const User = require("../../model/user/userAuth");
 const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
 const {
   normalizeIndianMobile,
-} = require("../../services/firebasePhoneAuthService");
+} = require("../../services/phoneNumberService");
 
 const isOnboardingProfileComplete = (user) =>
   Boolean(

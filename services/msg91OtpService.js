@@ -17,6 +17,10 @@ const getRequiredConfig = () => {
   return { authKey, templateId };
 };
 
+const assertMsg91OtpConfigured = () => {
+  getRequiredConfig();
+};
+
 const sendMsg91Otp = async ({ mobile, otp, variables = {} }) => {
   const { authKey, templateId } = getRequiredConfig();
   const params = {
@@ -54,5 +58,6 @@ const sendMsg91Otp = async ({ mobile, otp, variables = {} }) => {
 };
 
 module.exports = {
+  assertMsg91OtpConfigured,
   sendMsg91Otp,
 };
