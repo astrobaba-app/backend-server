@@ -99,17 +99,151 @@ const BUCKETS = {
 };
 
 const PLANET_REMEDIES = {
-  Saturn: "Maintain discipline, serve elders or workers, and keep Saturday commitments humble.",
-  Moon: "Prioritize sleep, hydration, journaling, and a calming Chandra mantra.",
-  Mars: "Use exercise to channel heat and avoid reactive conflict.",
-  Rahu: "Practice digital discipline, grounding, and avoid shortcuts.",
-  Ketu: "Use Ganesha mantra, meditation, decluttering, and clarity practices.",
-  Mercury: "Double-check messages, documents, and commitments.",
-  Jupiter: "Study, seek wise guidance, and practice generosity.",
-  Venus: "Keep relationships respectful and spending mindful.",
-  Sun: "Offer morning gratitude, build healthy confidence, and respect authority without ego clashes.",
-};
+  Saturn: [
+    "Maintain discipline and complete pending responsibilities.",
+    "Serve elders or workers whenever possible.",
+    "Follow a structured daily routine.",
+    "Avoid procrastination in important matters.",
+    "Practice patience when progress feels slow."
+  ],
 
+  Moon: [
+    "Prioritize quality sleep and hydration.",
+    "Spend time near nature or water.",
+    "Maintain a gratitude journal.",
+    "Practice calming breathing exercises.",
+    "Reduce emotional reactivity before making decisions."
+  ],
+
+  Mars: [
+    "Channel excess energy through exercise.",
+    "Avoid unnecessary arguments.",
+    "Focus on action instead of frustration.",
+    "Complete one demanding task with full attention.",
+    "Practice patience before reacting."
+  ],
+
+  Mercury: [
+    "Double-check messages and documents.",
+    "Keep communication clear and concise.",
+    "Review commitments before agreeing.",
+    "Focus on learning something practical.",
+    "Avoid spreading unverified information."
+  ],
+
+  Jupiter: [
+    "Study something meaningful today.",
+    "Seek guidance from a trusted mentor.",
+    "Practice generosity where appropriate.",
+    "Spend time on spiritual learning.",
+    "Focus on long-term wisdom over short-term gain."
+  ],
+
+  Venus: [
+    "Express appreciation to loved ones.",
+    "Create beauty and harmony in your environment.",
+    "Spend quality time with important relationships.",
+    "Avoid unnecessary indulgence.",
+    "Practice gratitude in relationships."
+  ],
+
+  Sun: [
+    "Start the day with gratitude.",
+    "Lead through example rather than ego.",
+    "Honor commitments made to others.",
+    "Focus on confidence without arrogance.",
+    "Spend time in sunlight when possible."
+  ],
+
+  Rahu: [
+    "Reduce digital distractions.",
+    "Avoid shortcuts and risky decisions.",
+    "Verify information carefully.",
+    "Stay grounded in practical priorities.",
+    "Focus on one goal at a time."
+  ],
+
+  Ketu: [
+    "Spend time in meditation or reflection.",
+    "Declutter your environment.",
+    "Simplify unnecessary commitments.",
+    "Practice detachment from outcomes.",
+    "Reconnect with spiritual practices."
+  ]
+};
+const BUCKET_REMEDIES = {
+  career: {
+    Saturn: [
+      "Complete pending work before taking on new responsibilities.",
+      "Focus on consistency rather than speed.",
+      "Strengthen professional discipline."
+    ],
+    Mercury: [
+      "Review important communications carefully.",
+      "Organize unfinished paperwork.",
+      "Improve professional networking."
+    ]
+  },
+
+  finance: {
+    Jupiter: [
+      "Review long-term financial goals.",
+      "Focus on saving rather than speculation.",
+      "Seek expert advice before major decisions."
+    ],
+    Rahu: [
+      "Avoid risky investments.",
+      "Verify financial opportunities carefully.",
+      "Stay disciplined with spending."
+    ]
+  },
+
+  relationships: {
+    Venus: [
+      "Express appreciation openly.",
+      "Spend quality time with loved ones.",
+      "Avoid unrealistic expectations."
+    ],
+    Moon: [
+      "Communicate feelings calmly.",
+      "Listen before reacting emotionally.",
+      "Strengthen emotional understanding."
+    ]
+  },
+
+  health: {
+    Saturn: [
+      "Follow a consistent sleep schedule.",
+      "Maintain healthy daily routines.",
+      "Focus on long-term wellness habits."
+    ],
+    Moon: [
+      "Stay hydrated throughout the day.",
+      "Manage emotional stress proactively.",
+      "Prioritize adequate rest."
+    ]
+  },
+
+  spirituality: {
+    Ketu: [
+      "Spend time in meditation.",
+      "Practice detachment from expectations.",
+      "Simplify unnecessary distractions."
+    ],
+    Jupiter: [
+      "Study spiritual teachings.",
+      "Spend time in prayer or reflection.",
+      "Seek wisdom from experienced guides."
+    ]
+  }
+};
+function randomize(arr) {
+  return [...arr].sort(() => Math.random() - 0.5);
+}
+
+function getRandomItems(arr = [], count = 2) {
+  return randomize(arr).slice(0, count);
+}
 const ORBS = {
   Moon: 3,
   Sun: 3,
@@ -223,7 +357,90 @@ function getCurrentDasha(dasha, date = new Date()) {
     source: "kundli_dasha",
   };
 }
+function generatePersonalizedRemedy({
+  planet,
+  bucket,
+  currentDasha,
+  transit,
+}) {
+  const house = transit.house_from_lagna;
 
+  let reason = `${planet} pressure is active`;
+
+  let remedy = "";
+
+  switch (bucket) {
+    case "career":
+      if (planet === "Saturn") {
+        remedy =
+          "Maintain strict work discipline, avoid delaying responsibilities, and complete pending commitments.";
+      } else if (planet === "Mercury") {
+        remedy =
+          "Review emails, paperwork, and communication carefully before acting.";
+      } else if (planet === "Mars") {
+        remedy =
+          "Channel competitive energy into productive work instead of conflict.";
+      }
+      break;
+
+    case "finance":
+      if (planet === "Jupiter") {
+        remedy =
+          "Focus on long-term planning and avoid overconfidence in money decisions.";
+      } else if (planet === "Rahu") {
+        remedy =
+          "Avoid speculative shortcuts and verify financial information carefully.";
+      } else if (planet === "Saturn") {
+        remedy =
+          "Track expenses and prioritize stability over quick gains.";
+      }
+      break;
+
+    case "relationships":
+      if (planet === "Venus") {
+        remedy =
+          "Express appreciation openly and avoid unrealistic expectations.";
+      } else if (planet === "Moon") {
+        remedy =
+          "Pause before emotional reactions and communicate calmly.";
+      } else if (planet === "Mars") {
+        remedy =
+          "Avoid impulsive arguments and focus on understanding the other perspective.";
+      }
+      break;
+
+    case "health":
+      if (planet === "Saturn") {
+        remedy =
+          "Maintain sleep discipline and consistent daily routines.";
+      } else if (planet === "Moon") {
+        remedy =
+          "Prioritize hydration, emotional balance, and adequate rest.";
+      } else if (planet === "Rahu") {
+        remedy =
+          "Reduce screen overload and create grounding habits.";
+      }
+      break;
+  }
+
+const bucketSpecific =
+  BUCKET_REMEDIES[bucket]?.[planet];
+
+if (bucketSpecific?.length) {
+  remedy = getRandomItems(bucketSpecific, 1)[0];
+} else {
+  remedy = getRandomItems(
+    PLANET_REMEDIES[planet] || [],
+    1
+  )[0];
+}
+  return {
+    planet,
+    reason,
+    remedy,
+    house,
+  };
+}
 function normalizeTransit(transit) {
   const root = transit?.transit || transit;
   const transits = root?.transits || root?.planets || root || {};
@@ -444,9 +661,20 @@ function buildBucketAnalysis({ kundli, currentDasha, personalizedTransits }) {
       caution_factors: cautionFactors.slice(0, 4),
       recommended_actions: config.actions,
       remedies: matchingTransits
-        .filter((item) => PLANET_REMEDIES[item.planet] && item.transit_challenge_score >= 55)
-        .slice(0, 2)
-        .map((item) => ({ planet: item.planet, reason: `${item.planet} pressure is active`, remedy: PLANET_REMEDIES[item.planet] })),
+  .filter(
+    (item) =>
+      PLANET_REMEDIES[item.planet] &&
+      item.transit_challenge_score >= 55
+  )
+  .slice(0, 3)
+  .map((item) =>
+    generatePersonalizedRemedy({
+      planet: item.planet,
+      bucket,
+      currentDasha,
+      transit: item,
+    })
+  ),
     };
   });
 }
@@ -529,12 +757,18 @@ function buildInsightPayload({ userRequest, kundli, transit, date = new Date() }
   const personalizedTransits = buildPersonalizedTransits({ kundli, transit });
   const bucketAnalyses = buildBucketAnalysis({ kundli, currentDasha, personalizedTransits })
     .sort((a, b) => b.score + b.challenge_score * 0.35 - (a.score + a.challenge_score * 0.35));
-  const topBuckets = bucketAnalyses.slice(0, 3);
+  const topBuckets = bucketAnalyses
   const mainBucket = topBuckets[0] || bucketAnalyses[0];
   const confidenceScore = Math.round(topBuckets.reduce((sum, item) => sum + item.confidence_score, 0) / Math.max(topBuckets.length, 1));
   const natalSummary = buildNatalSummary(kundli);
   const transitSummary = buildTransitSummary(personalizedTransits);
-  const remedies = topBuckets.flatMap((bucket) => bucket.remedies).slice(0, 4);
+  const remedies = [
+  ...new Map(
+    topBuckets
+      .flatMap((bucket) => bucket.remedies)
+      .map((r) => [r.remedy, r])
+  ).values(),
+].slice(0, 6);
   const recommendedActions = Array.from(new Set(topBuckets.flatMap((bucket) => bucket.recommended_actions))).slice(0, 5);
   const standoutCards = buildStandoutCards(kundli, bucketAnalyses);
 

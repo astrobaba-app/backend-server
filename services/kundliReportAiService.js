@@ -14,6 +14,13 @@ const quarterPeriods = () => [
   { period: "Oct - Dec", focus: "Consolidation", prediction: "Close the year by simplifying commitments and protecting long-term momentum." },
 ];
 
+const monthPeriods = () => [
+  { period: "Week 1", focus: "Kickoff", prediction: "Start the month with clear priorities and a steady pace to create strong momentum." },
+  { period: "Week 2", focus: "Adjustment", prediction: "Tune your actions based on early feedback and keep communication simple and direct." },
+  { period: "Week 3", focus: "Expansion", prediction: "Use growing confidence to make thoughtful progress in key work and relationships." },
+  { period: "Week 4", focus: "Reflection", prediction: "Review your progress, close open loops, and prepare for the next cycle with calm focus." },
+];
+
 const defaultKeyDates = () => [
   { type: "positive", date: "This Month", title: "Use this period for steady progress and disciplined action." },
   { type: "negative", date: "High-Stress Days", title: "Avoid impulsive decisions and give extra space for clarity." },
@@ -59,11 +66,33 @@ const buildRemedyList = (bucket, fallback = []) => {
   return fallback.length ? fallback : ["Stay consistent with sleep, hydration, calm communication, and one grounding daily practice."];
 };
 
-async function generateKundliReportContent(kundliData, userDetails) {
+function normalizeReportType(reportType) {
+  const normalized = String(reportType || "yearly").toLowerCase();
+  return normalized === "monthly" ? "monthly" : "yearly";
+}
+
+function buildReportOverview(reportType, payload, freeReport) {
+  const basicOverview =
+    freeReport?.legacy?.general?.ascendant_overview ||
+    `This report is personalized from your birth chart timing and your current life trends. Right now, the strongest focus is ${payload.mainTheme?.toLowerCase() || "today's guidance"}. Keep your approach practical, stay emotionally balanced, and choose steady progress over quick shortcuts. Clear communication, regular routine, and realistic planning will help you get better outcomes.`;
+
+  if (reportType === "monthly") {
+    return `${basicOverview} This monthly forecast highlights the themes for the next four weeks and helps you move with awareness through each phase of the month.`;
+  }
+
+  return `${basicOverview} This yearly forecast highlights the major themes and opportunities for the year ahead while helping you stay steady through shifting planetary timing.`;
+}
+
+async function generateKundliReportContent(kundliData, userDetails, reportType = "yearly") {
   try {
+    const normalizedReportType = normalizeReportType(reportType);
+    const reportLabel =
+  normalizedReportType === "monthly"
+    ? "Monthly"
+    : "Yearly";
     const userRequest = {
       id: kundliData?.requestId || "kundli-report",
-      userId: "kundli-report",
+      userId: userDetails?.userId || null,
       fullName: userDetails?.fullName || "User",
       dateOfbirth: userDetails?.dateOfbirth || null,
       timeOfbirth: userDetails?.timeOfbirth || null,
@@ -91,20 +120,30 @@ async function generateKundliReportContent(kundliData, userDetails) {
     const spiritualBucket = getBucket(payload, "spirituality");
     const travelBucket = getBucket(payload, "travel");
     const educationBucket = getBucket(payload, "education");
+const periods =
+  normalizedReportType === "monthly"
+    ? monthPeriods()
+    : quarterPeriods();
 
-    const overview =
-      freeReport?.legacy?.general?.ascendant_overview ||
-      `This report is personalized from your birth chart timing and your current life trends. Right now, the strongest focus is ${payload.mainTheme?.toLowerCase() || "daily guidance"}. Keep your approach practical, stay emotionally balanced, and choose steady progress over quick shortcuts. Clear communication, regular routine, and realistic planning will help you get better outcomes. Use this period to simplify your priorities and strengthen consistency across important areas.`;
+const overview = buildReportOverview(
+  normalizedReportType,
+  payload,
+  freeReport);
+// const reportLabel =
+//   normalizedReportType === "monthly"
+//     ? "Monthly"
+//     : "Yearly";
 
     const reportContent = {
       overview,
+      reportType: normalizedReportType,
       careerFinance: buildSectionText({
         title: "Career and finances",
         bucket: careerBucket || financeBucket,
         fallback:
           "Focus on work quality, realistic timelines, and thoughtful financial planning. Avoid rushing commitments.",
       }),
-      careerPeriods: quarterPeriods(),
+      careerPeriods: periods,
       careerKeyDates: defaultKeyDates(),
       careerRemedies: buildRemedyList(careerBucket, [
         "Keep a fixed work routine and clear task priorities.",
@@ -117,7 +156,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "Give attention to communication tone, patience, and mutual understanding in close relationships.",
       }),
-      relationshipPeriods: quarterPeriods(),
+      relationshipPeriods: periods,
       relationshipKeyDates: defaultKeyDates(),
       relationshipRemedies: buildRemedyList(relationshipBucket, [
         "Speak calmly and avoid reacting in the heat of the moment.",
@@ -130,7 +169,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "Track spending, avoid emotional purchases, and make money decisions after careful review.",
       }),
-      financePeriods: quarterPeriods(),
+      financePeriods: periods,
       financeKeyDates: defaultKeyDates(),
       financeRemedies: buildRemedyList(financeBucket, [
         "Plan spending weekly and avoid unnecessary risk.",
@@ -143,7 +182,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "Protect your energy with better sleep, hydration, food timing, and stress management.",
       }),
-      healthPeriods: quarterPeriods(),
+      healthPeriods: periods,
       healthKeyDates: defaultKeyDates(),
       healthRemedies: buildRemedyList(healthBucket, [
         "Sleep on time and keep hydration consistent.",
@@ -156,7 +195,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "A short daily grounding routine can improve clarity, calmness, and emotional stability.",
       }),
-      spiritualPeriods: quarterPeriods(),
+      spiritualPeriods: periods,
       spiritualKeyDates: [
         { type: "positive", date: "Quiet Days", title: "Use this time for reflection, gratitude, and inner balance." },
         { type: "positive", date: "Weekly Reset", title: "Create one simple spiritual routine and stay consistent." },
@@ -172,7 +211,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "Plan trips carefully, avoid last-minute rush, and keep communication/document details clear.",
       }),
-      travelPeriods: quarterPeriods(),
+      travelPeriods: periods,
       travelKeyDates: defaultKeyDates(),
       travelRemedies: buildRemedyList(travelBucket, [
         "Keep documents and essentials ready in advance.",
@@ -185,7 +224,7 @@ async function generateKundliReportContent(kundliData, userDetails) {
         fallback:
           "Build learning momentum with consistency, revision, and realistic study goals.",
       }),
-      educationPeriods: quarterPeriods(),
+      educationPeriods: periods,
       educationKeyDates: defaultKeyDates(),
       educationRemedies: buildRemedyList(educationBucket, [
         "Set a fixed study slot and follow it daily.",
