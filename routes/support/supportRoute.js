@@ -22,6 +22,12 @@ router.get("/tickets/my-tickets", checkForAuthenticationCookie(), getMyTickets);
 router.get("/tickets/:ticketId", checkForAuthenticationCookie(), getTicketDetails);
 router.post("/tickets/:ticketId/reply", checkForAuthenticationCookie(), ...upload.array("images", 5), replyToTicket);
 
+// Astrologer routes
+router.post("/astrologer/tickets", checkForAuthenticationCookie(), authorizeRoles(["astrologer"]), ...upload.array("images", 5), createTicket);
+router.get("/astrologer/tickets/my-tickets", checkForAuthenticationCookie(), authorizeRoles(["astrologer"]), getMyTickets);
+router.get("/astrologer/tickets/:ticketId", checkForAuthenticationCookie(), authorizeRoles(["astrologer"]), getTicketDetails);
+router.post("/astrologer/tickets/:ticketId/reply", checkForAuthenticationCookie(), authorizeRoles(["astrologer"]), ...upload.array("images", 5), replyToTicket);
+
 // Upload route for images
 router.post("/upload", checkForAuthenticationCookie(), ...upload.array("images", 5), (req, res) => {
   try {

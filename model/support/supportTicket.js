@@ -17,9 +17,19 @@ const SupportTicket = sequelize.define(
     },
     userId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "users",
+        key: "id",
+      },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    },
+    astrologerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "astrologers",
         key: "id",
       },
       onDelete: "CASCADE",

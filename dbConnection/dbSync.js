@@ -1248,6 +1248,57 @@ async function ensurePalmOrderColumns() {
   }
 }
 
+async function ensureSupportTicketActorColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("support_tickets");
+
+    if (table.userId && table.userId.allowNull === false) {
+      await sequelize.query(
+        'ALTER TABLE "support_tickets" ALTER COLUMN "userId" DROP NOT NULL'
+      );
+    }
+
+    if (!table.astrologerId && !table.astrologer_id) {
+      await queryInterface.addColumn("support_tickets", "astrologerId", {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+          model: "astrologers",
+          key: "id",
+        },
+        onDelete: "CASCADE",
+        onUpdate: "CASCADE",
+      });
+    }
+
+    const updatedTable = await queryInterface.describeTable("support_tickets");
+    const indexes = await queryInterface.showIndex("support_tickets");
+    const hasAstrologerIndex = indexes.some(
+      (index) => index.name === "support_tickets_astrologer_id"
+    );
+    if (
+      !hasAstrologerIndex &&
+      (updatedTable.astrologerId || updatedTable.astrologer_id)
+    ) {
+      await queryInterface.addIndex("support_tickets", [
+        updatedTable.astrologerId ? "astrologerId" : "astrologer_id",
+      ], {
+        name: "support_tickets_astrologer_id",
+      });
+    }
+
+    await sequelize.query(
+      'ALTER TYPE "enum_ticket_replies_repliedByType" ADD VALUE IF NOT EXISTS \'astrologer\''
+    );
+    console.log("Ensured support ticket astrologer ownership columns exist");
+  } catch (error) {
+    console.error("Failed to ensure support ticket actor columns:", error);
+    throw error;
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -1278,6 +1329,7 @@ const initDB = (callback) => {
     .then(() => ensurePalmJobColumns())
     .then(() => ensurePalmUploadColumns())
     .then(() => ensurePalmOrderColumns())
+    .then(() => ensureSupportTicketActorColumns())
     .then(() => {
       console.log("All models synced");
       callback();

@@ -719,6 +719,17 @@ const PalmOrder = require("../palm/palmOrder");
     as: "user",
   });
 
+  Astrologer.hasMany(SupportTicket, {
+    foreignKey: "astrologerId",
+    as: "supportTickets",
+    onDelete: "CASCADE",
+  });
+
+  SupportTicket.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
   Admin.hasMany(SupportTicket, {
     foreignKey: "adminId",
     as: "assignedTickets",
