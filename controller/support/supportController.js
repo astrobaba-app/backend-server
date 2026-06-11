@@ -1,6 +1,7 @@
 const SupportTicket = require("../../model/support/supportTicket");
 const TicketReply = require("../../model/support/ticketReply");
 const User = require("../../model/user/userAuth");
+const Astrologer = require("../../model/astrologer/astrologer");
 const Admin = require("../../model/admin/admin");
 const { Op, fn, col } = require("sequelize");
 const {
@@ -30,12 +31,33 @@ const generateTicketNumber = async () => {
   return ticketNumber;
 };
 
+const getTicketActor = (req) => {
+  const isAstrologer =
+    req.user.role === "astrologer" || req.user.actorType === "astrologer";
+
+  return {
+    id: req.user.id,
+    role: isAstrologer ? "astrologer" : "user",
+    ownerField: isAstrologer ? "astrologerId" : "userId",
+    model: isAstrologer ? Astrologer : User,
+  };
+};
+
+const serializeTicketForAdmin = (ticket) => {
+  const plainTicket = ticket.toJSON ? ticket.toJSON() : ticket;
+
+  return {
+    ...plainTicket,
+    user: plainTicket.user || plainTicket.astrologer || null,
+    requesterType: plainTicket.astrologerId ? "astrologer" : "user",
+  };
+};
+
 // ============= USER ROUTES =============
 
 const createTicket = async (req, res) => {
   try {
-    const userId = req.user.id;
-    console.log("User ID creating ticket:", userId);
+    const actor = getTicketActor(req);
     const { subject, description, category, priority = "medium" } = req.body;
 
     if (!subject || !description) {
@@ -54,7 +76,7 @@ const createTicket = async (req, res) => {
     // Create ticket
     const ticket = await SupportTicket.create({
       ticketNumber,
-      userId,
+      [actor.ownerField]: actor.id,
       subject,
       description,
       images: imageUrls,
@@ -64,12 +86,12 @@ const createTicket = async (req, res) => {
     });
 
     // Get user details
-    const user = await User.findByPk(userId, {
+    const owner = await actor.model.findByPk(actor.id, {
       attributes: ["fullName", "email"],
     });
 
     // Send confirmation email
-    await sendTicketCreatedEmail(user, ticket);
+    await sendTicketCreatedEmail(owner, ticket);
 
     res.status(201).json({
       success: true,
@@ -102,11 +124,11 @@ const createTicket = async (req, res) => {
  */
 const getMyTickets = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const actor = getTicketActor(req);
     const { status, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
 
-    const where = { userId };
+    const where = { [actor.ownerField]: actor.id };
     if (status) {
       where.status = status;
     }
@@ -128,7 +150,7 @@ const getMyTickets = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      tickets,
+      tickets: tickets.map(serializeTicketForAdmin),
       pagination: {
         total: count,
         page: parseInt(page),
@@ -151,11 +173,17 @@ const getMyTickets = async (req, res) => {
  */
 const getTicketDetails = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const actor = getTicketActor(req);
     const { ticketId } = req.params;
+    const replyPage = Math.max(parseInt(req.query.replyPage, 10) || 1, 1);
+    const replyLimit = Math.min(
+      Math.max(parseInt(req.query.replyLimit, 10) || 10, 1),
+      50
+    );
+    const replyOffset = (replyPage - 1) * replyLimit;
 
     const ticket = await SupportTicket.findOne({
-      where: { id: ticketId, userId },
+      where: { id: ticketId, [actor.ownerField]: actor.id },
       include: [
         {
           model: Admin,
@@ -173,13 +201,15 @@ const getTicketDetails = async (req, res) => {
       });
     }
 
-    // Get all replies (exclude internal notes)
-    const replies = await TicketReply.findAll({
+    // Get paged replies (exclude internal notes)
+    const { rows: replies, count: replyCount } = await TicketReply.findAndCountAll({
       where: {
         ticketId,
         isInternal: false,
       },
       order: [["createdAt", "ASC"]],
+      limit: replyLimit,
+      offset: replyOffset,
     });
 
     // Format replies with sender info
@@ -192,10 +222,15 @@ const getTicketDetails = async (req, res) => {
           });
           senderInfo = { name: admin?.name || "Support Team", type: "admin" };
         } else {
-          const user = await User.findByPk(reply.repliedBy, {
+          const senderModel =
+            reply.repliedByType === "astrologer" ? Astrologer : User;
+          const user = await senderModel.findByPk(reply.repliedBy, {
             attributes: ["fullName"],
           });
-          senderInfo = { name: user?.fullName || "You", type: "user" };
+          senderInfo = {
+            name: user?.fullName || "You",
+            type: reply.repliedByType,
+          };
         }
 
         return {
@@ -212,8 +247,14 @@ const getTicketDetails = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      ticket,
+      ticket: serializeTicketForAdmin(ticket),
       replies: formattedReplies,
+      repliesPagination: {
+        total: replyCount,
+        page: replyPage,
+        limit: replyLimit,
+        totalPages: Math.ceil(replyCount / replyLimit),
+      },
     });
   } catch (error) {
     console.error("Get ticket details error:", error);
@@ -230,7 +271,7 @@ const getTicketDetails = async (req, res) => {
  */
 const replyToTicket = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const actor = getTicketActor(req);
     const { ticketId } = req.params;
     const { message } = req.body;
 
@@ -243,7 +284,7 @@ const replyToTicket = async (req, res) => {
 
     // Check if ticket belongs to user
     const ticket = await SupportTicket.findOne({
-      where: { id: ticketId, userId },
+      where: { id: ticketId, [actor.ownerField]: actor.id },
     });
 
     if (!ticket) {
@@ -253,10 +294,10 @@ const replyToTicket = async (req, res) => {
       });
     }
 
-    if (ticket.status === "closed") {
+    if (["closed", "resolved"].includes(ticket.status)) {
       return res.status(400).json({
         success: false,
-        message: "Cannot reply to a closed ticket",
+        message: "Cannot reply to a resolved or closed ticket",
       });
     }
 
@@ -279,8 +320,8 @@ const replyToTicket = async (req, res) => {
     // Create reply
     const reply = await TicketReply.create({
       ticketId,
-      repliedBy: userId,
-      repliedByType: "user",
+      repliedBy: actor.id,
+      repliedByType: actor.role,
       message,
       attachments: attachmentUrls,
       isInternal: false,
@@ -289,7 +330,6 @@ const replyToTicket = async (req, res) => {
     // Update ticket
     await ticket.update({
       lastRepliedAt: new Date(),
-      status: ticket.status === "resolved" ? "open" : ticket.status,
     });
 
     res.status(201).json({
@@ -354,6 +394,13 @@ const getAllTickets = async (req, res) => {
           model: User,
           as: "user",
           attributes: ["id", "fullName", "email", "mobile"],
+          required: false,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "email", "phoneNumber"],
+          required: false,
         },
         {
           model: Admin,
@@ -397,6 +444,13 @@ const getTicketDetailsAdmin = async (req, res) => {
           model: User,
           as: "user",
           attributes: ["id", "fullName", "email", "mobile"],
+          required: false,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "email", "phoneNumber"],
+          required: false,
         },
         {
           model: Admin,
@@ -430,10 +484,15 @@ const getTicketDetailsAdmin = async (req, res) => {
           });
           senderInfo = { name: admin?.name || "Admin", type: "admin" };
         } else {
-          const user = await User.findByPk(reply.repliedBy, {
+          const senderModel =
+            reply.repliedByType === "astrologer" ? Astrologer : User;
+          const user = await senderModel.findByPk(reply.repliedBy, {
             attributes: ["fullName"],
           });
-          senderInfo = { name: user?.fullName || "User", type: "user" };
+          senderInfo = {
+            name: user?.fullName || "User",
+            type: reply.repliedByType,
+          };
         }
 
         return {
@@ -486,6 +545,13 @@ const replyToTicketAdmin = async (req, res) => {
           model: User,
           as: "user",
           attributes: ["fullName", "email"],
+          required: false,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["fullName", "email"],
+          required: false,
         },
       ],
     });
@@ -533,7 +599,12 @@ const replyToTicketAdmin = async (req, res) => {
     if (!isInternal) {
       const admin = await Admin.findByPk(adminId, { attributes: ["name"] });
       try {
-        await sendTicketReplyEmail(ticket.user, ticket, reply, admin.name);
+        await sendTicketReplyEmail(
+          ticket.user || ticket.astrologer,
+          ticket,
+          reply,
+          admin.name
+        );
       } catch (error) {
         console.error("Email send error e", error);
         res.status(500).json({
@@ -581,6 +652,13 @@ const updateTicketStatus = async (req, res) => {
           model: User,
           as: "user",
           attributes: ["fullName", "email"],
+          required: false,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["fullName", "email"],
+          required: false,
         },
       ],
     });
@@ -610,13 +688,18 @@ const updateTicketStatus = async (req, res) => {
 
     // Send email notification if status changed
     if (status && status !== oldStatus) {
-      await sendTicketStatusUpdateEmail(ticket.user, ticket, oldStatus, status);
+      await sendTicketStatusUpdateEmail(
+        ticket.user || ticket.astrologer,
+        ticket,
+        oldStatus,
+        status
+      );
     }
 
     res.status(200).json({
       success: true,
-      message: "Ticket updated successfully. User has been notified via email.",
-      ticket,
+      message: "Ticket updated successfully. Requester has been notified via email.",
+      ticket: serializeTicketForAdmin(ticket),
     });
   } catch (error) {
     console.error("Update ticket status error:", error);
