@@ -499,7 +499,7 @@ const createKundli = async (req, res) => {
       yogini,
       manglikAnalysis,
       personality,
-      gemstoneRemedies,
+      gemstoneRemedies, 
       rudrakshaSuggestion,
       ashtakavarga,
       transit,
@@ -520,6 +520,8 @@ const createKundli = async (req, res) => {
         getTransitChart(userRequest),
         getCompleteHoroscope(userRequest),
     ]);
+
+    
 
     // Extract values or set to null if failed
     const extractValue = (result, name) => {
@@ -594,6 +596,7 @@ const createKundli = async (req, res) => {
       horoscope: finalHoroscope,
     });
 
+   // console.log("planetary result from kundli controller:", kundli);
     // Generate AI-enhanced Free Report narratives in the background (non-blocking)
     // The AI generation takes 30+ seconds, so we don't want to block the response
     generateFreeReportNarratives({
