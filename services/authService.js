@@ -28,7 +28,8 @@ function createToken(user) {
 
     const payload = {
       id:user.id,
-      role: user.role || null
+      role: user.role || null,
+      fullName: user.fullName || null,
     };
     return JWT.sign(payload, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
   } catch (error) {
@@ -40,7 +41,8 @@ function createToken(user) {
 const createMiddlewareToken = (user) => {
   return JWT.sign(
     { id: user.id,
-      role: user.role || null
+      role: user.role || null,
+      fullName: user.fullName || null,
      }, 
     process.env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRES_IN }

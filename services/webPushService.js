@@ -151,6 +151,8 @@ async function sendChatRequestPush(astrologerId, { sessionId, userName }) {
     title: "New Chat Invitation",
     body: `${safeUserName} wants to start a chat with you.`,
     tag: `chat-request-${sessionId}`,
+    requireInteraction: true,
+    renotify: true,
     url: `/astrologer/live-chats?sessionId=${sessionId}`,
     data: {
       type: "chat_request",
