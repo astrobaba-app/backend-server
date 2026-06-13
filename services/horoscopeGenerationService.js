@@ -116,10 +116,11 @@ async function generateAndCacheHoroscope(zodiacSign, period, date = new Date()) 
         throw new Error(`Invalid period: ${period}`);
     }
     
+    // Fetch astro engine data
     const response = await axios.get(url, { params, timeout: 30000 });
     const horoscopeData = response.data.data;
     
-    // Enhance with AI
+    // Enhance with AI immediately
     let aiEnhanced = null;
     try {
       aiEnhanced = await enhanceHoroscopeWithAI({
@@ -127,7 +128,22 @@ async function generateAndCacheHoroscope(zodiacSign, period, date = new Date()) 
         period: period,
         horoscopeData: horoscopeData,
       });
-      console.log(`[HoroscopeGen] AI enhancement successful for ${capitalizedSign} ${period}`);
+
+      // Validation Guardrail: Prevent caching lazy/empty AI output
+      if (aiEnhanced) {
+        const isLazyTemplate = 
+          aiEnhanced.category_scores?.love === 0 || 
+          !aiEnhanced.detailed_readings?.love || 
+          aiEnhanced.detailed_readings?.love.length < 10;
+
+        if (isLazyTemplate) {
+          console.warn(`[HoroscopeGen] ⚠️ AI returned empty/lazy template for ${capitalizedSign} ${period}. Rejecting payload.`);
+          aiEnhanced = null; 
+        } else {
+          console.log(`[HoroscopeGen] AI enhancement successful and verified for ${capitalizedSign} ${period}`);
+        }
+      }
+
     } catch (aiErr) {
       console.error(`[HoroscopeGen] AI enhancement failed for ${capitalizedSign} ${period}:`, aiErr?.message);
     }
@@ -146,18 +162,16 @@ async function generateAndCacheHoroscope(zodiacSign, period, date = new Date()) 
     
     let cached;
     if (existing) {
-      // Update existing entry
       await existing.update({
         horoscopeData: horoscopeData,
-        aiEnhanced: aiEnhanced,
+        aiEnhanced: aiEnhanced, 
         generatedAt: new Date(),
         validUntil: validUntil,
         isActive: true
       });
       cached = existing;
-      console.log(`[HoroscopeGen] Updated ${period} horoscope for ${capitalizedSign} (${periodKey})`);
+      console.log(`[HoroscopeGen] Updated ${period} cache for ${capitalizedSign}`);
     } else {
-      // Create new entry
       cached = await CachedHoroscope.create({
         zodiacSign: zodiacSign.toLowerCase(),
         period: period,
@@ -168,10 +182,8 @@ async function generateAndCacheHoroscope(zodiacSign, period, date = new Date()) 
         validUntil: validUntil,
         isActive: true
       });
-      console.log(`[HoroscopeGen] Created ${period} horoscope for ${capitalizedSign} (${periodKey})`);
+      console.log(`[HoroscopeGen] Created ${period} cache for ${capitalizedSign}`);
     }
-    
-    console.log(`[HoroscopeGen] Cached ${period} horoscope for ${capitalizedSign} until ${validUntil.toISOString()}`);
     
     return cached;
   } catch (error) {
@@ -181,31 +193,48 @@ async function generateAndCacheHoroscope(zodiacSign, period, date = new Date()) 
 }
 
 /**
- * Generate horoscopes for all zodiac signs for a given period
+ * Generate horoscopes for all zodiac signs for a given period IN PARALLEL
  */
 async function generateAllHoroscopesForPeriod(period, date = new Date()) {
   console.log(`\n========================================`);
-  console.log(`[HoroscopeGen] Starting ${period.toUpperCase()} horoscope generation for all signs`);
+  console.log(`[HoroscopeGen] Starting PARALLEL ${period.toUpperCase()} generation for all 12 signs`);
   console.log(`[HoroscopeGen] Date: ${date.toISOString()}`);
   console.log(`========================================\n`);
   
+  // =======================================================================
+  // TEMPORARY WIPE: Clears all broken cache data from the database
+  // TODO: REMOVE THIS LINE ONCE YOUR APP HAS FETCHED FRESH DATA SUCCESSFULLY
+  // =======================================================================
+  await CachedHoroscope.destroy({ where: {} }); 
+  console.log(`[HoroscopeGen] 🗑️ DATABASE WIPED SUCCESSFULLY 🗑️`);
+
   const results = {
     success: [],
     failed: []
   };
   
-  for (const sign of ZODIAC_SIGNS) {
+  // Create an array of Promises that will all execute at the exact same time
+  const generationPromises = ZODIAC_SIGNS.map(async (sign) => {
     try {
       await generateAndCacheHoroscope(sign, period, date);
-      results.success.push(sign);
-      
-      // Add small delay to avoid overwhelming the astro-engine
-      await new Promise(resolve => setTimeout(resolve, 500));
+      return { status: 'fulfilled', sign };
     } catch (error) {
       console.error(`[HoroscopeGen] Failed to generate ${period} for ${sign}:`, error?.message);
-      results.failed.push({ sign, error: error?.message });
+      return { status: 'rejected', sign, error: error?.message };
     }
-  }
+  });
+
+  // Wait for all 12 simultaneous requests to finish
+  const outcomes = await Promise.all(generationPromises);
+
+  // Sort the outcomes into success/failed arrays
+  outcomes.forEach(outcome => {
+    if (outcome.status === 'fulfilled') {
+      results.success.push(outcome.sign);
+    } else {
+      results.failed.push({ sign: outcome.sign, error: outcome.error });
+    }
+  });
   
   console.log(`\n========================================`);
   console.log(`[HoroscopeGen] ${period.toUpperCase()} generation complete`);
@@ -225,7 +254,6 @@ async function generateAllHoroscopesForPeriod(period, date = new Date()) {
 async function getCachedHoroscope(zodiacSign, period, date = new Date()) {
   const periodKey = getPeriodKey(period, date);
   
-  // Try to get from cache
   const cached = await CachedHoroscope.findOne({
     where: {
       zodiacSign: zodiacSign.toLowerCase(),
@@ -235,7 +263,8 @@ async function getCachedHoroscope(zodiacSign, period, date = new Date()) {
     }
   });
   
-  if (cached && new Date(cached.validUntil) > new Date()) {
+  // Guardrail: Ensure aiEnhanced exists AND love score is not 0
+  if (cached && new Date(cached.validUntil) > new Date() && cached.aiEnhanced && cached.aiEnhanced.category_scores?.love !== 0) {
     console.log(`[HoroscopeGen] Serving cached ${period} horoscope for ${zodiacSign} (${periodKey})`);
     return {
       success: true,
@@ -250,8 +279,7 @@ async function getCachedHoroscope(zodiacSign, period, date = new Date()) {
     };
   }
   
-  // Not in cache or expired - generate new
-  console.log(`[HoroscopeGen] Cache miss for ${zodiacSign} ${period} (${periodKey}). Generating...`);
+  console.log(`[HoroscopeGen] Cache miss or invalid AI data for ${zodiacSign} ${period} (${periodKey}). Generating...`);
   try {
     const newCache = await generateAndCacheHoroscope(zodiacSign, period, date);
     return {

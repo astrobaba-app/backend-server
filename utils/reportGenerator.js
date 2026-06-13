@@ -27,7 +27,7 @@ const GENERAL_REPORT_CONFIG = {
   }
 };
 
-// ==================== UTILITY & HELPER FUNCTIONS ====================
+
 
 function getSizeKB(obj) {
   try {
