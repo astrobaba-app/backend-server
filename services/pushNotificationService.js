@@ -54,7 +54,6 @@ class PushNotificationService {
           defaultSound: true,
           defaultVibrateTimings: true,
           defaultLightSettings: true,
-          sticky: isChatRequest,
         },
       },
       apns: {
