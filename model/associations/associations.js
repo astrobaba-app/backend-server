@@ -27,6 +27,7 @@ const Notification = require("../notification/notification");
 const AstrologerWebPushSubscription = require("../notification/astrologerWebPushSubscription");
 const Coupon = require("../coupon/coupon");
 const CouponUsage = require("../coupon/couponUsage");
+const CouponUserAssignment = require("../coupon/couponUserAssignment");
 const Follow = require("../follow/follow");
 const AssistantPlan = require("../assistant/assistantPlan");
 const AssistantChat = require("../assistant/assistantChat");
@@ -52,6 +53,7 @@ const PalmUpload = require("../palm/palmUpload");
 const PalmFeature = require("../palm/palmFeature");
 const PalmReport = require("../palm/palmReport");
 const AIJob = require("../palm/aiJob");
+const PalmOrder = require("../palm/palmOrder");
 
 
   // User has many UserRequests
@@ -479,6 +481,39 @@ const AIJob = require("../palm/aiJob");
     onDelete: "CASCADE",
   });
 
+  Coupon.hasMany(CouponUserAssignment, {
+    foreignKey: "couponId",
+    as: "assignments",
+    onDelete: "CASCADE",
+  });
+
+  CouponUserAssignment.belongsTo(Coupon, {
+    foreignKey: "couponId",
+    as: "coupon",
+  });
+
+  User.hasMany(CouponUserAssignment, {
+    foreignKey: "userId",
+    as: "couponAssignments",
+    onDelete: "CASCADE",
+  });
+
+  CouponUserAssignment.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Admin.hasMany(CouponUserAssignment, {
+    foreignKey: "assignedBy",
+    as: "couponAssignments",
+    onDelete: "SET NULL",
+  });
+
+  CouponUserAssignment.belongsTo(Admin, {
+    foreignKey: "assignedBy",
+    as: "admin",
+  });
+
   // Forum associations
   User.hasMany(ForumPost, {
     foreignKey: "authorUserId",
@@ -684,6 +719,17 @@ const AIJob = require("../palm/aiJob");
     as: "user",
   });
 
+  Astrologer.hasMany(SupportTicket, {
+    foreignKey: "astrologerId",
+    as: "supportTickets",
+    onDelete: "CASCADE",
+  });
+
+  SupportTicket.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
   Admin.hasMany(SupportTicket, {
     foreignKey: "adminId",
     as: "assignedTickets",
@@ -861,4 +907,8 @@ const AIJob = require("../palm/aiJob");
   AIJob.belongsTo(User, { foreignKey: "userId", as: "user" });
   PalmUpload.hasOne(AIJob, { foreignKey: "palmUploadId", as: "aiJob", onDelete: "CASCADE" });
   AIJob.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  User.hasMany(PalmOrder, { foreignKey: "userId", as: "palmOrders", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(User, { foreignKey: "userId", as: "user" });
+  PalmUpload.hasOne(PalmOrder, { foreignKey: "palmUploadId", as: "order", onDelete: "CASCADE" });
+  PalmOrder.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
 

@@ -1,7 +1,19 @@
 const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
+const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
 const User = require("../../model/user/userAuth");
+const { sequelize } = require("../../dbConnection/dbConfig");
 const { Op } = require("sequelize");
+
+const getAdminId = (req) => req.user?.id || req.admin?.id || null;
+
+const isCouponAssignedToUser = async (couponId, userId) => {
+  const assignment = await CouponUserAssignment.findOne({
+    where: { couponId, userId },
+  });
+
+  return !!assignment;
+};
 
 // Validate and apply coupon
 const validateCoupon = async (req, res) => {
@@ -37,6 +49,16 @@ const validateCoupon = async (req, res) => {
         success: false,
         message: "Invalid or inactive coupon code",
       });
+    }
+
+    if (coupon.assignmentRequired) {
+      const isAssigned = await isCouponAssignedToUser(coupon.id, userId);
+      if (!isAssigned) {
+        return res.status(403).json({
+          success: false,
+          message: "This coupon is not assigned to your account",
+        });
+      }
     }
 
     // Check if coupon is expired
@@ -194,6 +216,7 @@ const getActiveCoupons = async (req, res) => {
         "perUserLimit",
         "validUntil",
         "applicableFor",
+        "assignmentRequired",
       ],
       order: [["discountValue", "DESC"]],
     });
@@ -210,6 +233,13 @@ const getActiveCoupons = async (req, res) => {
         }
 
         // Check user usage count
+        if (coupon.assignmentRequired) {
+          const isAssigned = await isCouponAssignedToUser(coupon.id, userId);
+          if (!isAssigned) {
+            return null;
+          }
+        }
+
         const userUsageCount = await CouponUsage.count({
           where: {
             couponId: coupon.id,
@@ -301,7 +331,7 @@ const getMyCouponUsage = async (req, res) => {
 // Admin: Create coupon
 const createCoupon = async (req, res) => {
   try {
-    const adminId = req.admin.id;
+    const adminId = getAdminId(req);
     const {
       code,
       description,
@@ -315,6 +345,7 @@ const createCoupon = async (req, res) => {
       validFrom,
       validUntil,
       applicableFor,
+      assignmentRequired,
     } = req.body;
 
     if (!code || !discountType || !discountValue || !validUntil) {
@@ -349,6 +380,7 @@ const createCoupon = async (req, res) => {
       validFrom: validFrom || new Date(),
       validUntil,
       applicableFor: applicableFor || "all",
+      assignmentRequired: !!assignmentRequired,
       createdBy: adminId,
     });
 
@@ -412,7 +444,7 @@ const getAllCoupons = async (req, res) => {
 const updateCoupon = async (req, res) => {
   try {
     const { couponId } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
     const coupon = await Coupon.findByPk(couponId);
     if (!coupon) {
@@ -422,12 +454,36 @@ const updateCoupon = async (req, res) => {
       });
     }
 
+    if (updateData.code) {
+      updateData.code = String(updateData.code).trim().toUpperCase();
+    }
+
     // Don't allow changing code if coupon has been used
-    if (updateData.code && coupon.usageCount > 0) {
+    if (
+      updateData.code &&
+      updateData.code !== coupon.code &&
+      coupon.usageCount > 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Cannot change coupon code after it has been used",
       });
+    }
+
+    if (updateData.code && updateData.code !== coupon.code) {
+      const existingCoupon = await Coupon.findOne({
+        where: {
+          code: updateData.code,
+          id: { [Op.ne]: couponId },
+        },
+      });
+
+      if (existingCoupon) {
+        return res.status(400).json({
+          success: false,
+          message: "Coupon code already exists",
+        });
+      }
     }
 
     await coupon.update(updateData);
@@ -514,6 +570,135 @@ const toggleCouponStatus = async (req, res) => {
   }
 };
 
+// Admin: Assign coupon to users
+const assignCouponToUsers = async (req, res) => {
+  try {
+    const { couponId } = req.params;
+    const { userIds, note } = req.body;
+    const adminId = getAdminId(req);
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "userIds must be a non-empty array",
+      });
+    }
+
+    const coupon = await Coupon.findByPk(couponId);
+    if (!coupon) {
+      return res.status(404).json({
+        success: false,
+        message: "Coupon not found",
+      });
+    }
+
+    const users = await User.findAll({
+      where: { id: { [Op.in]: userIds } },
+      attributes: ["id"],
+    });
+    const validUserIds = users.map((user) => user.id);
+
+    if (!validUserIds.length) {
+      return res.status(404).json({
+        success: false,
+        message: "No valid users found for assignment",
+      });
+    }
+
+    await Promise.all(
+      validUserIds.map((userId) =>
+        CouponUserAssignment.findOrCreate({
+          where: { couponId, userId },
+          defaults: {
+            couponId,
+            userId,
+            assignedBy: adminId,
+            note: note || null,
+          },
+        })
+      )
+    );
+
+    await coupon.update({ assignmentRequired: true });
+
+    res.status(200).json({
+      success: true,
+      message: "Coupon assigned successfully",
+      assignedCount: validUserIds.length,
+      skippedCount: userIds.length - validUserIds.length,
+    });
+  } catch (error) {
+    console.error("Assign coupon error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to assign coupon",
+      error: error.message,
+    });
+  }
+};
+
+// Admin: List users assigned to a coupon
+const getCouponAssignments = async (req, res) => {
+  try {
+    const { couponId } = req.params;
+
+    const assignments = await CouponUserAssignment.findAll({
+      where: { couponId },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "fullName", "email", "mobile", "createdAt"],
+        },
+      ],
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      success: true,
+      assignments,
+      total: assignments.length,
+    });
+  } catch (error) {
+    console.error("Get coupon assignments error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch coupon assignments",
+      error: error.message,
+    });
+  }
+};
+
+// Admin: Remove a user's coupon assignment
+const removeCouponAssignment = async (req, res) => {
+  try {
+    const { couponId, userId } = req.params;
+
+    const deleted = await CouponUserAssignment.destroy({
+      where: { couponId, userId },
+    });
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Coupon assignment not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Coupon assignment removed",
+    });
+  } catch (error) {
+    console.error("Remove coupon assignment error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove coupon assignment",
+      error: error.message,
+    });
+  }
+};
+
 // Admin: Get coupon usage analytics
 const getCouponAnalytics = async (req, res) => {
   try {
@@ -574,5 +759,8 @@ module.exports = {
   updateCoupon,
   deleteCoupon,
   toggleCouponStatus,
+  assignCouponToUsers,
+  getCouponAssignments,
+  removeCouponAssignment,
   getCouponAnalytics,
 };

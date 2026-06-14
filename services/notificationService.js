@@ -1,6 +1,27 @@
 const Notification = require("../model/notification/notification");
 const User = require("../model/user/userAuth");
+const BroadcastLog = require("../model/admin/broadcastLog");
+const DeviceToken = require("../model/user/deviceToken");
 const pushNotificationService = require("./pushNotificationService");
+const { Op, literal } = require("sequelize");
+
+const MAX_PUSH_ATTEMPTS = 3;
+const DEFAULT_PENDING_PUSH_LIMIT = 3;
+const DEFAULT_PENDING_PUSH_MAX_AGE_HOURS = 3;
+
+const getPositiveIntegerEnv = (name, fallback) => {
+  const value = Number.parseInt(process.env[name], 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+};
+
+const PENDING_PUSH_LIMIT = getPositiveIntegerEnv(
+  "PENDING_PUSH_LIMIT",
+  DEFAULT_PENDING_PUSH_LIMIT
+);
+const PENDING_PUSH_MAX_AGE_HOURS = getPositiveIntegerEnv(
+  "PENDING_PUSH_MAX_AGE_HOURS",
+  DEFAULT_PENDING_PUSH_MAX_AGE_HOURS
+);
 
 class NotificationService {
   /**
@@ -70,20 +91,40 @@ class NotificationService {
       const users = await User.findAll({
         attributes: ["id"],
       });
+      const pushEligibleUsers = sendPush
+        ? await DeviceToken.findAll({
+            attributes: ["userId"],
+            group: ["userId"],
+            raw: true,
+          })
+        : [];
+      const pushEligibleUserIds = new Set(
+        pushEligibleUsers.map((token) => String(token.userId)).filter(Boolean)
+      );
 
       // Create notification for each user
       const notifications = await Promise.all(
-        users.map((user) =>
-          Notification.create({
+        users.map((user) => {
+          const userId = String(user.id);
+          const pushResendEligible =
+            type === "admin_broadcast" && pushEligibleUserIds.has(userId);
+
+          return Notification.create({
             userId: user.id,
             type,
             title,
             message,
-            data,
+            data: {
+              ...data,
+              pushResendEligible,
+            },
             actionUrl,
             priority,
-          })
-        )
+          });
+        })
+      );
+      const notificationIdsByUserId = new Map(
+        notifications.map((notification) => [String(notification.userId), notification.id])
       );
 
       // Send push notifications via FCM
@@ -108,6 +149,45 @@ class NotificationService {
           });
           pushSuccessCount = pushResult?.successCount ?? 0;
           pushFailureCount = pushResult?.failureCount ?? 0;
+
+          const attemptedNotificationIds = (pushResult?.attemptedUserIds || [])
+            .map((userId) => notificationIdsByUserId.get(String(userId)))
+            .filter(Boolean);
+          const deliveredNotificationIds = (pushResult?.deliveredUserIds || [])
+            .map((userId) => notificationIdsByUserId.get(String(userId)))
+            .filter(Boolean);
+          const failedNotificationIds = (pushResult?.failedUserIds || [])
+            .map((userId) => notificationIdsByUserId.get(String(userId)))
+            .filter(Boolean);
+
+          if (attemptedNotificationIds.length) {
+            await Notification.update(
+              {
+                pushAttemptCount: literal('"pushAttemptCount" + 1'),
+                pushLastAttemptAt: new Date(),
+              },
+              { where: { id: attemptedNotificationIds } }
+            );
+          }
+
+          if (deliveredNotificationIds.length) {
+            await Notification.update(
+              {
+                pushDeliveredAt: new Date(),
+                pushLastError: null,
+              },
+              { where: { id: deliveredNotificationIds } }
+            );
+          }
+
+          if (failedNotificationIds.length) {
+            await Notification.update(
+              {
+                pushLastError: "FCM delivery failed",
+              },
+              { where: { id: failedNotificationIds } }
+            );
+          }
         } catch (pushError) {
           console.error("Error sending broadcast push notification:", pushError);
           // Don't fail the entire notification if push fails
@@ -116,13 +196,134 @@ class NotificationService {
 
       return {
         success: true,
-        totalSent: notifications.length,
+        totalSent: sendPush ? pushEligibleUserIds.size : notifications.length,
+        totalInAppCount: notifications.length,
         pushSuccessCount,
         pushFailureCount,
+        pushPendingCount: Math.max(pushEligibleUserIds.size - pushSuccessCount, 0),
       };
     } catch (error) {
       console.error("Error broadcasting notification:", error);
       throw error;
+    }
+  }
+
+  async sendPendingPushToUser(userId, limit = PENDING_PUSH_LIMIT) {
+    try {
+      const requestedLimit = Number.parseInt(limit, 10);
+      const effectiveLimit = Math.min(
+        Number.isInteger(requestedLimit) && requestedLimit > 0
+          ? requestedLimit
+          : PENDING_PUSH_LIMIT,
+        PENDING_PUSH_LIMIT
+      );
+      const maxAge = new Date(
+        Date.now() - PENDING_PUSH_MAX_AGE_HOURS * 60 * 60 * 1000
+      );
+
+      const pendingNotifications = await Notification.findAll({
+        where: {
+          userId,
+          type: "admin_broadcast",
+          pushDeliveredAt: null,
+          data: {
+            [Op.contains]: {
+              pushResendEligible: true,
+            },
+          },
+          createdAt: {
+            [Op.gte]: maxAge,
+          },
+          pushAttemptCount: {
+            [Op.lt]: MAX_PUSH_ATTEMPTS,
+          },
+          [Op.or]: [{ expiresAt: null }, { expiresAt: { [Op.gt]: new Date() } }],
+        },
+        order: [["createdAt", "DESC"]],
+        limit: effectiveLimit,
+      });
+
+      if (!pendingNotifications.length) {
+        return {
+          success: true,
+          attempted: 0,
+          delivered: 0,
+          failed: 0,
+        };
+      }
+
+      let delivered = 0;
+      let failed = 0;
+
+      for (const notification of pendingNotifications) {
+        await notification.update({
+          pushAttemptCount: literal('"pushAttemptCount" + 1'),
+          pushLastAttemptAt: new Date(),
+        });
+
+        try {
+          const stringifiedData = {};
+          for (const [key, value] of Object.entries(notification.data || {})) {
+            stringifiedData[key] = String(value);
+          }
+
+          const result = await pushNotificationService.sendToUser(userId, {
+            title: notification.title,
+            body: notification.message,
+            data: {
+              ...stringifiedData,
+              type: String(notification.type),
+              notificationId: String(notification.id),
+              actionUrl: String(notification.actionUrl || ""),
+            },
+          });
+
+          if (result.success && (result.successCount ?? 0) > 0) {
+            delivered += 1;
+            await notification.update({
+              pushDeliveredAt: new Date(),
+              pushLastError: null,
+            });
+
+            const broadcastLogId = notification.data?.broadcastLogId;
+            if (broadcastLogId) {
+              await BroadcastLog.update(
+                {
+                  pushSuccessCount: literal('"pushSuccessCount" + 1'),
+                  pushPendingCount: literal('GREATEST("pushPendingCount" - 1, 0)'),
+                },
+                { where: { id: broadcastLogId } }
+              );
+            }
+          } else {
+            failed += 1;
+            await notification.update({
+              pushLastError: result.message || "No active device token delivered",
+            });
+          }
+        } catch (error) {
+          failed += 1;
+          await notification.update({
+            pushLastError: error.message || "Pending push resend failed",
+          });
+        }
+      }
+
+      return {
+        success: true,
+        attempted: pendingNotifications.length,
+        delivered,
+        failed,
+      };
+    } catch (error) {
+      console.error("Error sending pending push notifications:", error);
+      return {
+        success: false,
+        attempted: 0,
+        delivered: 0,
+        failed: 0,
+        error: error.message,
+      };
     }
   }
 

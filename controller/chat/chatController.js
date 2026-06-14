@@ -64,6 +64,88 @@ function getRequestExpiryIso(session) {
   return new Date(startedAt + CHAT_REQUEST_TIMEOUT_SECONDS * 1000).toISOString();
 }
 
+function canAccessChatSession(reqUser, session) {
+  if (!reqUser || !session) return false;
+  if (reqUser.role === "astrologer") {
+    return session.astrologerId === reqUser.id;
+  }
+  return session.userId === reqUser.id;
+}
+
+function getSessionStatusMeta(session) {
+  if (!session || session.status !== "active" || session.requestStatus !== "pending") {
+    return {};
+  }
+
+  return {
+    requestTimeoutSeconds: CHAT_REQUEST_TIMEOUT_SECONDS,
+    requestExpiresAt: getRequestExpiryIso(session),
+  };
+}
+
+function emitChatEnded(io, session, payload = {}) {
+  if (!io || !session) return;
+
+  const {
+    getSessionRoom,
+    getUserRoom,
+    getAstrologerRoom,
+  } = require("../../services/chatSocket");
+
+  const endedPayload = {
+    sessionId: session.id,
+    ...payload,
+  };
+
+  io
+    .to(getSessionRoom(session.id))
+    .to(getUserRoom(session.userId))
+    .to(getAstrologerRoom(session.astrologerId))
+    .emit("chat:ended", endedPayload);
+}
+
+function emitChatMessage(io, session, payload) {
+  if (!io || !session || !payload) return;
+
+  const {
+    getSessionRoom,
+    getUserRoom,
+    getAstrologerRoom,
+  } = require("../../services/chatSocket");
+
+  io
+    .to(getSessionRoom(session.id))
+    .to(getUserRoom(session.userId))
+    .to(getAstrologerRoom(session.astrologerId))
+    .emit("message:new", payload);
+}
+
+function mapHistoryMessages(messages = []) {
+  return messages
+    .map((message) => {
+      const json = message.toJSON ? message.toJSON() : message;
+      return {
+        id: json.originalMessageId || json.id,
+        historyMessageId: json.id,
+        sessionId: json.historySessionId,
+        senderId: json.senderId,
+        senderType: json.senderType,
+        message: json.isDeleted ? null : json.message,
+        messageType: json.messageType,
+        fileUrl: json.fileUrl || null,
+        isDeleted: json.isDeleted || false,
+        replyToMessageId: json.replyToMessageId || null,
+        createdAt: json.originalCreatedAt || json.createdAt,
+        updatedAt: json.updatedAt,
+      };
+    })
+    .sort(
+      (a, b) =>
+        new Date(a.createdAt || 0).getTime() -
+        new Date(b.createdAt || 0).getTime()
+    );
+}
+
 // Start a chat session (user only)
 const startChatSession = async (req, res) => {
   try {
@@ -272,16 +354,19 @@ const endChatSession = async (req, res) => {
     // Notify both sides that chat ended so UI can close/clean up instantly.
     if (io) {
       const {
-        getSessionRoom,
         getUserRoom,
         getAstrologerRoom,
         mapSession,
       } = require("../../services/chatSocket");
 
-      io.to(getSessionRoom(session.id)).emit("chat:ended", {
-        sessionId: session.id,
+      emitChatEnded(io, session, {
         endedBy: "user",
         reason: endReason,
+        currentMinutes: billing.currentMinutes,
+        currentCost: billing.currentCost,
+        totalMinutes: billing.totalMinutes,
+        totalCost: billing.totalCost,
+        billedAmount: billing.billedAmount,
       });
 
       io.to(getUserRoom(session.userId)).emit("chat:updated", {
@@ -511,7 +596,6 @@ const sendMessage = async (req, res) => {
     const io = req.app.get("io");
     if (io) {
       const {
-        getSessionRoom,
         getUserRoom,
         getAstrologerRoom,
         mapMessage,
@@ -523,7 +607,7 @@ const sendMessage = async (req, res) => {
       const sessionForUser = mapSession(session, "user");
       const sessionForAstrologer = mapSession(session, "astrologer");
 
-      io.to(getSessionRoom(sessionId)).emit("message:new", {
+      emitChatMessage(io, session, {
         sessionId,
         message: messagePayload,
       });
@@ -631,6 +715,103 @@ const getSessionMessages = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch messages",
+      error: error.message,
+    });
+  }
+};
+
+// v2: Get one chat session by id with both participants, for mobile resync/polling.
+const getChatSessionStatusV2 = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findByPk(sessionId, {
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "pricePerMinute", "rating"],
+        },
+      ],
+    });
+
+    if (session) {
+      if (!canAccessChatSession(req.user, session)) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied to this chat session",
+        });
+      }
+
+      const now = new Date();
+      const startTime = session.startTime ? new Date(session.startTime) : now;
+      const currentMinutes = Math.max(
+        0,
+        Math.ceil((now - startTime) / (1000 * 60))
+      );
+      const currentCost = currentMinutes * parseFloat(session.pricePerMinute || 0);
+
+      return res.status(200).json({
+        success: true,
+        session: {
+          ...session.toJSON(),
+          currentMinutes,
+          currentCost,
+        },
+        ...getSessionStatusMeta(session),
+      });
+    }
+
+    const archived = await ChatHistorySession.findOne({
+      where: { sourceSessionId: sessionId },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "pricePerMinute", "rating"],
+        },
+      ],
+    });
+
+    if (!archived) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    if (!canAccessChatSession(req.user, archived)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied to this chat session",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      session: {
+        ...archived.toJSON(),
+        id: sessionId,
+        archived: true,
+        status: archived.status || "completed",
+        requestStatus: archived.requestStatus || "approved",
+      },
+    });
+  } catch (error) {
+    console.error("Get chat session status v2 error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch chat session status",
       error: error.message,
     });
   }
@@ -948,7 +1129,6 @@ const approveChatRequest = async (req, res) => {
 
       if (io && chatSocketService) {
         const {
-          getSessionRoom,
           getUserRoom,
           getAstrologerRoom,
           mapSession,
@@ -958,10 +1138,14 @@ const approveChatRequest = async (req, res) => {
 
         clearUserInactivityAutoEnd(activeSession.id);
 
-        io.to(getSessionRoom(activeSession.id)).emit("chat:ended", {
-          sessionId: activeSession.id,
+        emitChatEnded(io, activeSession, {
           endedBy: "astrologer",
           reason: "astrologer_switched_chat",
+          currentMinutes: switchedBilling.currentMinutes,
+          currentCost: switchedBilling.currentCost,
+          totalMinutes: switchedBilling.totalMinutes,
+          totalCost: switchedBilling.totalCost,
+          billedAmount: switchedBilling.billedAmount,
         });
 
         io.to(getUserRoom(activeSession.userId)).emit("chat:updated", {
@@ -1207,6 +1391,108 @@ const getUserAstrologerChatHistory = async (req, res) => {
   }
 };
 
+const getChatHistorySessionV2 = async (req, res) => {
+  try {
+    const { historySessionId } = req.params;
+
+    const historySession = await ChatHistorySession.findByPk(historySessionId, {
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
+        },
+        {
+          model: ChatHistoryMessage,
+          as: "messages",
+          required: false,
+        },
+      ],
+      order: [[{ model: ChatHistoryMessage, as: "messages" }, "originalCreatedAt", "ASC"]],
+    });
+
+    if (!historySession) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat history session not found",
+      });
+    }
+
+    if (!canAccessChatSession(req.user, historySession)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied to this chat history session",
+      });
+    }
+
+    const json = historySession.toJSON();
+
+    return res.status(200).json({
+      success: true,
+      historySession: {
+        ...json,
+        messages: mapHistoryMessages(json.messages || []),
+      },
+    });
+  } catch (error) {
+    console.error("Get chat history session v2 error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch chat history session",
+      error: error.message,
+    });
+  }
+};
+
+const getAstrologerChatHistory = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { page = 1, limit = 20 } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageSize = Math.max(parseInt(limit, 10) || 20, 1);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const { rows: historySessions, count } = await ChatHistorySession.findAndCountAll({
+      where: { astrologerId },
+      distinct: true,
+      col: "id",
+      limit: pageSize,
+      offset,
+      order: [["endTime", "DESC"], ["createdAt", "DESC"]],
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ASTROLOGER_CHAT_USER_ATTRIBUTES,
+        },
+      ],
+    });
+
+    res.status(200).json({
+      success: true,
+      historySessions,
+      pagination: {
+        total: count,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(count / pageSize),
+      },
+    });
+  } catch (error) {
+    console.error("Get astrologer chat history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch astrologer chat history",
+      error: error.message,
+    });
+  }
+};
+
 // End an active chat session from astrologer side
 const endAstrologerChatSession = async (req, res) => {
   try {
@@ -1270,16 +1556,19 @@ const endAstrologerChatSession = async (req, res) => {
 
     if (io) {
       const {
-        getSessionRoom,
         getUserRoom,
         getAstrologerRoom,
         mapSession,
       } = require("../../services/chatSocket");
 
-      io.to(getSessionRoom(session.id)).emit("chat:ended", {
-        sessionId: session.id,
+      emitChatEnded(io, session, {
         endedBy: "astrologer",
         reason: "astrologer_left_chat",
+        currentMinutes: billing.currentMinutes,
+        currentCost: billing.currentCost,
+        totalMinutes: billing.totalMinutes,
+        totalCost: billing.totalCost,
+        billedAmount: billing.billedAmount,
       });
 
       io.to(getUserRoom(session.userId)).emit("chat:updated", {
@@ -1323,9 +1612,12 @@ module.exports = {
   endAstrologerChatSession,
   sendMessage,
   getSessionMessages,
+  getChatSessionStatusV2,
   getUserChatSessions,
   getUserChatHistory,
   getUserAstrologerChatHistory,
+  getChatHistorySessionV2,
+  getAstrologerChatHistory,
   getAstrologerChatSessions,
   getActiveSession,
   getTotalMinutesWithAstrologer,

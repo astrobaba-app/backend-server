@@ -22,10 +22,10 @@ const TicketReply = sequelize.define(
     repliedBy: {
       type: DataTypes.UUID,
       allowNull: false,
-      comment: "User ID or Admin ID",
+      comment: "User, astrologer, or admin ID",
     },
     repliedByType: {
-      type: DataTypes.ENUM("user", "admin"),
+      type: DataTypes.ENUM("user", "astrologer", "admin"),
       allowNull: false,
     },
     message: {

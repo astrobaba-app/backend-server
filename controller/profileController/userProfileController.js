@@ -1,6 +1,21 @@
 const User = require("../../model/user/userAuth");
 const { validatePincode, isValidState, isValidCity } = require("../../utils/indianLocations");
+const {
+  normalizeIndianMobile,
+} = require("../../services/phoneNumberService");
 
+const isOnboardingProfileComplete = (user) =>
+  Boolean(
+    user.fullName &&
+      user.gender &&
+      user.dateOfbirth &&
+      user.timeOfbirth &&
+      user.placeOfBirth &&
+      user.latitude !== null &&
+      user.latitude !== undefined &&
+      user.longitude !== null &&
+      user.longitude !== undefined
+  );
 
 const getProfile = async (req, res) => {
   try {
@@ -35,6 +50,7 @@ const updateProfile = async (req, res) => {
     const {
       fullName,
       email,
+      mobile,
       gender,
       dateOfbirth,
       timeOfbirth,
@@ -83,6 +99,33 @@ const updateProfile = async (req, res) => {
     // Update fields if provided
     if (fullName !== undefined) user.fullName = fullName;
     if (email !== undefined) user.email = email;
+    if (mobile !== undefined) {
+      if (mobile === null || mobile === "") {
+        user.mobile = null;
+      } else {
+        const normalizedMobile = normalizeIndianMobile(mobile);
+
+        if (!normalizedMobile) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid mobile number format",
+          });
+        }
+
+        const existingMobileUser = await User.findOne({
+          where: { mobile: normalizedMobile },
+        });
+
+        if (existingMobileUser && existingMobileUser.id !== user.id) {
+          return res.status(409).json({
+            success: false,
+            message: "Mobile number is already linked to another account",
+          });
+        }
+
+        user.mobile = normalizedMobile;
+      }
+    }
     if (gender !== undefined) user.gender = gender;
     
     // Validate and update dateOfbirth
@@ -183,6 +226,10 @@ const updateProfile = async (req, res) => {
 
       user.forumIdentityMode = forumIdentityMode;
     }
+
+    if (!user.isOnboarded && isOnboardingProfileComplete(user)) {
+      user.isOnboarded = true;
+    }
     
     await user.save();
 
@@ -208,6 +255,7 @@ const updateProfile = async (req, res) => {
         pushNotifications: user.pushNotifications,
         emailUpdates: user.emailUpdates,
         smsAlerts: user.smsAlerts,
+        isOnboarded: user.isOnboarded,
         forumIdentityMode: user.forumIdentityMode,
         forumAnonymousHandle: user.forumAnonymousHandle,
         forumAnonymousHash: user.forumAnonymousHash,

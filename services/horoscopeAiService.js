@@ -101,13 +101,51 @@ async function enhanceHoroscopeWithAI({ zodiacSign, period = 'Daily', horoscopeD
       normalizedPeriod = 'Daily';
     }
 
-    // Look up the specific function for this period and sign
-    const generatorFunction = GENERATORS[normalizedPeriod][normalizedSign];
+    // Build payload for AI without shadowing the logging context.
+    const aiContext = {
+      zodiacSign,
+      period,
+      date: horoscopeData.date || horoscopeData.start_date || horoscopeData.month || horoscopeData.year,
+      moonPhase: horoscopeData.moon_phase,
+      predictions: {
+        overview: predictions.overall || predictions.overview,
+        love: predictions.love || predictions.love_relationships,
+        career: predictions.career || predictions.career_business,
+        finance: predictions.finance || predictions.finance_wealth,
+        health: predictions.health || predictions.health_wellness,
+        emotions: predictions.emotions_mind,
+        travel: predictions.travel_movement,
+        personal: predictions.spiritual_growth,
+      },
+      luckyElements: horoscopeData.lucky_elements,
+      remedies: horoscopeData.remedies,
+    };
 
-    if (!generatorFunction) {
-      console.warn(`[HoroscopeAI] Unsupported or invalid zodiac sign: ${zodiacSign}`);
-      return null;
-    }
+    const prompt = `You are an expert Vedic astrologer. Generate engaging, personalized horoscope narratives for ${zodiacSign} for their ${period} horoscope.
+
+Context:
+- Zodiac Sign: ${zodiacSign}
+- Period: ${period}
+- Date: ${aiContext.date}
+- Moon Phase: ${aiContext.moonPhase || 'N/A'}
+
+For each section below, create a 6-7 line narrative that:
+1. Is warm, personal, and directly addresses the reader
+2. Incorporates the key predictions and insights
+3. Provides actionable advice and encouragement
+4. Maintains an optimistic yet realistic tone
+5. Uses conversational, easy-to-understand language
+
+Sections to enhance:
+1. Overview: ${JSON.stringify(aiContext.predictions.overview)}
+2. Love & Relationships: ${JSON.stringify(aiContext.predictions.love)}
+3. Personal Life: ${JSON.stringify(aiContext.predictions.personal)}
+4. Career & Finance: ${JSON.stringify(aiContext.predictions.career)} + ${JSON.stringify(aiContext.predictions.finance)}
+5. Health & Wellness: ${JSON.stringify(aiContext.predictions.health)}
+6. Emotions & Mind: ${JSON.stringify(aiContext.predictions.emotions)}
+7. Lucky Insights: ${JSON.stringify(aiContext.luckyElements)}
+8. Travel & Movement: ${JSON.stringify(aiContext.predictions.travel)}
+9. Remedies: ${JSON.stringify(aiContext.remedies)}
 
     console.log(`[HoroscopeAI] Routing request to ${normalizedPeriod} generator for ${normalizedSign}...`);
 

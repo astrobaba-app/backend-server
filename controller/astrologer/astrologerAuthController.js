@@ -1,10 +1,5 @@
 const Astrologer = require("../../model/astrologer/astrologer");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-const crypto = require("crypto");
 const redis = require("../../config/redis/redis");
-const handleSendAuthOTP = require("../../mobileService/userAuthOtp");
-const { sendAstrologerPasswordResetOTPEmail } = require("../../emailService/authEmail");
 const {
   createToken,
   createMiddlewareToken,
@@ -17,20 +12,14 @@ const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologe
 const Follow = require("../../model/follow/follow");
 const notificationService = require("../../services/notificationService");
 const {
-  verifyFirebasePhoneToken,
   normalizeIndianMobile,
-} = require("../../services/firebasePhoneAuthService");
+} = require("../../services/phoneNumberService");
+const {
+  createAndQueueOtp,
+  verifyQueuedOtp,
+} = require("../../services/otpQueueService");
 
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
-
-const PASSWORD_RESET_OTP_TTL_SECONDS = 600;
-const PASSWORD_RESET_TOKEN_TTL_SECONDS = 600;
-
-const normalizeForgotMethod = (value) => (value || "").toLowerCase().trim();
-
-const normalizePhoneNumber = (value) => (value || "").replace(/\D/g, "").trim();
+const REGISTRATION_VERIFIED_TTL_SECONDS = 20 * 60;
 
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 
@@ -46,26 +35,36 @@ const sendRegistrationOTP = async (req, res) => {
       });
     }
 
-    // Twilio-based OTP flow retained for rollback/reference.
-    // const otp = generateOTP();
-    // const otpKey = `astrologer:otp:${normalizedPhoneNumber}`;
-    // await redis.setex(otpKey, 600, {
-    //   otp,
-    //   type: "registration",
-    //   createdAt: Date.now(),
-    // });
-    // await handleSendAuthOTP(normalizedPhoneNumber, otp);
+    const astrologer = await Astrologer.findOne({
+      where: { phoneNumber: normalizedPhoneNumber },
+    });
+
+    if (astrologer && !astrologer.isApproved) {
+      return res.status(403).json({
+        success: false,
+        pendingApproval: true,
+        message:
+          "Your application is currently under review and has not been approved yet. You will receive an SMS and/or email once approval is completed.",
+      });
+    }
+
+    await createAndQueueOtp({
+      actorType: "astrologer",
+      mobile: normalizedPhoneNumber,
+    });
 
     res.status(200).json({
       success: true,
-      message: "Use Firebase phone authentication to receive OTP",
+      accountExists: Boolean(astrologer),
+      isApproved: astrologer ? astrologer.isApproved : false,
+      message: "OTP sent successfully",
       phoneNumber: normalizedPhoneNumber,
     });
   } catch (error) {
     console.error("Send registration OTP error:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to send OTP",
+      message: error.statusCode === 429 ? error.message : "Failed to send OTP",
       error: error.message,
     });
   }
@@ -74,43 +73,93 @@ const sendRegistrationOTP = async (req, res) => {
 // Verify OTP
 const verifyOTP = async (req, res) => {
   try {
-    const { phoneNumber, firebaseIdToken } = req.body;
+    const { phoneNumber } = req.body;
+    const otp = String(req.body.otp || "").trim();
 
-    if (!phoneNumber || !firebaseIdToken) {
+    const normalizedPhoneNumber = normalizeIndianMobile(phoneNumber);
+    if (!normalizedPhoneNumber || !otp) {
       return res.status(400).json({
         success: false,
-        message: "Phone number and firebaseIdToken are required",
+        message: "Phone number and OTP are required",
       });
     }
 
-    const verificationResult = await verifyFirebasePhoneToken(
-      firebaseIdToken,
-      phoneNumber
-    );
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 4-digit OTP",
+      });
+    }
 
-    // Legacy Redis OTP verification retained for rollback/reference.
-    // const { otp } = req.body;
-    // const otpKey = `astrologer:otp:${phoneNumber}`;
-    // const storedData = await redis.get(otpKey);
-    // if (!storedData) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "OTP not found or expired. Please request a new OTP",
-    //   });
-    // }
-    // const otpData = typeof storedData === "string" ? JSON.parse(storedData) : storedData;
-    // if (otpData.otp !== otp) {
-    //   return res.status(400).json({
-    //     success: false,
-    //     message: "Invalid OTP",
-    //   });
-    // }
-    // await redis.del(otpKey);
+    await verifyQueuedOtp({
+      actorType: "astrologer",
+      mobile: normalizedPhoneNumber,
+      otp,
+    });
+    const astrologer = await Astrologer.findOne({
+      where: { phoneNumber: normalizedPhoneNumber },
+    });
 
-    res.status(200).json({
+    if (!astrologer) {
+      const verificationKey = `astrologer:registration:verified:${normalizedPhoneNumber}`;
+      await redis.setex(verificationKey, REGISTRATION_VERIFIED_TTL_SECONDS, {
+        phoneNumber: normalizedPhoneNumber,
+        verifiedAt: Date.now(),
+      });
+
+      return res.status(200).json({
+        success: true,
+        requiresRegistration: true,
+        message: "Phone number verified successfully",
+        phoneNumber: normalizedPhoneNumber,
+      });
+    }
+
+    if (!astrologer.isApproved) {
+      return res.status(403).json({
+        success: false,
+        pendingApproval: true,
+        message:
+          "Your application is currently under review and has not been approved yet. You will receive an SMS and/or email once approval is completed.",
+      });
+    }
+
+    if (!astrologer.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been deactivated. Please contact support.",
+      });
+    }
+
+    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const token = createToken(authPayload);
+    const astrologerToken = createMiddlewareToken(authPayload);
+    const refreshToken = createRefreshToken(authPayload);
+
+    setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
+
+    return res.status(200).json({
       success: true,
-      message: "Phone number verified successfully",
-      phoneNumber: verificationResult.mobile,
+      message: "Login successful",
+      phoneNumber: normalizedPhoneNumber,
+      requiresRegistration: false,
+      astrologer: {
+        id: astrologer.id,
+        phoneNumber: astrologer.phoneNumber,
+        email: astrologer.email,
+        fullName: astrologer.fullName,
+        photo: astrologer.photo,
+        isApproved: astrologer.isApproved,
+        isActive: astrologer.isActive,
+        isOnline: astrologer.isOnline,
+        languages: astrologer.languages,
+        skills: astrologer.skills,
+        yearsOfExperience: astrologer.yearsOfExperience,
+        rating: parseFloat(astrologer.rating),
+        totalConsultations: astrologer.totalConsultations,
+      },
+      token,
+      astrologerToken,
     });
   } catch (error) {
     console.error("Verify OTP error:", error);
@@ -129,7 +178,6 @@ const completeRegistration = async (req, res) => {
     const {
       phoneNumber,
       email,
-      password,
       fullName,
       dateOfBirth,
       gender,
@@ -142,10 +190,27 @@ const completeRegistration = async (req, res) => {
     } = req.body;
 
     // Validation
-    if (!phoneNumber || !email || !password || !fullName) {
+    if (!phoneNumber || !fullName) {
       return res.status(400).json({
         success: false,
-        message: "Phone number, email, password, and full name are required",
+        message: "Phone number and full name are required",
+      });
+    }
+
+    const normalizedPhoneNumber = normalizeIndianMobile(phoneNumber);
+    if (!normalizedPhoneNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid 10-digit phone number",
+      });
+    }
+
+    const verificationKey = `astrologer:registration:verified:${normalizedPhoneNumber}`;
+    const verificationData = await redis.get(verificationKey);
+    if (!verificationData) {
+      return res.status(403).json({
+        success: false,
+        message: "Phone number verification expired. Please verify OTP again.",
       });
     }
 
@@ -240,7 +305,7 @@ const completeRegistration = async (req, res) => {
 
     // Check if astrologer already exists
     const existingAstrologer = await Astrologer.findOne({
-      where: { phoneNumber },
+      where: { phoneNumber: normalizedPhoneNumber },
     });
 
     if (existingAstrologer) {
@@ -250,28 +315,27 @@ const completeRegistration = async (req, res) => {
       });
     }
 
-    const existingEmail = await Astrologer.findOne({
-      where: { email },
-    });
-
-    if (existingEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
+    const normalizedEmail = email ? normalizeEmail(email) : null;
+    if (normalizedEmail) {
+      const existingEmail = await Astrologer.findOne({
+        where: { email: normalizedEmail },
       });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already registered",
+        });
+      }
     }
-
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
 
     // Get photo URL from uploaded file (if any)
     const photo = req.fileUrl || null;
 
     // Create astrologer
     const astrologer = await Astrologer.create({
-      phoneNumber,
-      email,
-      password: hashedPassword,
+      phoneNumber: normalizedPhoneNumber,
+      email: normalizedEmail,
+      password: null,
       fullName,
       photo,
       dateOfBirth: dateOfBirth || null,
@@ -284,10 +348,12 @@ const completeRegistration = async (req, res) => {
       bio: bio || null,
       isApproved: false,
     });
+    await redis.del(verificationKey);
 
     res.status(201).json({
       success: true,
-      message: "Registration successful. Your profile is pending approval.",
+      message:
+        "Your application has been submitted successfully. You will receive an SMS and/or email once your account is approved by our team.",
       astrologer: {
         id: astrologer.id,
         phoneNumber: astrologer.phoneNumber,
@@ -312,93 +378,12 @@ const completeRegistration = async (req, res) => {
   }
 };
 
-// Login with email and password
 const login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required",
-      });
-    }
-
-    // Find astrologer
-    const astrologer = await Astrologer.findOne({ where: { email } });
-
-    if (!astrologer) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password",
-      });
-    }
-
-
-
-    // Check password
-    const isPasswordValid = await bcrypt.compare(password, astrologer.password);
-
-    if (!isPasswordValid) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password",
-      });
-    }
-
-  if (!astrologer.isApproved) {
-      return res.status(403).json({
-        success: false,
-        message: "Your account has been Pending approval. Please wait for admin approval.",
-      });
-    }
-
-    // Check if account is active
-    if (!astrologer.isActive) {
-      return res.status(403).json({
-        success: false,
-        message: "Your account has been deactivated. Please contact support.",
-      });
-    }
-
-    // Generate JWT token with explicit astrologer role
-    const authPayload = { id: astrologer.id, role: "astrologer" };
-    const token = createToken(authPayload);
-    const astrologerToken = createMiddlewareToken(authPayload);
-    const refreshToken = createRefreshToken(authPayload);
-  
-    setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
-
-
-    res.status(200).json({
-      success: true,
-      message: "Login successful",
-      astrologer: {
-        id: astrologer.id,
-        phoneNumber: astrologer.phoneNumber,
-        email: astrologer.email,
-        fullName: astrologer.fullName,
-        photo: astrologer.photo,
-        isApproved: astrologer.isApproved,
-        isActive: astrologer.isActive,
-        isOnline: astrologer.isOnline,
-        languages: astrologer.languages,
-        skills: astrologer.skills,
-        yearsOfExperience: astrologer.yearsOfExperience,
-        rating: parseFloat(astrologer.rating),
-        totalConsultations: astrologer.totalConsultations,
-      },
-      token,
-      astrologerToken, // Add this for localStorage
-    });
-  } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to login",
-      error: error.message,
-    });
-  }
+  return res.status(410).json({
+    success: false,
+    message:
+      "Password login has been removed. Please login using mobile OTP.",
+  });
 };
 
 // Get profile
@@ -838,236 +823,6 @@ const getOnlineStatus = async (req, res) => {
   }
 };
 
-const sendForgotPasswordOTP = async (req, res) => {
-  try {
-    const method = normalizeForgotMethod(req.body.method);
-    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
-    const email = normalizeEmail(req.body.email);
-
-    if (!["mobile", "email"].includes(method)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please select a valid OTP method",
-      });
-    }
-
-    let astrologer;
-    let recipient;
-
-    if (method === "mobile") {
-      if (!/^\d{10}$/.test(phoneNumber)) {
-        return res.status(400).json({
-          success: false,
-          message: "Please provide a valid 10-digit mobile number",
-        });
-      }
-
-      astrologer = await Astrologer.findOne({ where: { phoneNumber } });
-      recipient = phoneNumber;
-    } else {
-      if (!/^\S+@\S+\.\S+$/.test(email)) {
-        return res.status(400).json({
-          success: false,
-          message: "Please provide a valid email address",
-        });
-      }
-
-      astrologer = await Astrologer.findOne({ where: { email } });
-      recipient = email;
-    }
-
-    if (!astrologer) {
-      return res.status(404).json({
-        success: false,
-        message: "Astrologer account not found",
-      });
-    }
-
-    if (!astrologer.isActive) {
-      return res.status(403).json({
-        success: false,
-        message: "Your account is deactivated. Please contact support.",
-      });
-    }
-
-    const otp = generateOTP();
-    const otpKey = `astrologer:forgot-password:otp:${method}:${recipient}`;
-    const verifiedKey = `astrologer:forgot-password:verified:${method}:${recipient}`;
-
-    await redis.del(verifiedKey);
-    await redis.setex(otpKey, PASSWORD_RESET_OTP_TTL_SECONDS, {
-      otp,
-      astrologerId: astrologer.id,
-      method,
-      recipient,
-      createdAt: Date.now(),
-    });
-
-    if (method === "mobile") {
-      await handleSendAuthOTP(phoneNumber, otp);
-    } else {
-      await sendAstrologerPasswordResetOTPEmail({
-        to: astrologer.email,
-        fullName: astrologer.fullName,
-        otp,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: `OTP sent successfully to your ${method === "mobile" ? "mobile number" : "email"}`,
-    });
-  } catch (error) {
-    console.error("Send forgot password OTP error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to send OTP",
-      error: error.message,
-    });
-  }
-};
-
-const verifyForgotPasswordOTP = async (req, res) => {
-  try {
-    const method = normalizeForgotMethod(req.body.method);
-    const otp = (req.body.otp || "").trim();
-    const phoneNumber = normalizePhoneNumber(req.body.phoneNumber);
-    const email = normalizeEmail(req.body.email);
-
-    if (!["mobile", "email"].includes(method)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please select a valid OTP method",
-      });
-    }
-
-    if (!/^\d{6}$/.test(otp)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide a valid 6-digit OTP",
-      });
-    }
-
-    const recipient = method === "mobile" ? phoneNumber : email;
-
-    if (!recipient) {
-      return res.status(400).json({
-        success: false,
-        message: `Please provide your ${method === "mobile" ? "mobile number" : "email"}`,
-      });
-    }
-
-    const otpKey = `astrologer:forgot-password:otp:${method}:${recipient}`;
-    const storedData = await redis.get(otpKey);
-
-    if (!storedData) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP not found or expired. Please request a new OTP",
-      });
-    }
-
-    const otpData = typeof storedData === "string" ? JSON.parse(storedData) : storedData;
-
-    if (otpData.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    await redis.del(otpKey);
-
-    const resetToken = crypto.randomBytes(32).toString("hex");
-    const resetTokenKey = `astrologer:forgot-password:token:${resetToken}`;
-    await redis.setex(resetTokenKey, PASSWORD_RESET_TOKEN_TTL_SECONDS, {
-      astrologerId: otpData.astrologerId,
-      method,
-      recipient,
-      verifiedAt: Date.now(),
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "OTP verified successfully",
-      resetToken,
-    });
-  } catch (error) {
-    console.error("Verify forgot password OTP error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to verify OTP",
-      error: error.message,
-    });
-  }
-};
-
-const resetForgotPassword = async (req, res) => {
-  try {
-    const resetToken = (req.body.resetToken || "").trim();
-    const newPassword = (req.body.newPassword || "").trim();
-    const confirmPassword = (req.body.confirmPassword || "").trim();
-
-    if (!resetToken) {
-      return res.status(400).json({
-        success: false,
-        message: "Reset token is required",
-      });
-    }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        success: false,
-        message: "New password must be at least 6 characters long",
-      });
-    }
-
-    if (newPassword !== confirmPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "Password and confirm password do not match",
-      });
-    }
-
-    const resetTokenKey = `astrologer:forgot-password:token:${resetToken}`;
-    const tokenData = await redis.get(resetTokenKey);
-
-    if (!tokenData) {
-      return res.status(400).json({
-        success: false,
-        message: "Reset session expired. Please verify OTP again",
-      });
-    }
-
-    const parsedTokenData = typeof tokenData === "string" ? JSON.parse(tokenData) : tokenData;
-
-    const astrologer = await Astrologer.findByPk(parsedTokenData.astrologerId);
-    if (!astrologer) {
-      return res.status(404).json({
-        success: false,
-        message: "Astrologer account not found",
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await astrologer.update({ password: hashedPassword });
-
-    await redis.del(resetTokenKey);
-
-    return res.status(200).json({
-      success: true,
-      message: "Password reset successful. Please login with your new password",
-    });
-  } catch (error) {
-    console.error("Reset forgot password error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to reset password",
-      error: error.message,
-    });
-  }
-};
-
 module.exports = {
   sendRegistrationOTP,
   verifyOTP,
@@ -1081,7 +836,4 @@ module.exports = {
   goOnline,
   goOffline,
   getOnlineStatus,
-  sendForgotPasswordOTP,
-  verifyForgotPasswordOTP,
-  resetForgotPassword,
 };

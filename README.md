@@ -158,7 +158,37 @@ APPLE_REDIRECT_URI=YOUR_APPLE_REDIRECT_URI
 WEB_PUSH_PUBLIC_KEY=YOUR_WEB_PUSH_PUBLIC_KEY
 WEB_PUSH_PRIVATE_KEY=YOUR_WEB_PUSH_PRIVATE_KEY
 WEB_PUSH_SUBJECT=mailto:hello@graho.in
+
+# Temporary MSG91 OTP test route
+MSG91_AUTH_KEY=YOUR_MSG91_AUTH_KEY
+MSG91_OTP_TEMPLATE_ID=YOUR_MSG91_OTP_TEMPLATE_ID
+OTP_QUEUE_WORKER_ENABLED=true
+TEMP_MSG91_OTP_ENABLED=false
+TEMP_MSG91_OTP_API_KEY=YOUR_RANDOM_INTERNAL_TEST_KEY
 ```
+
+User and astrologer OTP sends use backend-generated 4-digit OTPs, Redis storage,
+a Redis queue, and MSG91 delivery from an on-demand OTP worker. The worker wakes
+when an OTP is queued, drains pending OTP jobs, then goes idle without polling
+Redis. Each phone number is limited to 5 OTP requests per 1 hour.
+
+## Temporary MSG91 OTP Route
+
+Enable `TEMP_MSG91_OTP_ENABLED=true` only while testing, then call:
+
+```http
+POST /api/internal/temp-otp/send
+x-internal-api-key: YOUR_RANDOM_INTERNAL_TEST_KEY
+Content-Type: application/json
+
+{
+  "mobile": "9876543210",
+  "otp": "1234"
+}
+```
+
+The `otp` field is optional. When omitted, MSG91 generates the OTP. Optional
+MSG91 template variables can be passed in a `variables` object.
 
 ## Firebase Service Account JSON (from Notion)
 

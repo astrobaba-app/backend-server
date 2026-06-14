@@ -18,6 +18,9 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
+const {
+  handleNewUserOnboarding,
+} = require("../../services/newUserOnboardingService");
 
 const normalizeSource = (value) => {
   if (Array.isArray(value)) {
@@ -63,6 +66,162 @@ const decodeOAuthState = (stateValue) => {
   }
 
   return null;
+};
+
+const getAllowedGoogleClientIds = () =>
+  [
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_WEB_CLIENT_ID,
+    process.env.GOOGLE_ANDROID_CLIENT_ID,
+    process.env.GOOGLE_IOS_CLIENT_ID,
+  ].filter(Boolean);
+
+const buildUserPayload = (user) => ({
+  id: user.id,
+  fullName: user.fullName,
+  email: user.email,
+  mobile: user.mobile,
+  gender: user.gender,
+  dateOfbirth: user.dateOfbirth,
+  timeOfbirth: user.timeOfbirth,
+  placeOfBirth: user.placeOfBirth,
+  latitude: user.latitude,
+  longitude: user.longitude,
+  isOnboarded: user.isOnboarded,
+});
+
+const findOrCreateGoogleUser = async ({ googleId, name, email }) => {
+  let googleAuth = await GoogleAuth.findOne({
+    where: { googleId },
+    include: [{ model: User, as: "user" }],
+  });
+
+  let user;
+  let isNewUser = false;
+
+  if (googleAuth) {
+    user = googleAuth.user;
+
+    const updates = {};
+    if (!user.fullName && name) {
+      updates.fullName = name;
+    }
+    if (!user.email && email) {
+      updates.email = email;
+    }
+
+    if (Object.keys(updates).length) {
+      await user.update(updates);
+    }
+  } else {
+    user = email ? await User.findOne({ where: { email } }) : null;
+
+    if (user) {
+      googleAuth = await GoogleAuth.create({
+        userId: user.id,
+        googleId,
+      });
+
+      if (!user.fullName && name) {
+        await user.update({ fullName: name });
+      }
+    } else {
+      user = await User.create({
+        fullName: name,
+        email,
+        isUserRequested: false,
+      });
+
+      googleAuth = await GoogleAuth.create({
+        userId: user.id,
+        googleId,
+      });
+
+      isNewUser = true;
+    }
+  }
+
+  return { user, isNewUser };
+};
+
+const completeGoogleLogin = async (res, user, isNewUser) => {
+  const token = createToken(user);
+  const middlewareToken = createMiddlewareToken(user);
+  const refreshToken = createRefreshToken(user);
+
+  setTokenCookie(res, token, middlewareToken, refreshToken);
+
+  await trackUserLogin(user.id, "email", {
+    invalidateTotalUsers: isNewUser,
+  });
+
+  let bonusInfo = null;
+  if (isNewUser) {
+    try {
+      const bonusResult = await applySignupBonus(user.id, "google");
+      if (bonusResult.bonusApplied) {
+        bonusInfo = {
+          amount: bonusResult.amount,
+          message: bonusResult.message,
+        };
+      }
+    } catch (error) {
+      console.error("Failed to apply signup bonus:", error);
+    }
+
+    try {
+      await handleNewUserOnboarding({
+        mobile: user.mobile,
+        email: user.email,
+      });
+    } catch (error) {
+      console.error("Failed during new user onboarding notifications:", error);
+    }
+  }
+
+  return {
+    token,
+    middlewareToken,
+    refreshToken,
+    bonusInfo,
+    profileIncomplete: !user.isOnboarded,
+  };
+};
+
+const verifyGoogleIdToken = async (idToken) => {
+  const allowedClientIds = getAllowedGoogleClientIds();
+
+  if (!allowedClientIds.length) {
+    const error = new Error("Google mobile auth is not configured properly");
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const response = await axios.get("https://oauth2.googleapis.com/tokeninfo", {
+    params: { id_token: idToken },
+  });
+
+  const profile = response.data || {};
+
+  if (!profile.sub) {
+    const error = new Error("Google ID missing from token");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!allowedClientIds.includes(profile.aud)) {
+    const error = new Error("Google token audience is not allowed");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (profile.email_verified && String(profile.email_verified) !== "true") {
+    const error = new Error("Google email is not verified");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  return profile;
 };
 
 const redirectToGoogle = (req, res) => {
@@ -170,69 +329,16 @@ const googleCallback = async (req, res) => {
         .json({ message: "Google ID missing from response" });
     }
 
-    // Check if Google account is already linked
-    let googleAuth = await GoogleAuth.findOne({ 
-      where: { googleId },
-      include: [{ model: User, as: "user" }]
+    const { user, isNewUser } = await findOrCreateGoogleUser({
+      googleId,
+      name,
+      email,
     });
-
-    let user;
-    let isNewUser = false;
-
-    if (googleAuth) {
-      // User already exists with this Google ID - login
-      user = googleAuth.user;
-      
-      // Update user info if changed
-      if (user.fullName !== name || user.email !== email) {
-        await user.update({ fullName: name, email });
-      }
-    } else {
-      // Check if user exists with this email
-      user = await User.findOne({ where: { email } });
-
-      if (user) {
-        // User exists with email - link Google account
-        googleAuth = await GoogleAuth.create({
-          userId: user.id,
-          googleId,
-        });
-      } else {
-        // New user - create user and Google auth
-        user = await User.create({
-          fullName: name,
-          email,
-          isUserRequested: false,
-        });
-
-        googleAuth = await GoogleAuth.create({
-          userId: user.id,
-          googleId,
-        });
-        
-        isNewUser = true;
-      }
-    }
-
-    const token = createToken(user);
-    const middlewareToken = createMiddlewareToken(user);
-    const refreshToken = createRefreshToken(user);
-
-    setTokenCookie(res, token, middlewareToken, refreshToken);
-
-    await trackUserLogin(user.id, "email", {
-      invalidateTotalUsers: isNewUser,
-    });
-
-    // Apply signup bonus for new users
-    if (isNewUser) {
-      try {
-        await applySignupBonus(user.id, "google");
-      } catch (error) {
-        console.error("Failed to apply signup bonus:", error);
-        // Don't fail the registration if bonus fails
-      }
-    }
+    const { token, middlewareToken, refreshToken } = await completeGoogleLogin(
+      res,
+      user,
+      isNewUser
+    );
 
     // Use source parameter to determine redirect destination
     // Only redirect to app deep link if explicitly from app (source=app)
@@ -281,7 +387,52 @@ const googleCallback = async (req, res) => {
   }
 };
 
+const googleMobileLogin = async (req, res) => {
+  try {
+    const idToken = String(req.body.idToken || "").trim();
+
+    if (!idToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Google ID token is required",
+      });
+    }
+
+    const profile = await verifyGoogleIdToken(idToken);
+    const { user, isNewUser } = await findOrCreateGoogleUser({
+      googleId: profile.sub,
+      name: profile.name,
+      email: profile.email,
+    });
+    const { token, middlewareToken, bonusInfo, profileIncomplete } =
+      await completeGoogleLogin(res, user, isNewUser);
+
+    return res.status(200).json({
+      success: true,
+      message: isNewUser ? "Registration successful" : "Login successful",
+      isNewUser: profileIncomplete,
+      token,
+      middlewareToken,
+      bonusInfo,
+      user: buildUserPayload(user),
+    });
+  } catch (error) {
+    console.error("Google mobile login error:", {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status,
+    });
+
+    const statusCode = error.statusCode || error.response?.status || 500;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || "Google login failed",
+    });
+  }
+};
+
 module.exports = {
   googleCallback,
+  googleMobileLogin,
   redirectToGoogle,
 };

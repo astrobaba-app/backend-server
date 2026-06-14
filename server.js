@@ -14,6 +14,7 @@ const { assertDeveloperIdentity } = require("./services/developerIdentityService
 const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
+const { startOtpQueueWorker } = require("./services/otpQueueService");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -177,6 +178,7 @@ const forumRoute = require("./routes/forum/forumRoute");
 const jobRoute = require("./routes/job/jobRoute");
 const palmReadingRoute = require("./routes/palm/palmReadingRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
+const tempOtpRoute = require("./routes/internal/tempOtpRoute");
 const { startPalmQueueWorker } = require("./services/palmQueueService");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
@@ -211,6 +213,7 @@ app.use("/api/forum", forumRoute);
 app.use("/api/jobs", jobRoute);
 app.use("/api/palm-reading", palmReadingRoute);
 app.use("/api/internal", internalLogRoute);
+app.use("/api/internal/temp-otp", tempOtpRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 const wss = new WebSocketServer({ server, path: '/api/ai-voice-ws' });
@@ -294,12 +297,8 @@ initDB(() => {
     startForumAIModerationWorker();
     startForumDuplicateWorker();
     startJobApplicationEmailQueueWorker();
+    startOtpQueueWorker();
     startPalmQueueWorker();
-    console.log("Horoscope scheduler initialized");
-    console.log("Forum AI moderation worker initialized");
-    console.log("Forum duplicate worker initialized");
-    console.log("Job application email queue worker initialized");
-    console.log("Palm reading queue worker initialized");
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });
