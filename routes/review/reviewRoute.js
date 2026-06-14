@@ -4,6 +4,7 @@ const {
   createReview,
   getAstrologerReviews,
   getMyReview,
+  getMyReviews,
   updateReview,
   deleteReview,
   addReply,
@@ -15,6 +16,7 @@ const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // User routes (protected)
 router.post("/user/create", checkForAuthenticationCookie(), createReview);
+router.get("/user/my-reviews", checkForAuthenticationCookie(), getMyReviews);
 router.get("/user/my", checkForAuthenticationCookie(), getMyReview);
 router.put("/user/:reviewId", checkForAuthenticationCookie(), updateReview);
 router.delete("/user/:reviewId", checkForAuthenticationCookie(), deleteReview);

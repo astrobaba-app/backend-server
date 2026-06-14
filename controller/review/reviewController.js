@@ -192,6 +192,54 @@ const getMyReview = async (req, res) => {
   }
 };
 
+// Get all reviews created by the current user (user only)
+const getMyReviews = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { page = 1, limit = 10 } = req.query;
+    const parsedPage = parseInt(page, 10);
+    const parsedLimit = parseInt(limit, 10);
+    const offset = (parsedPage - 1) * parsedLimit;
+
+    const { rows: reviews, count } = await Review.findAndCountAll({
+      where: { userId },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "fullName", "email"],
+        },
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "skills", "categories"],
+        },
+      ],
+      limit: parsedLimit,
+      offset,
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      success: true,
+      reviews,
+      pagination: {
+        total: count,
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(count / parsedLimit),
+      },
+    });
+  } catch (error) {
+    console.error("Get my reviews error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch reviews",
+      error: error.message,
+    });
+  }
+};
+
 // Update review (user only - own review)
 const updateReview = async (req, res) => {
   try {
@@ -506,6 +554,7 @@ module.exports = {
   createReview,
   getAstrologerReviews,
   getMyReview,
+  getMyReviews,
   updateReview,
   deleteReview,
   addReply,
