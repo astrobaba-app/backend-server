@@ -45,7 +45,7 @@ const getBirthChart = async (userRequest) => {
     console.log('Fetching birth chart with data:', birth_data);
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/chart/birth`, {
       birth_data,
-      house_system: "PLACIDUS"
+      house_system: "WHOLE_SIGN"
     });
     return response.data;
   } catch (error) {
@@ -129,8 +129,11 @@ const getPanchang = async (userRequest) => {
 const getPlanetaryPositions = async (userRequest) => {
   try {
     const chartData = await getBirthChart(userRequest);
-    const planets = chartData.chart.planets || {};
-    const asc = chartData.chart.ascendant;
+  
+    // Extract the full chart object so we don't lose anything
+    const chart = chartData.chart || {};
+    const planets = chart.planets || {};
+    const asc = chart.ascendant;
 
     // Provide Ascendant in the same shape as other planetary rows for UI convenience
     if (asc && asc.longitude !== undefined && asc.longitude !== null) {
@@ -143,16 +146,34 @@ const getPlanetaryPositions = async (userRequest) => {
           sign_num: Math.floor(((ascLon + 360) % 360) / 30),
           sign_degree: asc.degree ?? (ascLon % 30),
         };
+        
+        // CRITICAL: If you are adding Ascendant to planets, 
+        // you must also assign it a house so the UI knows where to put it!
+        if (chart.planet_houses) {
+          chart.planet_houses['Ascendant'] = 1; 
+        }
       }
     }
 
-    return planets;
+    // console.log("Extracted planetary positions:", planets);
+    // console.log("Extracted house data:", {
+    //   planet_houses: chart.planet_houses,
+    //   houses: chart.houses
+    // });
+
+
+    // Return an object that includes BOTH the planets AND the house data
+    return {
+      planets: planets,
+      planet_houses: chart.planet_houses || {},
+      houses: chart.houses || {}
+    };
+
   } catch (error) {
     console.error("Error in getPlanetaryPositions:", error.response?.data || error.message);
     return null;
   }
 };
-
 /**
  * Fetch all divisional charts (D1-D60)
  */

@@ -1,36 +1,149 @@
+const { generateGeneralDetails, generateVimshottariDashaReport, generateRudrakshaSuggestion, generateGemstoneSuggestion, generateDoshaReport } = require("../utils/reportGenerator");
 const { buildInsightPayload } = require("./astroInsightEngineService");
 const { createChatCompletion } = require("./openaiClient");
 
+// ==================== CONFIGURATION & CONSTANTS ====================
+
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
+const GENERAL_REPORT_CONFIG = {
+  temperature: 0.52,
+  maxTokens: 4200,
+  minSentencesPerSection: 5,
+  maxSentencesPerSection: 8,
+  enableDetailedLogging: true,
+  enablePayloadValidation: true,
+  fallbackMode: "enhanced",
+  version: "2.1.0",
+  supportedSigns: [
+    "Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo",
+    "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"
+  ],
+  elementMap: {
+    Aries: "Fire", Taurus: "Earth", Gemini: "Air", Cancer: "Water",
+    Leo: "Fire", Virgo: "Earth", Libra: "Air", Scorpio: "Water",
+    Sagittarius: "Fire", Capricorn: "Earth", Aquarius: "Air", Pisces: "Water"
+  },
+  modalityMap: {
+    Aries: "Cardinal", Taurus: "Fixed", Gemini: "Mutable", Cancer: "Cardinal",
+    Leo: "Fixed", Virgo: "Mutable", Libra: "Cardinal", Scorpio: "Fixed",
+    Sagittarius: "Mutable", Capricorn: "Cardinal", Aquarius: "Fixed", Pisces: "Mutable"
+  }
+};
 
-function normalizeDateOnly(value = new Date()) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
-  return date.toISOString().slice(0, 10);
+// Step 1: Prepare pre-computed recommendations (from your astrology logic)
+const gemstoneData = {
+  lifeStone: {
+    gemName: "Blue Sapphire",
+    howToWear: "Gold, on middle finger",
+    mantra: "Om pram prim praum sah shanaisharaya namah"
+  },
+  luckyStone: {
+    gemName: "Emerald",
+    howToWear: "Gold, on ring or little finger",
+    mantra: "Om bram brim braum sah budhaya namah"
+  },
+  fortuneStone: {
+    gemName: "Diamond",
+    howToWear: "Gold or silver, on middle finger",
+    mantra: "Om dram drim draum sah shukraya namah"
+  }
+};
+
+// ==================== UTILITY & HELPER FUNCTIONS ====================
+
+function getSizeKB(obj) {
+  try {
+    return (Buffer.byteLength(JSON.stringify(obj || {}), 'utf8') / 1024).toFixed(2);
+  } catch (e) {
+    return "0.00";
+  }
 }
 
-function buildKundliFromLegacyInput({
-  basicDetails,
-  personality,
-  remedies,
-  horoscope,
-  manglikAnalysis,
-  dasha,
-  planetary,
-  ashtakvarga,
-  yogas,
-}) {
+function safeStringify(obj, fallback = "{}") {
+  try {
+    return JSON.stringify(obj || {}, null, 2);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function validateKundliData(kundli) {
+  if (!kundli) return { valid: false, reason: "No kundli object provided" };
+  
+  const hasBasic = !!(kundli.basicDetails || kundli.horoscope);
+  const hasPlanetary = !!(kundli.planetary && Object.keys(kundli.planetary).length > 0);
+  
   return {
-    basicDetails: basicDetails || null,
-    personality: personality || null,
-    remedies: remedies || null,
-    horoscope: horoscope || null,
-    manglikAnalysis: manglikAnalysis || null,
-    dasha: dasha || null,
-    planetary: planetary || null,
-    ashtakvarga: ashtakvarga || null,
-    yogas: yogas || null,
+    valid: hasBasic || hasPlanetary,
+    reason: hasBasic || hasPlanetary ? "OK" : "Missing basicDetails/horoscope and planetary data",
+    hasBasic,
+    hasPlanetary
+  };
+}
+
+function sanitizePlanetaryData(planetaryInput) {
+  if (!planetaryInput || !Array.isArray(planetaryInput)) return [];
+  
+  return planetaryInput
+    .filter(p => p && p.planet && p.sign)
+    .map(p => ({
+      planet: String(p.planet).trim(),
+      sign: String(p.sign).trim(),
+      is_retrograde: Boolean(p.is_retrograde)
+    }));
+}
+
+function getElementFromSign(sign) {
+  if (!sign) return "Unknown";
+  return GENERAL_REPORT_CONFIG.elementMap[sign] || "Unknown";
+}
+
+function getModalityFromSign(sign) {
+  if (!sign) return "Unknown";
+  return GENERAL_REPORT_CONFIG.modalityMap[sign] || "Unknown";
+}
+
+function calculateDominantElement(payload) {
+  try {
+    const signs = [];
+    if (payload.ascendant) signs.push(payload.ascendant);
+    if (payload.moonSign) signs.push(payload.moonSign);
+    if (payload.sunSign) signs.push(payload.sunSign);
+    
+    if (payload.planetary && Array.isArray(payload.planetary)) {
+      payload.planetary.forEach(p => {
+        if (p.sign) signs.push(p.sign);
+      });
+    }
+    
+    const elementCount = { Fire: 0, Earth: 0, Air: 0, Water: 0 };
+    signs.forEach(s => {
+      const el = getElementFromSign(s);
+      if (elementCount[el] !== undefined) elementCount[el]++;
+    });
+    
+    let dominant = "Balanced";
+    let maxCount = 0;
+    Object.keys(elementCount).forEach(el => {
+      if (elementCount[el] > maxCount) {
+        maxCount = elementCount[el];
+        dominant = el;
+      }
+    });
+    
+    return { dominant, counts: elementCount, totalSigns: signs.length };
+  } catch (e) {
+    return { dominant: "Unknown", counts: {}, totalSigns: 0 };
+  }
+}
+
+function buildEnhancedLoggingContext(baseContext = {}) {
+  return {
+    feature: baseContext.feature || "general_details_ai",
+    timestamp: new Date().toISOString(),
+    serviceVersion: GENERAL_REPORT_CONFIG.version,
+    ...baseContext
   };
 }
 
@@ -84,6 +197,7 @@ function fallbackNarrativeFromInsight(insightPayload) {
           `Conversations with family or close people can feel more supportive when you speak clearly and stay patient. ` +
           `This is a good period to trust your natural strengths and take small consistent steps rather than waiting for perfect timing. ` +
           `Your progress is likely to build through discipline, balance, and realistic expectations.`,
+
         personality:
           `Your emotional style is influenced by ${moon}, so mood and mindset can shape your decisions more than usual in this phase. ` +
           `You will do best when you avoid overthinking and bring your attention back to what you can control today. ` +
@@ -91,6 +205,7 @@ function fallbackNarrativeFromInsight(insightPayload) {
           `If plans change suddenly, treat it as an adjustment period instead of a setback. ` +
           `Your chart suggests that maturity in speech and consistency in action can improve outcomes across multiple areas. ` +
           `Keep your approach simple, grounded, and steady for the best results this cycle.`,
+
         physical:
           `Your presence can feel stronger when you maintain clean daily habits and give your body proper rest. ` +
           `On busy days, do not ignore hydration, movement, and sleep, because these directly affect focus and confidence. ` +
@@ -98,6 +213,7 @@ function fallbackNarrativeFromInsight(insightPayload) {
           `Try to avoid irregular schedules, as they may increase restlessness or reduce motivation. ` +
           `Small lifestyle discipline now can create noticeable improvements in both energy and mood. ` +
           `Think of this period as a time to strengthen your foundation from the inside out.`,
+
         health:
           `This period asks for balanced routines rather than extremes, especially around rest, food timing, and stress management. ` +
           `If your mind feels overloaded, reduce unnecessary pressure and return to a simple daily structure. ` +
@@ -128,9 +244,15 @@ function fallbackNarrativeFromInsight(insightPayload) {
   };
 }
 
-function buildInsightPayloadForReport({
-  userRequest,
-  kundli,
+// ==================== REMAINING FUNCTIONS ====================
+
+function normalizeDateOnly(value = new Date()) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+function buildKundliFromLegacyInput({
   basicDetails,
   personality,
   remedies,
@@ -141,35 +263,17 @@ function buildInsightPayloadForReport({
   ashtakvarga,
   yogas,
 }) {
-  const normalizedUserRequest = userRequest || {
-    id: "free-report",
-    userId: "free-report",
-    fullName: basicDetails?.name || basicDetails?.fullName || "User",
-    dateOfbirth: basicDetails?.date || basicDetails?.dateOfBirth || null,
-    timeOfbirth: basicDetails?.time || basicDetails?.timeOfBirth || null,
-    placeOfBirth: basicDetails?.place || basicDetails?.placeOfBirth || null,
+  return {
+    basicDetails: basicDetails || null,
+    personality: personality || null,
+    remedies: remedies || null,
+    horoscope: horoscope || null,
+    manglikAnalysis: manglikAnalysis || null,
+    dasha: dasha || null,
+    planetary: planetary || null,
+    ashtakvarga: ashtakvarga || null,
+    yogas: yogas || null,
   };
-
-  const normalizedKundli =
-    kundli ||
-    buildKundliFromLegacyInput({
-      basicDetails,
-      personality,
-      remedies,
-      horoscope,
-      manglikAnalysis,
-      dasha,
-      planetary,
-      ashtakvarga,
-      yogas,
-    });
-
-  return buildInsightPayload({
-    userRequest: normalizedUserRequest,
-    kundli: normalizedKundli,
-    transit: normalizedKundli?.horoscope?.transit || { datetime: new Date().toISOString(), transits: {} },
-    date: normalizeDateOnly(new Date()),
-  });
 }
 
 async function generateFreeReportNarratives({
@@ -186,152 +290,75 @@ async function generateFreeReportNarratives({
   yogas,
   context = {},
 }) {
+  const totalStartTime = Date.now();
+
   try {
-    const insightPayload = buildInsightPayloadForReport({
-      userRequest,
-      kundli,
-      basicDetails,
-      personality,
-      remedies,
-      horoscope,
-      manglikAnalysis,
-      dasha,
-      planetary,
-      ashtakvarga,
-      yogas,
+    // Normalize input (supports both new Kundli object and legacy parameters)
+    const normalizedKundli = kundli || buildKundliFromLegacyInput({
+      basicDetails, personality, remedies, horoscope, manglikAnalysis, dasha, planetary, ashtakvarga, yogas
     });
 
-    if (!process.env.OPENAI_API_KEY) {
-      return fallbackNarrativeFromInsight(insightPayload);
+    let gemstoneRecommendations = gemstoneData;
+
+    // If dynamic gemstone data exists in the Kundli, prefer it
+    if (normalizedKundli?.remedies?.gemstones?.lifeStone?.gemName) {
+      gemstoneRecommendations = normalizedKundli.remedies.gemstones;
     }
 
-    const loggingContext = { feature: "free_report_ai", ...context };
-    const systemPrompt = `You are Graho's Vedic astrology report writer.
-- Use ONLY the structured payload provided.
-- Do not invent placements.
-- Explain clearly and practically in Indian English.
-- Avoid fear language and deterministic certainty.
-- Keep health and money sections safety-compliant.
-- Return JSON only.`;
+    // Execute all report generators in parallel
+    const [
+      generalDetails,
+      dashaReport,
+      rudrakshaReport,
+      gemstoneReport,
+      doshaReport
+    ] = await Promise.all([
+      generateGeneralDetails(normalizedKundli, context),
+      generateVimshottariDashaReport(normalizedKundli, context),
+      generateRudrakshaSuggestion({
+        basicDetails: normalizedKundli.basicDetails || basicDetails,
+        horoscope: normalizedKundli.horoscope || horoscope,
+        planetary: normalizedKundli.planetary || planetary,
+        remedies: normalizedKundli.remedies || remedies,
+        dasha: normalizedKundli.dasha || dasha,
+        context
+      }),
+      generateGemstoneSuggestion({
+        basicDetails: normalizedKundli.basicDetails || basicDetails,
+        horoscope: normalizedKundli.horoscope || horoscope,
+        planetary: normalizedKundli.planetary || planetary,
+        preComputedRecommendations: gemstoneRecommendations,
+        context
+      }),
+      generateDoshaReport(normalizedKundli, context)
+    ]);
 
-    const userPrompt = `Generate a complete free report from this insight engine payload.
-Return JSON with EXACT keys:
-{
-  "engine_version": "insight_engine_v1",
-  "generated_by": "llm",
-  "generated_at": string,
-  "insight": {
-    "main_theme": string,
-    "confidence_score": number,
-    "top_buckets": [
-      {
-        "bucket": string,
-        "title": string,
-        "summary": string,
-        "actions": string[],
-        "remedies": [{"planet": string, "reason": string, "remedy": string}],
-        "score": number,
-        "challenge_score": number
-      }
-    ],
-    "recommended_actions": string[],
-    "remedies": [{"planet": string, "reason": string, "remedy": string}],
-    "dasha_context": object,
-    "transit_context": object,
-    "llm_payload": object
-  },
-  "legacy": {
-    "general": {
-      "ascendant_overview": string,
-      "personality": string,
-      "physical": string,
-      "health": string
-    },
-    "remedies": {
-      "overview": string,
-      "rudraksha": string,
-      "gemstones": string
-    },
-    "dosha": {
-      "overview": string,
-      "manglik": string,
-      "kalsarpa": string,
-      "sadesati": string
-    }
-  }
-}
-
-Payload:
-${JSON.stringify(insightPayload)}`;
-
-    const completion = await createChatCompletion({
-      model: CHAT_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.45,
-      max_tokens: 2500,
-      response_format: { type: "json_object" },
-    }, loggingContext);
-
-    const content = completion.choices[0]?.message?.content;
-    if (!content) {
-      return fallbackNarrativeFromInsight(insightPayload);
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(content);
-    } catch (err) {
-      const start = content.indexOf("{");
-      const end = content.lastIndexOf("}");
-      if (start !== -1 && end !== -1 && end > start) {
-        parsed = JSON.parse(content.slice(start, end + 1));
-      } else {
-        console.error("[FreeReportAI] Invalid JSON in LLM output:", err?.message || err);
-        return fallbackNarrativeFromInsight(insightPayload);
-      }
-    }
-
+    // Combine all reports into final response structure
     return {
-      engine_version: "insight_engine_v1",
-      generated_by: "llm",
+      engine_version: "insight_engine_v3_parallel",
+      generated_by: "parallel_llm_agents",
       generated_at: new Date().toISOString(),
-      ...parsed,
-      insight: {
-        ...(parsed.insight || {}),
-        main_theme: parsed?.insight?.main_theme || insightPayload.mainTheme,
-        confidence_score:
-          typeof parsed?.insight?.confidence_score === "number"
-            ? parsed.insight.confidence_score
-            : insightPayload.confidenceScore,
-        llm_payload: parsed?.insight?.llm_payload || insightPayload.llmPayload,
-      },
+
+      // Root level fields (description, personality, career, etc.)
+      ...(generalDetails || {}),
+
+      // Detailed sub-reports
+      dashaReport: dashaReport || null,
+      rudrakshaReport: rudrakshaReport || null,
+      gemstoneReport: gemstoneReport || null,
+      doshaReport: doshaReport || null,
     };
+
   } catch (error) {
-    console.error("[FreeReportAI] Error generating narratives:", error?.message || error);
-    try {
-      const insightPayload = buildInsightPayloadForReport({
-        userRequest,
-        kundli,
-        basicDetails,
-        personality,
-        remedies,
-        horoscope,
-        manglikAnalysis,
-        dasha,
-        planetary,
-        ashtakvarga,
-        yogas,
-      });
-      return fallbackNarrativeFromInsight(insightPayload);
-    } catch {
-      return null;
-    }
+    console.error("[FreeReportAI] Error in generateFreeReportNarratives:", error?.message || error);
+    return null;
   }
 }
+
+// ==================== MODULE EXPORTS ====================
 
 module.exports = {
   generateFreeReportNarratives,
-};
+  validateKundliData,
+  sanitizePlanetaryData,
+};    

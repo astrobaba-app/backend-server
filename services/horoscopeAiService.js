@@ -1,24 +1,104 @@
-const { createChatCompletion } = require("./openaiClient");
+const {
+  // Daily
+  generateDailyHoroscopeReportForAries, generateDailyHoroscopeReportForTaurus, generateDailyHoroscopeReportForGemini, generateDailyHoroscopeReportForCancer,
+  generateDailyHoroscopeReportForLeo, generateDailyHoroscopeReportForVirgo, generateDailyHoroscopeReportForLibra, generateDailyHoroscopeReportForScorpio,
+  generateDailyHoroscopeReportForSagittarius, generateDailyHoroscopeReportForCapricorn, generateDailyHoroscopeReportForAquarius, generateDailyHoroscopeReportForPisces,
+  
+  // Weekly
+  generateWeeklyHoroscopeReportForAries, generateWeeklyHoroscopeReportForTaurus, generateWeeklyHoroscopeReportForGemini, generateWeeklyHoroscopeReportForCancer,
+  generateWeeklyHoroscopeReportForLeo, generateWeeklyHoroscopeReportForVirgo, generateWeeklyHoroscopeReportForLibra, generateWeeklyHoroscopeReportForScorpio,
+  generateWeeklyHoroscopeReportForSagittarius, generateWeeklyHoroscopeReportForCapricorn, generateWeeklyHoroscopeReportForAquarius, generateWeeklyHoroscopeReportForPisces,
 
-const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+  // Monthly
+  generateMonthlyHoroscopeReportForAries, generateMonthlyHoroscopeReportForTaurus, generateMonthlyHoroscopeReportForGemini, generateMonthlyHoroscopeReportForCancer,
+  generateMonthlyHoroscopeReportForLeo, generateMonthlyHoroscopeReportForVirgo, generateMonthlyHoroscopeReportForLibra, generateMonthlyHoroscopeReportForScorpio,
+  generateMonthlyHoroscopeReportForSagittarius, generateMonthlyHoroscopeReportForCapricorn, generateMonthlyHoroscopeReportForAquarius, generateMonthlyHoroscopeReportForPisces,
+
+  // Yearly
+  generateYearlyHoroscopeReportForAries, generateYearlyHoroscopeReportForTaurus, generateYearlyHoroscopeReportForGemini, generateYearlyHoroscopeReportForCancer,
+  generateYearlyHoroscopeReportForLeo, generateYearlyHoroscopeReportForVirgo, generateYearlyHoroscopeReportForLibra, generateYearlyHoroscopeReportForScorpio,
+  generateYearlyHoroscopeReportForSagittarius, generateYearlyHoroscopeReportForCapricorn, generateYearlyHoroscopeReportForAquarius, generateYearlyHoroscopeReportForPisces
+} = require("../utils/horoscopeGenerator");
+
+// A clean mapping object to route both the period and the sign to the correct function
+const GENERATORS = {
+  Daily: {
+    Aries: generateDailyHoroscopeReportForAries,
+    Taurus: generateDailyHoroscopeReportForTaurus,
+    Gemini: generateDailyHoroscopeReportForGemini,
+    Cancer: generateDailyHoroscopeReportForCancer,
+    Leo: generateDailyHoroscopeReportForLeo,
+    Virgo: generateDailyHoroscopeReportForVirgo,
+    Libra: generateDailyHoroscopeReportForLibra,
+    Scorpio: generateDailyHoroscopeReportForScorpio,
+    Sagittarius: generateDailyHoroscopeReportForSagittarius,
+    Capricorn: generateDailyHoroscopeReportForCapricorn,
+    Aquarius: generateDailyHoroscopeReportForAquarius,
+    Pisces: generateDailyHoroscopeReportForPisces
+  },
+  Weekly: {
+    Aries: generateWeeklyHoroscopeReportForAries,
+    Taurus: generateWeeklyHoroscopeReportForTaurus,
+    Gemini: generateWeeklyHoroscopeReportForGemini,
+    Cancer: generateWeeklyHoroscopeReportForCancer,
+    Leo: generateWeeklyHoroscopeReportForLeo,
+    Virgo: generateWeeklyHoroscopeReportForVirgo,
+    Libra: generateWeeklyHoroscopeReportForLibra,
+    Scorpio: generateWeeklyHoroscopeReportForScorpio,
+    Sagittarius: generateWeeklyHoroscopeReportForSagittarius,
+    Capricorn: generateWeeklyHoroscopeReportForCapricorn,
+    Aquarius: generateWeeklyHoroscopeReportForAquarius,
+    Pisces: generateWeeklyHoroscopeReportForPisces
+  },
+  Monthly: {
+    Aries: generateMonthlyHoroscopeReportForAries,
+    Taurus: generateMonthlyHoroscopeReportForTaurus,
+    Gemini: generateMonthlyHoroscopeReportForGemini,
+    Cancer: generateMonthlyHoroscopeReportForCancer,
+    Leo: generateMonthlyHoroscopeReportForLeo,
+    Virgo: generateMonthlyHoroscopeReportForVirgo,
+    Libra: generateMonthlyHoroscopeReportForLibra,
+    Scorpio: generateMonthlyHoroscopeReportForScorpio,
+    Sagittarius: generateMonthlyHoroscopeReportForSagittarius,
+    Capricorn: generateMonthlyHoroscopeReportForCapricorn,
+    Aquarius: generateMonthlyHoroscopeReportForAquarius,
+    Pisces: generateMonthlyHoroscopeReportForPisces
+  },
+  Yearly: {
+    Aries: generateYearlyHoroscopeReportForAries,
+    Taurus: generateYearlyHoroscopeReportForTaurus,
+    Gemini: generateYearlyHoroscopeReportForGemini,
+    Cancer: generateYearlyHoroscopeReportForCancer,
+    Leo: generateYearlyHoroscopeReportForLeo,
+    Virgo: generateYearlyHoroscopeReportForVirgo,
+    Libra: generateYearlyHoroscopeReportForLibra,
+    Scorpio: generateYearlyHoroscopeReportForScorpio,
+    Sagittarius: generateYearlyHoroscopeReportForSagittarius,
+    Capricorn: generateYearlyHoroscopeReportForCapricorn,
+    Aquarius: generateYearlyHoroscopeReportForAquarius,
+    Pisces: generateYearlyHoroscopeReportForPisces
+  }
+};
 
 /**
- * Enhance horoscope data with AI-generated narratives
- * Converts structured predictions into 6-7 line explanations for each section
+ * Enhance horoscope data with AI-generated narratives.
+ * Routes the raw data to the exact sign & period archetype generator.
  */
-async function enhanceHoroscopeWithAI({ zodiacSign, period, horoscopeData, context = {} }) {
+async function enhanceHoroscopeWithAI({ zodiacSign, period = 'Daily', horoscopeData, context = {} }) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      console.warn('[HoroscopeAI] OpenAI API key not configured, skipping enhancement');
+    if (!zodiacSign) {
+      console.warn('[HoroscopeAI] No zodiac sign provided to enhancer');
       return null;
     }
 
-    const loggingContext = { feature: "horoscope_ai", ...context };
-    const predictions = horoscopeData.predictions;
+    // Normalize strings to match the exact casing in our mapping object
+    const normalizedSign = zodiacSign.charAt(0).toUpperCase() + zodiacSign.slice(1).toLowerCase();
+    let normalizedPeriod = period.charAt(0).toUpperCase() + period.slice(1).toLowerCase();
 
-    if (!predictions) {
-      console.warn('[HoroscopeAI] No predictions data available');
-      return null;
+    // Default to 'Daily' if an unknown period is passed
+    if (!GENERATORS[normalizedPeriod]) {
+      console.warn(`[HoroscopeAI] Unknown period '${period}'. Defaulting to 'Daily'.`);
+      normalizedPeriod = 'Daily';
     }
 
     // Build payload for AI without shadowing the logging context.
@@ -67,59 +147,26 @@ Sections to enhance:
 8. Travel & Movement: ${JSON.stringify(aiContext.predictions.travel)}
 9. Remedies: ${JSON.stringify(aiContext.remedies)}
 
-Return ONLY a JSON object with this exact structure (no markdown, no explanation):
-{
-  "overview": "6-7 line narrative...",
-  "love_relationships": "6-7 line narrative...",
-  "personal_life": "6-7 line narrative...",
-  "career_finance": "6-7 line narrative...",
-  "health_wellness": "6-7 line narrative...",
-  "emotions_mind": "6-7 line narrative...",
-  "lucky_insights": "6-7 line narrative...",
-  "travel_movement": "6-7 line narrative...",
-  "remedies": "6-7 line narrative..."
-}`;
+    console.log(`[HoroscopeAI] Routing request to ${normalizedPeriod} generator for ${normalizedSign}...`);
 
-    const response = await createChatCompletion({
-      model: CHAT_MODEL,
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert Vedic astrologer who creates warm, personalized, and insightful horoscope narratives. Always respond with valid JSON only.",
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 2000,
-    }, loggingContext);
+    // Call the specific function and wait for the formatted JSON response
+    const enhancedReport = await generatorFunction({
+      period: normalizedPeriod,
+      horoscopeData,
+      context
+    });
 
-    const content = response.choices[0]?.message?.content?.trim();
-    
-    if (!content) {
-      console.warn('[HoroscopeAI] No content in OpenAI response');
+    if (!enhancedReport) {
+      console.warn(`[HoroscopeAI] ${normalizedPeriod} generator for ${normalizedSign} failed to return a valid report.`);
       return null;
     }
 
-    // Clean markdown formatting if present
-    let cleanContent = content;
-    if (cleanContent.startsWith('```json')) {
-      cleanContent = cleanContent.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-    } else if (cleanContent.startsWith('```')) {
-      cleanContent = cleanContent.replace(/^```\s*/, '').replace(/\s*```$/, '');
-    }
-
-    const enhanced = JSON.parse(cleanContent);
-    
-    console.log(`[HoroscopeAI] Successfully enhanced ${period} horoscope for ${zodiacSign}`);
-    return enhanced;
+    return enhancedReport;
 
   } catch (error) {
-    console.error('[HoroscopeAI] Enhancement failed:', error?.message || error);
+    console.error(`[HoroscopeAI] Enhancement routing failed for ${zodiacSign} (${period}):`, error?.message || error);
     
-    // Return null instead of throwing to allow graceful degradation
+    // Return null instead of throwing to allow graceful degradation in your app
     return null;
   }
 }
