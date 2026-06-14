@@ -201,12 +201,7 @@ async function generateAllHoroscopesForPeriod(period, date = new Date()) {
   console.log(`[HoroscopeGen] Date: ${date.toISOString()}`);
   console.log(`========================================\n`);
   
-  // =======================================================================
-  // TEMPORARY WIPE: Clears all broken cache data from the database
-  // TODO: REMOVE THIS LINE ONCE YOUR APP HAS FETCHED FRESH DATA SUCCESSFULLY
-  // =======================================================================
-  await CachedHoroscope.destroy({ where: {} }); 
-  console.log(`[HoroscopeGen] 🗑️ DATABASE WIPED SUCCESSFULLY 🗑️`);
+ 
 
   const results = {
     success: [],
