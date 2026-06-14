@@ -254,6 +254,7 @@ const startChatSession = async (req, res) => {
         data: {
           type: "chat_request",
           sessionId: String(session.id),
+          requestExpiresAt: getRequestExpiryIso(session),
           astrologerId: String(astrologerId),
           userId: String(req.user.id),
           clickAction: "/astrologer/live-chats",

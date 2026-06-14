@@ -23,6 +23,13 @@ class PushNotificationService {
     }
 
     const fcmTokens = tokens.map((t) => t.token);
+    const isChatRequest = data?.type === "chat_request";
+    const requestExpiresAt = data?.requestExpiresAt
+      ? new Date(data.requestExpiresAt).getTime()
+      : null;
+    const ttlMs = isChatRequest
+      ? Math.max(1, Math.min(30000, requestExpiresAt ? requestExpiresAt - Date.now() : 30000))
+      : undefined;
 
     const message = {
       notification: {
@@ -37,16 +44,34 @@ class PushNotificationService {
       },
       android: {
         priority: "high",
+        ...(ttlMs ? { ttl: ttlMs } : {}),
+        ...(isChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
         notification: {
           channelId: CHAT_ALERTS_CHANNEL_ID,
-          priority: "high",
+          ...(isChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
+          priority: isChatRequest ? "max" : "high",
+          visibility: "public",
           defaultSound: true,
+          defaultVibrateTimings: true,
+          defaultLightSettings: true,
         },
       },
       apns: {
         headers: {
           "apns-priority": "10",
+          ...(ttlMs ? { "apns-expiration": String(Math.floor((Date.now() + ttlMs) / 1000)) } : {}),
         },
+        ...(isChatRequest
+          ? {
+              payload: {
+                aps: {
+                  sound: "default",
+                  interruptionLevel: "time-sensitive",
+                  category: "CHAT_REQUEST",
+                },
+              },
+            }
+          : {}),
       },
       tokens: fcmTokens,
     };
@@ -225,8 +250,11 @@ class PushNotificationService {
           priority: 'high',
           notification: {
             channelId: CHAT_ALERTS_CHANNEL_ID,
-            priority: "high",
+            priority: "max",
+            visibility: "public",
             defaultSound: true,
+            defaultVibrateTimings: true,
+            defaultLightSettings: true,
           },
         },
         apns: {
