@@ -11,6 +11,7 @@ const { Op } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
 const { enqueuePalmJob } = require("../../services/palmQueueService");
 const { checkPalmEngineHealth } = require("../../services/palmReadingService");
+const { generatePalmReportPDF } = require("../../services/palmReportPdfService");
 
 const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 59);
 const PALM_CHECKOUT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -705,6 +706,7 @@ const getPalmReadingJob = async (req, res) => {
         structuredInsights: report?.structuredInsights || {},
         finalNarrativeReport: report?.finalNarrative || "",
         confidenceScores: report?.confidenceScores || feature?.confidenceScores || {},
+        pdfDownloadUrl: report ? `/palm-reading/reports/${job.palmUploadId}/pdf` : null,
       };
     }
     if (job.status === "failed") {
@@ -782,6 +784,7 @@ const getPalmReadingHistory = async (req, res) => {
             structuredInsights: item.report.structuredInsights || {},
             finalNarrative: item.report.finalNarrative || "",
             confidenceScores: item.report.confidenceScores || {},
+            pdfDownloadUrl: `/palm-reading/reports/${item.id}/pdf`,
           }
         : null,
       features: item.features?.features || {},
@@ -790,6 +793,50 @@ const getPalmReadingHistory = async (req, res) => {
     return res.status(200).json({ success: true, history });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Failed to fetch palm history", error: error.message });
+  }
+};
+
+const downloadPalmReadingPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { palmUploadId } = req.params;
+    const upload = await PalmUpload.findOne({
+      where: { id: palmUploadId, userId },
+      include: [
+        { model: AIJob, as: "aiJob", required: false },
+        { model: PalmFeature, as: "features", required: false },
+        { model: PalmReport, as: "report", required: true },
+      ],
+    });
+
+    if (!upload || !upload.report) {
+      return res.status(404).json({ success: false, message: "Completed palm report not found" });
+    }
+
+    if (upload.aiJob && upload.aiJob.status !== "completed") {
+      return res.status(409).json({ success: false, message: "Palm report is still processing" });
+    }
+
+    const pdfBuffer = await generatePalmReportPDF({
+      palmImages: upload.imageUrls || [],
+      features: upload.features?.features || {},
+      structuredInsights: upload.report.structuredInsights || {},
+      finalNarrative: upload.report.finalNarrative || "",
+      generatedAt: upload.report.createdAt || upload.createdAt,
+    });
+
+    const fileName = `graho_palmistry_report_${String(palmUploadId).slice(0, 8)}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("[Palm PDF] download failed", {
+      userId: req.user?.id,
+      palmUploadId: req.params?.palmUploadId,
+      message: error?.message,
+    });
+    return res.status(500).json({ success: false, message: "Failed to generate palm PDF", error: error.message });
   }
 };
 
@@ -827,6 +874,7 @@ module.exports = {
   resumePalmOrder,
   getPalmReadingJob,
   getPalmReadingHistory,
+  downloadPalmReadingPdf,
   getPalmReadingTrustIndicator,
   payPalmCheckoutWithWallet,
   createPalmCheckoutRazorpay,
