@@ -4,9 +4,6 @@ const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 
 /**
  * Enhance Ashtakoot kuta descriptions with AI-generated narratives.
- * Takes the raw Ashtakoot data from astro-engine and returns
- * longer 5-6 line explanations for each kuta used in the
- * Basic Details section.
  */
 async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, context = {} }) {
   try {
@@ -21,53 +18,51 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
     }
 
     const loggingContext = { feature: "matching_ai", ...context };
-
     const { kutas, total_points, max_points } = ashtakootData;
 
-    // Build a compact payload for the AI without shadowing the logging context.
-    const aiContext = {
-      couple: {
-        boyName,
-        girlName,
-      },
-      summary: {
-        total_points,
-        max_points,
-      },
+    const dataContext = {
+      couple: { boyName, girlName },
+      summary: { total_points, max_points },
       kutas: {
         varna: kutas.varna || null,
-        bhakoot: kutas.bhakoot || null,
-        graha_maitri: kutas.graha_maitri || null,
-        gana: kutas.gana || null,
-        nadi: kutas.nadi || null,
         vashya: kutas.vashya || null,
         tara: kutas.tara || null,
         yoni: kutas.yoni || null,
+        graha_maitri: kutas.graha_maitri || null,
+        gana: kutas.gana || null,
+        bhakoot: kutas.bhakoot || null,
+        nadi: kutas.nadi || null,
       },
     };
 
-    const prompt = `You are an expert Vedic astrologer.
-  Given the following Ashtakoot matching result for a couple, write detailed yet easy-to-understand explanations for each kuta.
+    const prompt = `You are an expert Vedic astrologer explaining a Kundli match to a modern couple. 
 
-  - Use the couple's names when helpful: Boy = ${boyName}, Girl = ${girlName}.
-  - Explicitly mention the score for each kuta in plain language, for example: "You scored 2 out of 2 in Vashya" or "You received 4 out of 6 points in Gana".
-  - Briefly explain what that score suggests for the relationship, including both strengths and areas to handle with understanding.
-  - Each explanation must be a single coherent paragraph of 5-6 lines (3-5 sentences), easy for non-astrologers to follow.
-  - Tone: warm, conservative, reassuring, realistic, and practical. Avoid dramatic or fatalistic language.
-  - Clearly treat all insights as traditional Vedic beliefs, not guarantees or professional advice. Avoid any strong medical, financial, or legal claims.
+Given the Ashtakoot matching result, generate the text for a UI table. 
+CRITICAL RULES:
+- Write in rich, flowing paragraphs. Strictly NO bullet points, NO lists, and NO disjointed one-liners.
+- Use simple, professional English that a beginner can easily understand. Avoid dense jargon.
 
-  Ashtakoot data (JSON): ${JSON.stringify(aiContext, null, 2)}
+For EACH of the 8 Kutas, provide:
+1. "area_of_life": A short 2-5 word phrase representing what this Kuta governs.
+2. "description": A descriptive 2-3 sentence paragraph explaining how the couple's specific combination and score affect their relationship. Keep it reassuring but realistic. Use the names ${boyName} and ${girlName} naturally.
+3. "meaning": A rich 2-3 sentence paragraph defining what this Kuta signifies in Vedic astrology.
 
-  Return ONLY a JSON object (no markdown, no comments) with this exact structure:
+Also provide:
+4. "conclusion": A complete 3-4 sentence paragraph for the bottom of the table stating their total score (${total_points} out of ${max_points}) and a final, thoughtful verdict on the marriage.
+
+Ashtakoot data (JSON): ${JSON.stringify(dataContext, null, 2)}
+
+Return ONLY a JSON object with this exact structure:
 {
-  "varna": { "enhanced_description": "5-6 line explanation for Varna compatibility" },
-  "bhakoot": { "enhanced_description": "5-6 line explanation for Bhakoot (Love)" },
-  "graha_maitri": { "enhanced_description": "5-6 line explanation for Graha Maitri (Mental compatibility)" },
-  "gana": { "enhanced_description": "5-6 line explanation for Gana (Temperament)" },
-  "nadi": { "enhanced_description": "5-6 line explanation for Nadi (Health)" },
-  "vashya": { "enhanced_description": "5-6 line explanation for Vashya (Dominance/attraction)" },
-  "tara": { "enhanced_description": "5-6 line explanation for Tara (Destiny/birth star)" },
-  "yoni": { "enhanced_description": "5-6 line explanation for Yoni (Physical compatibility)" }
+  "varna": { "area_of_life": "", "description": "", "meaning": "" },
+  "vashya": { "area_of_life": "", "description": "", "meaning": "" },
+  "tara": { "area_of_life": "", "description": "", "meaning": "" },
+  "yoni": { "area_of_life": "", "description": "", "meaning": "" },
+  "graha_maitri": { "area_of_life": "", "description": "", "meaning": "" },
+  "gana": { "area_of_life": "", "description": "", "meaning": "" },
+  "bhakoot": { "area_of_life": "", "description": "", "meaning": "" },
+  "nadi": { "area_of_life": "", "description": "", "meaning": "" },
+  "conclusion": ""
 }`;
 
     const response = await createChatCompletion({
@@ -76,7 +71,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
         {
           role: "system",
           content:
-            "You are an expert Vedic astrologer who writes accurate but gentle compatibility explanations. Always respond with valid JSON only, matching the requested schema. Be conservative and balanced, and always frame statements as possibilities or tendencies, not certainties.",
+            "You are an expert Vedic astrologer formatting data for a UI table. Write in simple, beautiful, and professional prose. Never use bullet points. Always respond with valid JSON only.",
         },
         {
           role: "user",
@@ -84,7 +79,7 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
         },
       ],
       temperature: 0.7,
-      max_tokens: 1800,
+      max_tokens: 2000,
     }, loggingContext);
 
     const content = response.choices[0]?.message?.content?.trim();
@@ -95,14 +90,12 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
     }
 
     let cleanContent = content;
-    if (cleanContent.startsWith("```json")) {
-      cleanContent = cleanContent.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-    } else if (cleanContent.startsWith("```")) {
-      cleanContent = cleanContent.replace(/^```\s*/, "").replace(/\s*```$/, "");
-    }
+    if (cleanContent.startsWith("```json")) cleanContent = cleanContent.replace(/^```json\s*/, "");
+    if (cleanContent.startsWith("```")) cleanContent = cleanContent.replace(/^```\s*/, "");
+    cleanContent = cleanContent.replace(/\s*```$/, "");
 
     const enhanced = JSON.parse(cleanContent);
-    console.log("[MatchingAI] Successfully enhanced Ashtakoot explanations for couple", boyName, "&", girlName);
+    console.log(`[MatchingAI] Successfully enhanced Ashtakoot explanations for ${boyName} & ${girlName}`);
     return enhanced;
   } catch (error) {
     console.error("[MatchingAI] Enhancement failed:", error?.message || error);
@@ -110,6 +103,70 @@ async function enhanceAshtakootWithAI({ ashtakootData, boyName, girlName, contex
   }
 }
 
+/**
+ * Enhance raw Manglik Dosha arrays into beautiful UI text
+ */
+async function enhanceManglikWithAI({ maleMangal, femaleMangal, boyName, girlName, context = {} }) {
+  try {
+    if (!process.env.OPENAI_API_KEY) return null;
+    
+    const loggingContext = { feature: "matching_ai_manglik", ...context };
+
+    const prompt = `You are an expert Vedic astrologer. 
+I have raw Manglik (Mars Dosha) data for a couple. Translate this robotic data into clear, reassuring, and professional paragraphs.
+
+CRITICAL RULES:
+- Strictly NO bullet points and NO lists.
+- Write proper, rich sentences. Ensure each field contains 2 to 3 complete, descriptive sentences.
+- Use simple, easy-to-understand English suitable for someone who knows nothing about astrology.
+
+Boy (${boyName}) Raw Data: ${JSON.stringify(maleMangal)}
+Girl (${girlName}) Raw Data: ${JSON.stringify(femaleMangal)}
+
+For EACH person, provide:
+1. "aspects_text": A rich 2-3 sentence paragraph explaining how Mars's aspects impact them based on the raw arrays.
+2. "house_text": A descriptive 2-3 sentence paragraph explaining Mars's house placement.
+3. "analysis_text": A smooth, reassuring 2-3 sentence paragraph summarizing their Manglik status (e.g., if it is cancelled, explain why beautifully and simply).
+
+Return ONLY a JSON object with this exact structure:
+{
+  "male": {
+    "aspects_text": "",
+    "house_text": "",
+    "analysis_text": ""
+  },
+  "female": {
+    "aspects_text": "",
+    "house_text": "",
+    "analysis_text": ""
+  }
+}`;
+
+    const response = await createChatCompletion({
+      model: CHAT_MODEL,
+      messages: [
+        { role: "system", content: "You are an expert Vedic astrologer writing for a consumer audience. Return only valid JSON. Write exclusively in complete, flowing paragraphs." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7,
+      max_tokens: 1500,
+    }, loggingContext);
+
+    const content = response.choices[0]?.message?.content?.trim();
+    
+    let cleanContent = content;
+    if (cleanContent.startsWith("```json")) cleanContent = cleanContent.replace(/^```json\s*/, "");
+    if (cleanContent.startsWith("```")) cleanContent = cleanContent.replace(/^```\s*/, "");
+    cleanContent = cleanContent.replace(/\s*```$/, "");
+    
+    return JSON.parse(cleanContent);
+  } catch (error) {
+    console.error("[MatchingAI] Manglik enhancement failed:", error?.message || error);
+    return null;
+  }
+}
+
 module.exports = {
   enhanceAshtakootWithAI,
+  enhanceManglikWithAI,
 };
