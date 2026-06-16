@@ -57,6 +57,24 @@ const ChatSession = sequelize.define(
       allowNull: false,
       comment: "Price per minute at the time of session",
     },
+    maxDurationSeconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "max_duration_seconds",
+      comment: "Maximum approved chat duration based on recharge wallet balance",
+    },
+    maxEndTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "max_end_time",
+      comment: "Auto-end time calculated from real chat wallet balance",
+    },
+    walletBalanceAtApproval: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+      field: "wallet_balance_at_approval",
+      comment: "Recharge wallet balance used to calculate max chat duration",
+    },
     // Chat request / approval status for user-astrologer chat
     requestStatus: {
       type: DataTypes.ENUM("pending", "approved", "rejected"),

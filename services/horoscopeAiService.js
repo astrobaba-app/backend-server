@@ -145,7 +145,7 @@ Sections to enhance:
 6. Emotions & Mind: ${JSON.stringify(aiContext.predictions.emotions)}
 7. Lucky Insights: ${JSON.stringify(aiContext.luckyElements)}
 8. Travel & Movement: ${JSON.stringify(aiContext.predictions.travel)}
-9. Remedies: ${JSON.stringify(aiContext.remedies)}
+9. Remedies: ${JSON.stringify(aiContext.remedies)}`;
 
     console.log(`[HoroscopeAI] Routing request to ${normalizedPeriod} generator for ${normalizedSign}...`);
 

@@ -83,6 +83,28 @@ function getSessionStatusMeta(session) {
   };
 }
 
+function calculateWalletLimitedChatTime({ rechargeBalance, pricePerMinute, startTime }) {
+  const realChatBalance = parseFloat(rechargeBalance || 0);
+  const rate = parseFloat(pricePerMinute || 0);
+
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return {
+      maxDurationSeconds: null,
+      maxEndTime: null,
+      walletBalanceAtApproval: realChatBalance,
+    };
+  }
+
+  const maxDurationSeconds = Math.max(1, Math.floor((realChatBalance / rate) * 60));
+  const startedAt = startTime instanceof Date ? startTime : new Date(startTime);
+
+  return {
+    maxDurationSeconds,
+    maxEndTime: new Date(startedAt.getTime() + maxDurationSeconds * 1000),
+    walletBalanceAtApproval: realChatBalance,
+  };
+}
+
 function emitChatEnded(io, session, payload = {}) {
   if (!io || !session) return;
 
@@ -348,8 +370,12 @@ const endChatSession = async (req, res) => {
     await session.reload();
 
     if (io) {
-      const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");
+      const {
+        clearUserInactivityAutoEnd,
+        clearWalletLimitAutoEnd,
+      } = require("../../services/chatSocket");
       clearUserInactivityAutoEnd(session.id);
+      clearWalletLimitAutoEnd(session.id);
     }
 
     // Notify both sides that chat ended so UI can close/clean up instantly.
@@ -515,6 +541,27 @@ const sendMessage = async (req, res) => {
         success: false,
         message: "Chat request has not been approved yet",
       });
+    }
+
+    if (session.status === "active" && session.requestStatus === "approved") {
+      const io = req.app.get("io");
+      const { enforceWalletTimeLimit } = require("../../services/chatSocket");
+      const walletLimitBilling = await enforceWalletTimeLimit(io, session);
+
+      if (walletLimitBilling) {
+        return res.status(402).json({
+          success: false,
+          message: "Chat ended because wallet balance time limit was reached.",
+          code: "CHAT_WALLET_TIME_LIMIT_REACHED",
+          session: {
+            id: session.id,
+            totalMinutes: walletLimitBilling.totalMinutes,
+            totalCost: walletLimitBilling.totalCost,
+            billedAmount: walletLimitBilling.billedAmount,
+            pricePerMinute: parseFloat(session.pricePerMinute || 0),
+          },
+        });
+      }
     }
 
     if (senderType === "user" && session.status === "active" && session.requestStatus === "approved") {
@@ -749,6 +796,13 @@ const getChatSessionStatusV2 = async (req, res) => {
         });
       }
 
+      if (session.status === "active" && session.requestStatus === "approved") {
+        const io = req.app.get("io");
+        const { enforceWalletTimeLimit } = require("../../services/chatSocket");
+        await enforceWalletTimeLimit(io, session);
+        await session.reload();
+      }
+
       const now = new Date();
       const startTime = session.startTime ? new Date(session.startTime) : now;
       const currentMinutes = Math.max(
@@ -980,6 +1034,13 @@ const getActiveSession = async (req, res) => {
       });
     }
 
+    if (session.status === "active" && session.requestStatus === "approved") {
+      const io = req.app.get("io");
+      const { enforceWalletTimeLimit } = require("../../services/chatSocket");
+      await enforceWalletTimeLimit(io, session);
+      await session.reload();
+    }
+
     // Calculate current duration
     const now = new Date();
     const startTime = new Date(session.startTime);
@@ -1062,8 +1123,30 @@ const approveChatRequest = async (req, res) => {
     if (session.requestStatus === "approved") {
       const io = req.app.get("io");
       if (io) {
-        const { scheduleUserInactivityAutoEnd } = require("../../services/chatSocket");
+        const {
+          enforceWalletTimeLimit,
+          scheduleUserInactivityAutoEnd,
+          scheduleWalletLimitAutoEnd,
+        } = require("../../services/chatSocket");
+        const walletLimitBilling = await enforceWalletTimeLimit(io, session);
+
+        if (walletLimitBilling) {
+          return res.status(402).json({
+            success: false,
+            message: "Chat ended because wallet balance time limit was reached.",
+            code: "CHAT_WALLET_TIME_LIMIT_REACHED",
+            session: {
+              id: session.id,
+              totalMinutes: walletLimitBilling.totalMinutes,
+              totalCost: walletLimitBilling.totalCost,
+              billedAmount: walletLimitBilling.billedAmount,
+              pricePerMinute: parseFloat(session.pricePerMinute || 0),
+            },
+          });
+        }
+
         scheduleUserInactivityAutoEnd(io, session);
+        scheduleWalletLimitAutoEnd(io, session);
       }
 
       return res.status(200).json({
@@ -1118,6 +1201,31 @@ const approveChatRequest = async (req, res) => {
       });
     }
 
+    const approvalStartTime = new Date();
+    const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+    const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+    const pricePerMinute = parseFloat(session.pricePerMinute || 0);
+
+    if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
+      return res.status(402).json({
+        success: false,
+        message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
+        code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
+        redirectTo: "/aichat",
+        wallet: {
+          balance: walletBreakdown.balance,
+          signupBonusBalance: walletBreakdown.signupBonusBalance,
+          humanChatBalance: walletBreakdown.rechargeBalance,
+        },
+      });
+    }
+
+    const walletLimit = calculateWalletLimitedChatTime({
+      rechargeBalance: walletBreakdown.rechargeBalance,
+      pricePerMinute,
+      startTime: approvalStartTime,
+    });
+
     const io = req.app.get("io");
     let chatSocketService = null;
     if (io) {
@@ -1134,10 +1242,12 @@ const approveChatRequest = async (req, res) => {
           getAstrologerRoom,
           mapSession,
           clearUserInactivityAutoEnd,
+          clearWalletLimitAutoEnd,
         } =
           chatSocketService;
 
         clearUserInactivityAutoEnd(activeSession.id);
+        clearWalletLimitAutoEnd(activeSession.id);
 
         emitChatEnded(io, activeSession, {
           endedBy: "astrologer",
@@ -1169,12 +1279,16 @@ const approveChatRequest = async (req, res) => {
     await session.update({
       requestStatus: "approved",
       status: "active",
-      startTime: new Date(),
+      startTime: approvalStartTime,
       endTime: null,
+      maxDurationSeconds: walletLimit.maxDurationSeconds,
+      maxEndTime: walletLimit.maxEndTime,
+      walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
     });
 
     if (io && chatSocketService) {
       chatSocketService.scheduleUserInactivityAutoEnd(io, session);
+      chatSocketService.scheduleWalletLimitAutoEnd(io, session);
     }
 
     // Notify both sides via Socket.IO if available
@@ -1248,9 +1362,11 @@ const rejectChatRequest = async (req, res) => {
         getAstrologerRoom,
         mapSession,
         clearUserInactivityAutoEnd,
+        clearWalletLimitAutoEnd,
       } = require("../../services/chatSocket");
 
       clearUserInactivityAutoEnd(session.id);
+      clearWalletLimitAutoEnd(session.id);
 
       const sessionForUser = mapSession(session, "user");
       const sessionForAstrologer = mapSession(session, "astrologer");
@@ -1551,8 +1667,12 @@ const endAstrologerChatSession = async (req, res) => {
     await session.reload();
 
     if (io) {
-      const { clearUserInactivityAutoEnd } = require("../../services/chatSocket");
+      const {
+        clearUserInactivityAutoEnd,
+        clearWalletLimitAutoEnd,
+      } = require("../../services/chatSocket");
       clearUserInactivityAutoEnd(session.id);
+      clearWalletLimitAutoEnd(session.id);
     }
 
     if (io) {
