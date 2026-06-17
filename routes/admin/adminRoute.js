@@ -42,6 +42,18 @@ const {
   updateWhatsappAuthSettings,
 } = require("../../controller/admin/whatsappAuthController");
 const {
+  uploadScheduledNotifications,
+  listScheduledNotificationBatches,
+  getScheduledNotificationBatch,
+  getScheduledNotificationGroups,
+  getScheduledNotificationHistory,
+  updateScheduledNotificationItem,
+  cancelScheduledNotificationItem,
+  cancelScheduledNotificationBatch,
+  deleteScheduledNotificationBatch,
+  getScheduledNotificationTemplate,
+} = require("../../controller/admin/scheduledNotificationController");
+const {
   getForumAppealsForAdmin,
   getForumPostsForAdmin,
   getForumReportsForAdmin,
@@ -67,6 +79,27 @@ const {
 } = require("../../controller/job/jobController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
+const multer = require("multer");
+
+const spreadsheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = new Set([
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel",
+      "text/csv",
+    ]);
+    if (
+      allowedMimeTypes.has(file.mimetype) ||
+      /\.(xlsx|xls|csv)$/i.test(file.originalname)
+    ) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Only Excel or CSV files are allowed"));
+  },
+});
 
 router.post("/register", register);
 router.post("/login", login);
@@ -209,6 +242,68 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   resendBroadcast
+);
+
+router.get(
+  "/scheduled-notifications/template",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getScheduledNotificationTemplate
+);
+router.post(
+  "/scheduled-notifications/upload",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  spreadsheetUpload.single("file"),
+  uploadScheduledNotifications
+);
+router.get(
+  "/scheduled-notifications",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  listScheduledNotificationBatches
+);
+router.get(
+  "/scheduled-notifications/groups",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getScheduledNotificationGroups
+);
+router.get(
+  "/scheduled-notifications/history",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getScheduledNotificationHistory
+);
+router.get(
+  "/scheduled-notifications/:batchId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getScheduledNotificationBatch
+);
+router.patch(
+  "/scheduled-notifications/items/:itemId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateScheduledNotificationItem
+);
+router.post(
+  "/scheduled-notifications/items/:itemId/cancel",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  cancelScheduledNotificationItem
+);
+router.post(
+  "/scheduled-notifications/:batchId/cancel",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  cancelScheduledNotificationBatch
+);
+router.delete(
+  "/scheduled-notifications/:batchId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  deleteScheduledNotificationBatch
 );
 
 // Signup bonus settings routes

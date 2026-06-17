@@ -1,9 +1,10 @@
 const MatchingProfile = require("../../model/horoscope/matchingProfile");
-const axios = require('axios');
-const { enhanceAshtakootWithAI } = require("../../services/matchingAiService");
+const axios = require("axios");
+const { enhanceAshtakootWithAI,enhanceManglikWithAI } = require("../../services/matchingAiService");
 
 // Astro Engine configuration
-const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || 'http://localhost:8000/api/v1';
+const ASTRO_ENGINE_BASE_URL =
+  process.env.ASTRO_ENGINE_URL || "http://localhost:8000/api/v1";
 
 /**
  * Format date from string to YYYY-MM-DD
@@ -35,7 +36,6 @@ const getBirthDataPayload = (name, dob, tob, lat, lon) => {
   };
 };
 
-
 const createMatching = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -57,14 +57,8 @@ const createMatching = async (req, res) => {
     console.log("Creating kundli matching for user:", req.body);
 
     // Validate required fields
-    const requiredFields = {
-      boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude,
-      girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude,
-    };
-
-    const missingFields = Object.entries(requiredFields)
-      .filter(([key, value]) => !value)
-      .map(([key]) => key);
+    const requiredFields = { boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude, girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude };
+    const missingFields = Object.entries(requiredFields).filter(([_, value]) => !value).map(([key]) => key);
 
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -74,28 +68,15 @@ const createMatching = async (req, res) => {
     }
 
     // Prepare birth details for both
-    const maleData = getBirthDataPayload(
-      boyName,
-      boyDateOfBirth,
-      boyTimeOfBirth,
-      boyLatitude,
-      boyLongitude
-    );
-
-    const femaleData = getBirthDataPayload(
-      girlName,
-      girlDateOfBirth,
-      girlTimeOfBirth,
-      girlLatitude,
-      girlLongitude
-    );
+    const maleData = getBirthDataPayload(boyName, boyDateOfBirth, boyTimeOfBirth, boyLatitude, boyLongitude);
+    const femaleData = getBirthDataPayload(girlName, girlDateOfBirth, girlTimeOfBirth, girlLatitude, girlLongitude);
 
     console.log("Fetching matching data from Astro Engine...");
 
     // Call Astro Engine matching API
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/matching/ashtakoot`, {
       male_data: maleData,
-      female_data: femaleData
+      female_data: femaleData,
     });
 
     const matchingData = response.data;
@@ -104,90 +85,90 @@ const createMatching = async (req, res) => {
     const maleMangal = matchingData.male_mangal_dosha;
     const femaleMangal = matchingData.female_mangal_dosha;
 
-    // Optional: compact planet tables from Astro Engine for Planet Details tab
+    // Optional UI Data
     const malePlanetDetails = matchingData.male_planet_details || [];
     const femalePlanetDetails = matchingData.female_planet_details || [];
-
-    // Optional: Lagna (D1) charts and ascendant info for Lagna Chart tab
     const boyLagnaChart = matchingData.male_lagna_chart || null;
     const girlLagnaChart = matchingData.female_lagna_chart || null;
     const boyAscendant = matchingData.male_ascendant || null;
     const girlAscendant = matchingData.female_ascendant || null;
 
-    // Optionally enhance basic Ashtakoot descriptions with OpenAI so
-    // the Basic Details section can show richer 5-6 line narratives.
-    try {
-      const enhancedKutas = await enhanceAshtakootWithAI({
-        ashtakootData,
-        boyName,
-        girlName,
+    console.log("[MatchingAI] Firing AI enhancements in parallel...");
+
+    // 🚀 FIRE BOTH AI CALLS IN PARALLEL
+    const ashtakootPromise = enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }).catch(err => {
+      console.warn("[MatchingAI] Failed Ashtakoot:", err?.message || err);
+      return null;
+    });
+
+    const manglikPromise = enhanceManglikWithAI({ maleMangal, femaleMangal, boyName, girlName }).catch(err => {
+      console.warn("[MatchingAI] Failed Manglik:", err?.message || err);
+      return null;
+    });
+
+    // Wait for both to finish at the exact same time
+    const [enhancedKutas, enhancedManglik] = await Promise.all([ashtakootPromise, manglikPromise]);
+
+    // --- Process Ashtakoot AI Result ---
+    let aiConclusion = null;
+    if (enhancedKutas && ashtakootData && ashtakootData.kutas) {
+      const kutaKeys = ["varna", "bhakoot", "graha_maitri", "gana", "nadi", "vashya", "tara", "yoni"];
+      kutaKeys.forEach((key) => {
+        if (ashtakootData.kutas[key] && enhancedKutas[key]) {
+          ashtakootData.kutas[key].area_of_life = enhancedKutas[key].area_of_life || "";
+          ashtakootData.kutas[key].description = enhancedKutas[key].description || "";
+          ashtakootData.kutas[key].meaning = enhancedKutas[key].meaning || "";
+        }
       });
-
-      if (enhancedKutas && ashtakootData && ashtakootData.kutas) {
-        const kutaKeys = [
-          "varna",
-          "bhakoot",
-          "graha_maitri",
-          "gana",
-          "nadi",
-          "vashya",
-          "tara",
-          "yoni",
-        ];
-
-        kutaKeys.forEach((key) => {
-          if (ashtakootData.kutas[key] && enhancedKutas[key]?.enhanced_description) {
-            ashtakootData.kutas[key].enhanced_description = enhancedKutas[key].enhanced_description;
-          }
-        });
+      if (enhancedKutas.conclusion) {
+        aiConclusion = enhancedKutas.conclusion;
       }
-    } catch (aiError) {
-      console.warn("[MatchingAI] Failed to enhance Ashtakoot descriptions:", aiError?.message || aiError);
     }
 
-    // Calculate compatibility score
+    // --- Process Manglik AI Result ---
+    if (enhancedManglik) {
+      if (maleMangal) {
+        maleMangal.ui_aspects = enhancedManglik.male.aspects_text;
+        maleMangal.ui_house = enhancedManglik.male.house_text;
+        maleMangal.ui_analysis = enhancedManglik.male.analysis_text;
+      }
+      if (femaleMangal) {
+        femaleMangal.ui_aspects = enhancedManglik.female.aspects_text;
+        femaleMangal.ui_house = enhancedManglik.female.house_text;
+        femaleMangal.ui_analysis = enhancedManglik.female.analysis_text;
+      }
+    }
+
+    // Calculate compatibility score fallback
     let compatibilityScore = null;
     if (ashtakootData?.total_points) {
       compatibilityScore = parseFloat(((ashtakootData.total_points / 36) * 100).toFixed(2));
     }
 
-    // Generate conclusion
+    // Generate conclusion (AI wins, falls back to raw math)
     let conclusion = "Compatibility analysis unavailable";
-    if (compatibilityScore !== null) {
-      if (compatibilityScore >= 70) {
-        conclusion = "Excellent match! Very compatible for marriage.";
-      } else if (compatibilityScore >= 50) {
-        conclusion = "Good match! Compatible with some areas to work on.";
-      } else if (compatibilityScore >= 30) {
-        conclusion = "Average match. Requires understanding and adjustment.";
-      } else {
-        conclusion = "Below average match. Careful consideration recommended.";
-      }
+    if (aiConclusion) {
+      conclusion = aiConclusion;
+    } else if (compatibilityScore !== null) {
+      if (compatibilityScore >= 70) conclusion = "Excellent match! Very compatible for marriage.";
+      else if (compatibilityScore >= 50) conclusion = "Good match! Compatible with some areas to work on.";
+      else if (compatibilityScore >= 30) conclusion = "Average match. Requires understanding and adjustment.";
+      else conclusion = "Below average match. Careful consideration recommended.";
     }
 
-    // Prepare manglik details
+    // Prepare manglik details (Now fully enhanced with AI text)
     const manglikData = {
       male_manglik: maleMangal?.present || false,
       female_manglik: femaleMangal?.present || false,
       male_manglik_details: maleMangal,
-      female_manglik_details: femaleMangal
+      female_manglik_details: femaleMangal,
     };
 
-    // Create matching profile
+    // Save to Database
     const matchingProfile = await MatchingProfile.create({
       userId,
-      boyName,
-      boyDateOfBirth,
-      boyTimeOfBirth,
-      boyPlaceOfBirth,
-      boyLatitude,
-      boyLongitude,
-      girlName,
-      girlDateOfBirth,
-      girlTimeOfBirth,
-      girlPlaceOfBirth,
-      girlLatitude,
-      girlLongitude,
+      boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude,
+      girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude,
       compatibilityScore,
       ashtakootDetails: ashtakootData,
       dashakootDetails: dashakootData,
@@ -195,7 +176,7 @@ const createMatching = async (req, res) => {
       conclusion,
     });
 
-    // Attach non-persisted planet tables so frontend can render them
+    // Attach non-persisted details for UI rendering
     const matchingJson = matchingProfile.toJSON();
     matchingJson.boyPlanetDetails = malePlanetDetails;
     matchingJson.girlPlanetDetails = femalePlanetDetails;
@@ -203,6 +184,9 @@ const createMatching = async (req, res) => {
     matchingJson.girlLagnaChart = girlLagnaChart;
     matchingJson.boyAscendant = boyAscendant;
     matchingJson.girlAscendant = girlAscendant;
+
+  //  console.log("Kundli matching " + JSON.stringify(matchingJson));
+
 
     res.status(201).json({
       success: true,
@@ -218,7 +202,6 @@ const createMatching = async (req, res) => {
     });
   }
 };
-
 
 const getAllMatchings = async (req, res) => {
   try {
@@ -252,7 +235,6 @@ const getAllMatchings = async (req, res) => {
   }
 };
 
-
 const getMatchingById = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -282,7 +264,6 @@ const getMatchingById = async (req, res) => {
     });
   }
 };
-
 
 const deleteMatching = async (req, res) => {
   try {

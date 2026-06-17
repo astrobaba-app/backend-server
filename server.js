@@ -15,6 +15,7 @@ const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
 const { startOtpQueueWorker } = require("./services/otpQueueService");
+const scheduledNotificationService = require("./services/scheduledNotificationService");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -299,6 +300,7 @@ initDB(() => {
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
     startPalmQueueWorker();
+    scheduledNotificationService.startWorker();
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });
