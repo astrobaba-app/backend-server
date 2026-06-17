@@ -181,6 +181,36 @@ async function ensureChatSessionColumns() {
     );
   }
 
+  if (!table.max_duration_seconds && !table.maxDurationSeconds) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "max_duration_seconds", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: "Maximum approved chat duration based on recharge wallet balance",
+      })
+    );
+  }
+
+  if (!table.max_end_time && !table.maxEndTime) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "max_end_time", {
+        type: DataTypes.DATE,
+        allowNull: true,
+        comment: "Auto-end time calculated from real chat wallet balance",
+      })
+    );
+  }
+
+  if (!table.wallet_balance_at_approval && !table.walletBalanceAtApproval) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "wallet_balance_at_approval", {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        comment: "Recharge wallet balance used to calculate max chat duration",
+      })
+    );
+  }
+
   if (operations.length) {
     await Promise.all(operations);
     console.log("Ensured chat_sessions metadata columns exist");
@@ -1050,6 +1080,7 @@ async function ensureAstrologerAuthColumns() {
 
   try {
     const table = await queryInterface.describeTable("astrologers");
+    const operations = [];
 
     if (table.email && table.email.allowNull === false) {
       await sequelize.query(
@@ -1057,8 +1088,73 @@ async function ensureAstrologerAuthColumns() {
       );
       console.log("Ensured astrologers.email is nullable for OTP-only auth");
     }
+
+    if (!table.sessionVersion && !table.session_version) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "sessionVersion", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+    if (!table.activeDeviceId && !table.active_device_id) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceId", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeDeviceName && !table.active_device_name) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceName", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeDeviceType && !table.active_device_type) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceType", {
+          type: DataTypes.ENUM("ios", "android", "web"),
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeSessionStartedAt && !table.active_session_started_at) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeSessionStartedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured astrologer session columns exist");
+    }
   } catch (error) {
     console.log("astrologers table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureAstrologerDeviceTokenColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("astrologer_device_tokens");
+
+    if (!table.deviceName && !table.device_name) {
+      await queryInterface.addColumn("astrologer_device_tokens", "deviceName", {
+        type: DataTypes.STRING,
+        allowNull: true,
+      });
+      console.log("Ensured astrologer device token deviceName column exists");
+    }
+  } catch (error) {
+    console.log("astrologer_device_tokens table will be created by sequelize.sync()");
   }
 }
 
@@ -1380,6 +1476,7 @@ const initDB = (callback) => {
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
     .then(() => ensureAstrologerAuthColumns())
+    .then(() => ensureAstrologerDeviceTokenColumns())
     .then(() => ensureJobApplicationColumns())
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())

@@ -359,7 +359,7 @@ class PushNotificationService {
     }
   }
 
-  async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null) {
+  async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null, deviceName = null) {
     try {
       const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
 
@@ -368,6 +368,7 @@ class PushNotificationService {
           astrologerId,
           deviceType,
           deviceId,
+          deviceName,
           isActive: true,
           lastUsedAt: new Date(),
         });
@@ -380,6 +381,7 @@ class PushNotificationService {
         token,
         deviceType,
         deviceId,
+        deviceName,
         isActive: true,
         lastUsedAt: new Date(),
       });
@@ -398,6 +400,33 @@ class PushNotificationService {
       return result > 0;
     } catch (error) {
       console.error("[FCM] Error removing astrologer token:", error);
+      throw error;
+    }
+  }
+
+  async deactivateAstrologerDeviceTokens(astrologerId, options = {}) {
+    try {
+      const where = {
+        astrologerId,
+        isActive: true,
+      };
+
+      if (options.deviceId) {
+        where.deviceId = options.deviceId;
+      }
+
+      if (options.exceptDeviceId) {
+        where.deviceId = { [Op.ne]: options.exceptDeviceId };
+      }
+
+      const result = await AstrologerDeviceToken.update(
+        { isActive: false },
+        { where }
+      );
+      console.log(`[FCM] Deactivated ${result[0]} astrologer tokens`);
+      return result[0];
+    } catch (error) {
+      console.error("[FCM] Error deactivating astrologer tokens:", error);
       throw error;
     }
   }

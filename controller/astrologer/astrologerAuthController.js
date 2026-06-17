@@ -131,7 +131,11 @@ const verifyOTP = async (req, res) => {
       });
     }
 
-    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const authPayload = {
+      id: astrologer.id,
+      role: "astrologer",
+      sessionVersion: astrologer.sessionVersion,
+    };
     const token = createToken(authPayload);
     const astrologerToken = createMiddlewareToken(authPayload);
     const refreshToken = createRefreshToken(authPayload);
@@ -588,7 +592,11 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
-    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const authPayload = {
+      id: astrologer.id,
+      role: "astrologer",
+      sessionVersion: astrologer.sessionVersion,
+    };
     const token = createToken(authPayload);
     const astrologerToken = createMiddlewareToken(authPayload);
     const nextRefreshToken = createRefreshToken(authPayload);

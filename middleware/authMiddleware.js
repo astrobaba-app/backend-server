@@ -1,9 +1,10 @@
 const { validateToken } = require("../services/authService");
 const { parse } = require("cookie");
+const Astrologer = require("../model/astrologer/astrologer");
 
 
 function checkForAuthenticationCookie() {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     try {
       let token;
       if (req.headers.cookie) {
@@ -36,6 +37,23 @@ function checkForAuthenticationCookie() {
       }
 
       req.user = userPayload;
+      if (userPayload.role === "astrologer") {
+        const astrologer = await Astrologer.findByPk(userPayload.id, {
+          attributes: ["id", "sessionVersion"],
+        });
+
+        if (!astrologer) {
+          return res.status(401).json({ error: "Invalid or expired token." });
+        }
+
+        const tokenSessionVersion = Number.isInteger(userPayload.sessionVersion)
+          ? userPayload.sessionVersion
+          : 0;
+
+        if (tokenSessionVersion !== (astrologer.sessionVersion || 0)) {
+          return res.status(401).json({ error: "Invalid or expired token." });
+        }
+      }
       next();
     } catch (error) {
       console.error("[Auth] middleware error:", {

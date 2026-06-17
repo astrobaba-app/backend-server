@@ -18,6 +18,7 @@ const {
   sendRegistrationOTPV2,
   verifyOTPV2,
   completeRegistrationV2,
+  logoutV2,
 } = require("../../controller/astrologer/astrologerAuthControllerV2");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
@@ -31,6 +32,7 @@ router.post("/refresh-token", refreshAccessToken);
 router.post("/v2/send-otp", sendRegistrationOTPV2);
 router.post("/v2/verify-otp", verifyOTPV2);
 router.post("/v2/register", upload.single("photo"), completeRegistrationV2);
+router.post("/v2/logout", checkForAuthenticationCookie(), logoutV2);
 
 // Protected routes
 router.get("/profile",checkForAuthenticationCookie(), getProfile);
