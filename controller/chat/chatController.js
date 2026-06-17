@@ -38,6 +38,13 @@ const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "country",
 ];
 const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
+const IMAGE_MESSAGE_ALLOWED_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+]);
 const VOICE_MESSAGE_ALLOWED_MIME_TYPES = new Set([
   "audio/webm",
   "audio/ogg",
@@ -49,6 +56,7 @@ const VOICE_MESSAGE_ALLOWED_MIME_TYPES = new Set([
   "audio/aac",
   "audio/x-m4a",
 ]);
+const MAX_IMAGE_MESSAGE_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_VOICE_NOTE_SECONDS = 120;
 const MAX_VOICE_NOTE_FILE_SIZE_BYTES = 12 * 1024 * 1024;
 
@@ -462,12 +470,38 @@ const sendMessage = async (req, res) => {
 
     const trimmedMessage = String(message || "").trim();
     const isVoiceMessage = normalizedMessageType === "voice";
+    const isImageMessage = normalizedMessageType === "image";
+    const isFileMessage = normalizedMessageType === "file";
+    const isAttachmentMessage = isVoiceMessage || isImageMessage || isFileMessage;
 
-    if (!isVoiceMessage && !trimmedMessage) {
+    if (!isAttachmentMessage && !trimmedMessage) {
       return res.status(400).json({
         success: false,
         message: "Message content is required",
       });
+    }
+
+    if ((isImageMessage || isFileMessage) && !req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Attachment file is required",
+      });
+    }
+
+    if (isImageMessage) {
+      if (!IMAGE_MESSAGE_ALLOWED_MIME_TYPES.has(req.file.mimetype)) {
+        return res.status(415).json({
+          success: false,
+          message: "Unsupported image format",
+        });
+      }
+
+      if ((req.file.size || 0) > MAX_IMAGE_MESSAGE_FILE_SIZE_BYTES) {
+        return res.status(413).json({
+          success: false,
+          message: "Image is too large. Maximum size is 5MB.",
+        });
+      }
     }
 
     if (isVoiceMessage) {
@@ -607,6 +641,10 @@ const sendMessage = async (req, res) => {
     // Create message
     const safeMessage = isVoiceMessage
       ? trimmedMessage || "[Voice note]"
+      : isImageMessage
+      ? trimmedMessage || "[Image]"
+      : isFileMessage
+      ? trimmedMessage || "[Attachment]"
       : trimmedMessage;
 
     const chatMessage = await ChatMessage.create({

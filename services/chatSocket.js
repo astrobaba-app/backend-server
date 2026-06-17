@@ -688,8 +688,12 @@ function initializeChatSocket(io) {
         try {
           const normalizedMessageType = String(messageType || "text").toLowerCase();
           const normalizedText = String(text || "").trim();
+          const isSocketAttachmentMessage =
+            normalizedMessageType === "voice" ||
+            normalizedMessageType === "image" ||
+            normalizedMessageType === "file";
 
-          if (!sessionId || (!normalizedText && normalizedMessageType !== "voice")) {
+          if (!sessionId || (!normalizedText && !isSocketAttachmentMessage)) {
             if (callback) callback({ success: false, error: "Missing data" });
             return;
           }
@@ -701,11 +705,11 @@ function initializeChatSocket(io) {
             return;
           }
 
-          if (normalizedMessageType === "voice" && !fileUrl) {
+          if (isSocketAttachmentMessage && !fileUrl) {
             if (callback) {
               callback({
                 success: false,
-                error: "Voice notes require uploaded audio file",
+                error: "Attachment messages require uploaded file URL",
               });
             }
             return;
@@ -782,7 +786,14 @@ function initializeChatSocket(io) {
             session,
             senderId: authId,
             senderType: isAstrologer ? "astrologer" : "user",
-            text: normalizedMessageType === "voice" ? (normalizedText || "[Voice note]") : normalizedText,
+            text:
+              normalizedMessageType === "voice"
+                ? normalizedText || "[Voice note]"
+                : normalizedMessageType === "image"
+                ? normalizedText || "[Image]"
+                : normalizedMessageType === "file"
+                ? normalizedText || "[Attachment]"
+                : normalizedText,
             messageType: normalizedMessageType,
             fileUrl,
             replyToMessageId,
