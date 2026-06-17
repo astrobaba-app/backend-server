@@ -5,6 +5,8 @@ const { DataTypes } = require("sequelize");
 const Admin = require("../model/admin/admin");
 const AdminSettings = require("../model/admin/adminSettings");
 const BroadcastLog = require("../model/admin/broadcastLog");
+const ScheduledNotificationBatch = require("../model/admin/scheduledNotificationBatch");
+const ScheduledNotificationItem = require("../model/admin/scheduledNotificationItem");
 
 // AI Chat models
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
@@ -702,6 +704,59 @@ async function ensureBroadcastLogDeliveryColumns() {
     }
   } catch (error) {
     console.log("broadcast_logs table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureScheduledNotificationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const batchTable = await queryInterface.describeTable("scheduled_notification_batches");
+    const itemTable = await queryInterface.describeTable("scheduled_notification_items");
+    const operations = [];
+
+    if (!batchTable.cancelledAt && !batchTable.cancelled_at) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_batches", "cancelledAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!batchTable.deletedAt && !batchTable.deleted_at) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_batches", "deletedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!itemTable.broadcastLogId && !itemTable.broadcast_log_id) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "broadcastLogId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!itemTable.lockToken && !itemTable.lock_token) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "lockToken", {
+          type: DataTypes.STRING(64),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured scheduled notification columns exist");
+    }
+  } catch (error) {
+    console.log("scheduled notification tables will be created by sequelize.sync()");
   }
 }
 
@@ -1416,6 +1471,7 @@ const initDB = (callback) => {
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureNotificationPushColumns())
     .then(() => ensureBroadcastLogDeliveryColumns())
+    .then(() => ensureScheduledNotificationColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
