@@ -5,6 +5,7 @@ const {
   sendMessage,
   getMyChatSessions,
   getChatMessages,
+  endChatSession,
   deleteChatSession,
   clearChatSession,
   attachKundliToSession,
@@ -22,6 +23,7 @@ router.post("/create", checkForAuthenticationCookie(), createChatSession);
 router.get("/sessions", checkForAuthenticationCookie(), getMyChatSessions);
 router.get("/session/:sessionId/messages", checkForAuthenticationCookie(), getChatMessages);
 router.post("/session/:sessionId/send", checkForAuthenticationCookie(), sendMessage);
+router.post("/session/:sessionId/end", checkForAuthenticationCookie(), endChatSession);
 router.delete("/session/:sessionId", checkForAuthenticationCookie(), deleteChatSession);
 router.delete("/session/:sessionId/clear", checkForAuthenticationCookie(), clearChatSession);
 router.put("/session/:sessionId/attach-kundli", checkForAuthenticationCookie(), attachKundliToSession);

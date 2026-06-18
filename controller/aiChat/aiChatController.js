@@ -7,8 +7,52 @@ const Kundli = require("../../model/horoscope/kundli");
 const { Op } = require("sequelize");
 const { buildInsightPayload } = require("../../services/astroInsightEngineService");
 const { createChatCompletion } = require("../../services/openaiClient");
+const {
+  buildInlineIntentInstruction,
+  getInterestJsonSchema,
+  normalizeClassificationPayload,
+  parseInlineAiResponse,
+} = require("../../services/interestCohortService");
+const {
+  queueAiChatInterestFinalization,
+} = require("../../services/aiChatInterestService");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const MAX_AI_INTEREST_SIGNALS_PER_SESSION = 20;
+
+const appendAiInterestSignal = (existingSignals, classification, userMessageId) => {
+  const normalized = normalizeClassificationPayload(classification);
+  if (!normalized) {
+    console.log("[InterestCohort][AI] Skipped invalid inline signal", {
+      userMessageId,
+      classification,
+    });
+    return Array.isArray(existingSignals) ? existingSignals : [];
+  }
+
+  const signals = Array.isArray(existingSignals) ? existingSignals : [];
+  const nextSignals = [
+    ...signals,
+    {
+      primaryIntent: normalized.primaryIntent,
+      secondaryIntent: normalized.secondaryIntent,
+      confidence: normalized.confidence,
+      userMessageId,
+      capturedAt: new Date().toISOString(),
+    },
+  ].slice(-MAX_AI_INTEREST_SIGNALS_PER_SESSION);
+
+  console.log("[InterestCohort][AI] Captured inline interest signal", {
+    userMessageId,
+    primaryIntent: normalized.primaryIntent,
+    secondaryIntent: normalized.secondaryIntent,
+    confidence: normalized.confidence,
+    previousSignalCount: signals.length,
+    nextSignalCount: nextSignals.length,
+  });
+
+  return nextSignals;
+};
 
 // Astrologer-specific system prompts
 const ASTROLOGER_PROFILES = {
@@ -1336,7 +1380,9 @@ const sendMessage = async (req, res) => {
 IMPORTANT: When user asks about "today", "now", "this year", "current", etc., use the above date and time for your response.`;
 
     // Get astrologer-specific system prompt
-    const systemPrompt = getSystemPrompt(session.astrologerId, { concise: fastMode });
+    const systemPrompt =
+      getSystemPrompt(session.astrologerId, { concise: fastMode }) +
+      buildInlineIntentInstruction();
 
     // Build messages array for OpenAI with optimized context
     const messages = [
@@ -1358,15 +1404,28 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         ? process.env.OPENAI_CHAT_MODEL_FAST || CHAT_MODEL
         : CHAT_MODEL,
       messages: messages,
-      max_tokens: fastMode ? 180 : 260,
+      max_tokens: fastMode ? 230 : 340,
       temperature: fastMode ? 0.6 : 0.7,
+      response_format: getInterestJsonSchema({ includeAstrologyResponse: true }),
     }, {
       req,
       userId,
       feature: "ai_chat_reply",
     });
 
-    let aiRawResponse = completion.choices[0].message.content || "";
+    const parsedInlineResponse = parseInlineAiResponse(
+      completion.choices[0].message.content || ""
+    );
+    let aiRawResponse = parsedInlineResponse.astrologyResponse;
+    const intentClassification = parsedInlineResponse.classification;
+    console.log("[InterestCohort][AI] Inline classification parsed from AI reply", {
+      userId,
+      sessionId,
+      hasClassification: Boolean(intentClassification),
+      primaryIntent: intentClassification?.primaryIntent || null,
+      secondaryIntent: intentClassification?.secondaryIntent || null,
+      confidence: intentClassification?.confidence || null,
+    });
     const completionFinishReason = completion.choices[0].finish_reason;
     let tokensUsed = completion.usage?.total_tokens || 0;
 
@@ -1418,15 +1477,25 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
       tokens: tokensUsed,
     });
 
+    const sessionUpdates = {};
+    if (intentClassification) {
+      sessionUpdates.interestSignals = appendAiInterestSignal(
+        session.interestSignals,
+        intentClassification,
+        userMessage.id
+      );
+    }
+
     // Update session title from first message if still "New Chat"
     if (session.title === "New Chat" && previousMessages.length <= 2) {
       const title = trimmedMessage.substring(0, 50) + (trimmedMessage.length > 50 ? "..." : "");
-      await session.update({ 
+      await session.update({
+        ...sessionUpdates,
         title,
         lastMessageAt: new Date(),
       });
     } else {
-      await session.update({ lastMessageAt: new Date() });
+      await session.update({ ...sessionUpdates, lastMessageAt: new Date() });
     }
 
     res.status(200).json({
@@ -1451,6 +1520,66 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     res.status(500).json({
       success: false,
       message: "Failed to send message",
+      error: error.message,
+    });
+  }
+};
+
+const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
+  const session = await AIChatSession.findOne({
+    where: { id: sessionId, userId },
+  });
+
+  if (!session) {
+    return {
+      status: 404,
+      body: {
+        success: false,
+        message: "Chat session not found",
+      },
+    };
+  }
+
+  await session.update({ isActive: false });
+  console.log("[InterestCohort][AI] AI chat session ended", {
+    userId,
+    sessionId,
+    signalCount: Array.isArray(session.interestSignals)
+      ? session.interestSignals.length
+      : 0,
+  });
+  queueAiChatInterestFinalization({
+    userId,
+    sessionId,
+    markInactive: false,
+  });
+
+  return {
+    status: 200,
+    body: {
+      success: true,
+      message: successMessage,
+    },
+  };
+};
+
+/**
+ * End an AI chat session and classify its consultation interest asynchronously.
+ */
+const endChatSession = async (req, res) => {
+  try {
+    const result = await finalizeAiChatSession({
+      userId: req.user.id,
+      sessionId: req.params.sessionId,
+      successMessage: "Chat session ended successfully",
+    });
+
+    return res.status(result.status).json(result.body);
+  } catch (error) {
+    console.error("End AI chat session error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to end chat session",
       error: error.message,
     });
   }
@@ -1721,27 +1850,13 @@ const getChatMessages = async (req, res) => {
  */
 const deleteChatSession = async (req, res) => {
   try {
-    const userId = req.user.id;
-    const { sessionId } = req.params;
-
-    const session = await AIChatSession.findOne({
-      where: { id: sessionId, userId },
+    const result = await finalizeAiChatSession({
+      userId: req.user.id,
+      sessionId: req.params.sessionId,
+      successMessage: "Chat session deleted successfully",
     });
 
-    if (!session) {
-      return res.status(404).json({
-        success: false,
-        message: "Chat session not found",
-      });
-    }
-
-    // Soft delete - just mark as inactive
-    await session.update({ isActive: false });
-
-    res.status(200).json({
-      success: true,
-      message: "Chat session deleted successfully",
-    });
+    return res.status(result.status).json(result.body);
   } catch (error) {
     console.error("Delete chat session error:", error);
     res.status(500).json({
@@ -1979,6 +2094,7 @@ module.exports = {
   sendMessage,
   getMyChatSessions,
   getChatMessages,
+  endChatSession,
   deleteChatSession,
   clearChatSession,
   attachKundliToSession,

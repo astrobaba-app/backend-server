@@ -151,7 +151,7 @@ const completeGoogleLogin = async (res, user, isNewUser) => {
 
   setTokenCookie(res, token, middlewareToken, refreshToken);
 
-  await trackUserLogin(user.id, "email", {
+  await trackUserLogin(user.id, "google", {
     invalidateTotalUsers: isNewUser,
   });
 

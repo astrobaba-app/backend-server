@@ -10,6 +10,7 @@ const { initializeChatSocket } = require("./services/chatSocket");
 const { initializeLiveStreamSocket } = require("./services/liveStreamSocket");
 const { startForumAIModerationWorker } = require("./services/forumAIModerationService");
 const { startForumDuplicateWorker } = require("./services/forumDuplicateService");
+const { startInterestClassificationWorker } = require("./services/interestClassificationWorker");
 const { assertDeveloperIdentity } = require("./services/developerIdentityService");
 const {
   startJobApplicationEmailQueueWorker,
@@ -173,6 +174,7 @@ const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const appleAuthRoute = require("./routes/authRoute/appleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
+const interestRoute = require("./routes/interest/interestRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
 const forumRoute = require("./routes/forum/forumRoute");
@@ -208,6 +210,7 @@ app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
+app.use("/api/interests", interestRoute);
 app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
 app.use("/api/forum", forumRoute);
@@ -297,6 +300,7 @@ initDB(() => {
     initializeScheduler();
     startForumAIModerationWorker();
     startForumDuplicateWorker();
+    startInterestClassificationWorker();
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
     startPalmQueueWorker();

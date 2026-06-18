@@ -132,12 +132,25 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    loginCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    firstLoginAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     lastLoginAt: {
       type: DataTypes.DATE,
       allowNull: true,
     },
     lastLoginMethod: {
-      type: DataTypes.ENUM("phone", "email"),
+      type: DataTypes.ENUM("phone", "google", "apple"),
+      allowNull: true,
+    },
+    lastLogoutAt: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
   },
