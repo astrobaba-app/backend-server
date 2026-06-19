@@ -20,7 +20,14 @@ const getSystemChromePath = () => {
 const getPuppeteerLaunchOptions = () => {
   const options = {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-features=Crashpad",
+      "--disable-crash-reporter"
+    ],
   };
 
   const chromePath = getSystemChromePath();
@@ -1322,10 +1329,20 @@ const generatePalmReportPDF = async ({ palmImages, features, structuredInsights,
       printBackground: true,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
     });
-    await browser.close();
+    try {
+      await browser.close();
+    } catch (closeError) {
+      console.warn("[Palm PDF Service] Browser close warning (safe to ignore):", closeError.message);
+    }
     return pdfBuffer;
   } catch (error) {
-    if (browser) await browser.close();
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.warn("[Palm PDF Service] Browser close warning in catch (safe to ignore):", closeError.message);
+      }
+    }
     const isMissingBrowser =
       typeof error?.message === "string" &&
       (error.message.includes("Could not find Chrome") || error.message.includes("Could not find Chromium"));

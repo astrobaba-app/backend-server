@@ -6,6 +6,12 @@ const {
   getGeneratedKundliReport,
   downloadKundliReportPDF,
   previewKundliReportPDF,
+  generateDailyKundaliReport,
+  getDailyKundaliHistory,
+  deleteDailyKundaliReport,
+  generateYearlyKundaliReport,
+  getYearlyKundaliHistory,
+  deleteYearlyKundaliReport,
 } = require("../../controller/horoscope/kundliReportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
@@ -24,4 +30,19 @@ router.post("/download", checkForAuthenticationCookie(), downloadKundliReportPDF
 // Preview PDF (base64)
 router.post("/preview", checkForAuthenticationCookie(), previewKundliReportPDF);
 
+// Daily Kundali endpoints
+router.post("/daily-kundali", checkForAuthenticationCookie(), generateDailyKundaliReport);
+router.get("/daily-kundali", checkForAuthenticationCookie(), getDailyKundaliHistory);
+
+// Delete a daily report record
+router.delete("/daily-kundali/:id", checkForAuthenticationCookie(), deleteDailyKundaliReport);
+
+// Yearly Kundali endpoints
+router.post("/yearly-kundali", checkForAuthenticationCookie(), generateYearlyKundaliReport);
+router.get("/yearly-kundali", checkForAuthenticationCookie(), getYearlyKundaliHistory);
+
+// Delete a yearly report record
+router.delete("/yearly-kundali/:id", checkForAuthenticationCookie(), deleteYearlyKundaliReport);
+
 module.exports = router;
+

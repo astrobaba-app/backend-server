@@ -18,6 +18,7 @@ const formatDate = (dateString) => {
  * Format time to HH:MM:SS
  */
 const formatTime = (timeString) => {
+  if (!timeString) return "00:00:00";
   const [hour, minute] = timeString.split(":");
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
 };
@@ -433,6 +434,22 @@ const getCompleteHoroscope = async (userRequest) => {
   }
 };
 
+/**
+ * Fetch KP cuspal positions and significators
+ */
+const getKpData = async (userRequest) => {
+  try {
+    const birth_data = getBirthDataPayload(userRequest);
+    const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/kp/cuspal`, {
+      birth_data,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Error in getKpData:", error.response?.data || error.message);
+    return null;
+  }
+};
+
 module.exports = {
   getBirthDataPayload,
   getBasicDetails,
@@ -450,4 +467,5 @@ module.exports = {
   getAshtakavarga,
   getCompleteHoroscope,
   getTransitChart,
+  getKpData,
 };
