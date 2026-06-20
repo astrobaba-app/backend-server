@@ -173,19 +173,33 @@ const getUserKundlisForChat = async (req, res) => {
       });
     }
 
-    const userRequests = await UserRequest.findAll({
-      where: { userId: chatSession.userId },
-      attributes: [
-        "id",
-        "fullName",
-        "dateOfbirth",
-        "timeOfbirth",
-        "placeOfBirth",
-        "gender",
-        "createdAt",
+    const kundlis = await Kundli.findAll({
+      where: {
+        sessionId,
+        createdBy: astrologerId,
+      },
+      include: [
+        {
+          model: UserRequest,
+          as: "userRequest",
+          where: { userId: chatSession.userId },
+          attributes: [
+            "id",
+            "fullName",
+            "dateOfbirth",
+            "timeOfbirth",
+            "placeOfBirth",
+            "gender",
+            "createdAt",
+          ],
+        },
       ],
       order: [["createdAt", "DESC"]],
     });
+
+    const userRequests = kundlis
+      .map((kundli) => kundli.userRequest)
+      .filter(Boolean);
 
     res.status(200).json({
       success: true,
@@ -242,7 +256,11 @@ const getKundliShareViewForChat = async (req, res) => {
     }
 
     const kundli = await Kundli.findOne({
-      where: { requestId: userRequestId },
+      where: {
+        requestId: userRequestId,
+        sessionId,
+        createdBy: astrologerId,
+      },
     });
 
     if (!kundli) {
@@ -312,7 +330,11 @@ const getKundliForChat = async (req, res) => {
     }
 
     const kundli = await Kundli.findOne({
-      where: { requestId: userRequestId },
+      where: {
+        requestId: userRequestId,
+        sessionId,
+        createdBy: astrologerId,
+      },
       include: [{ model: UserRequest, as: "userRequest" }],
     });
 
@@ -366,6 +388,8 @@ const createKundliForChat = async (req, res) => {
       id: chatSession.userId,
       astrologerId,
     };
+    req.kundliSessionId = sessionId;
+    req.kundliCreatedBy = astrologerId;
 
     return createKundli(req, res);
   } catch (error) {

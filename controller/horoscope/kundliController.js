@@ -581,6 +581,8 @@ const createKundli = async (req, res) => {
     }
     const kundli = await Kundli.create({
       requestId: userRequest.id,
+      sessionId: req.kundliSessionId || null,
+      createdBy: req.kundliCreatedBy || "user",
       basicDetails: basicDetailsVal,
       astroDetails: astroDetailsVal,
       manglikAnalysis: manglikAnalysisVal,
