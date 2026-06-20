@@ -18,7 +18,9 @@ const {
   getUserKundlisForCall,
   getKundliForCall,
   getUserKundlisForChat,
+  getKundliForChat,
   getKundliShareViewForChat,
+  createKundliForChat,
 } = require("../../controller/horoscope/kundliForCallController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const checkForAstrologerRole = require("../../middleware/roleMiddleware");
@@ -63,6 +65,16 @@ router.get(
   "/chat/:sessionId/kundli/:userRequestId/share-view",
   checkForAuthenticationCookie(),
   getKundliShareViewForChat
+);
+router.get(
+  "/chat/:sessionId/kundli/:userRequestId",
+  checkForAuthenticationCookie(),
+  getKundliForChat
+);
+router.post(
+  "/v2/chat/:sessionId/create",
+  checkForAuthenticationCookie(),
+  createKundliForChat
 );
 
 module.exports = router;

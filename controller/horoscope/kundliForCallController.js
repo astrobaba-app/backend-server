@@ -4,6 +4,7 @@ const CallSession = require("../../model/call/callSession");
 const ChatSession = require("../../model/chat/chatSession");
 const { Op } = require("sequelize");
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
+const { createKundli } = require("./kundliController");
 
 /**
  * Get user's Kundlis for astrologer during a call
@@ -272,9 +273,116 @@ const getKundliShareViewForChat = async (req, res) => {
   }
 };
 
+/**
+ * Get full Kundli details for astrologer during an active chat.
+ */
+const getKundliForChat = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId, userRequestId } = req.params;
+
+    const chatSession = await ChatSession.findOne({
+      where: {
+        id: sessionId,
+        astrologerId,
+        status: "active",
+        requestStatus: "approved",
+      },
+    });
+
+    if (!chatSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found or not active",
+      });
+    }
+
+    const userRequest = await UserRequest.findOne({
+      where: {
+        id: userRequestId,
+        userId: chatSession.userId,
+      },
+    });
+
+    if (!userRequest) {
+      return res.status(404).json({
+        success: false,
+        message: "User request not found",
+      });
+    }
+
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequestId },
+      include: [{ model: UserRequest, as: "userRequest" }],
+    });
+
+    if (!kundli) {
+      return res.status(404).json({
+        success: false,
+        message: "Kundli not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      kundli: kundli.toJSON(),
+    });
+  } catch (error) {
+    console.error("Get kundli for chat error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch kundli",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Create Kundli for the user connected to an active chat.
+ */
+const createKundliForChat = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const chatSession = await ChatSession.findOne({
+      where: {
+        id: sessionId,
+        astrologerId,
+        status: "active",
+        requestStatus: "approved",
+      },
+    });
+
+    if (!chatSession) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found or not active",
+      });
+    }
+
+    req.user = {
+      ...(req.user || {}),
+      id: chatSession.userId,
+      astrologerId,
+    };
+
+    return createKundli(req, res);
+  } catch (error) {
+    console.error("Create kundli for chat error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create kundli",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getUserKundlisForCall,
   getKundliForCall,
   getUserKundlisForChat,
+  getKundliForChat,
   getKundliShareViewForChat,
+  createKundliForChat,
 };
