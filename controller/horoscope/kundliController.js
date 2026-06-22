@@ -34,6 +34,17 @@ const {
   getTransitChart,
 } = require("../../services/astroEngineService");
 
+//for watsapp flow
+const WhatsappKundliSession = require(
+  "../../model/whatsapp/whatsappKundliSession"
+);
+
+const {
+  mergeWhatsappKundliData,
+  getMissingFields,
+  hasUsefulExtraction,
+} = require("../../utils/whatsappKundliSessionHelper");
+
 /**
  * Shared helper — converts raw Ashtakavarga API response into the compact
  * house-rotated structure stored in the DB and consumed by the frontend.
@@ -71,9 +82,7 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
   }
 }
 
-const {
-  generateFreeReportNarratives,
-} = require("../../services/freeReportAiService");
+const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
 const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
@@ -95,10 +104,8 @@ const UNKNOWN_WHATSAPP_TOB_TOKENS = new Set([
 const DEFAULT_WHATSAPP_AI_ASTROLOGER_ID =
   process.env.WHATSAPP_AI_ASTROLOGER_ID || "ai-astrologer-devansh";
 const WHATSAPP_FAST_FORMAT_MODEL =
-  process.env.OPENAI_CHAT_MODEL_FAST ||
-  process.env.OPENAI_CHAT_MODEL ||
-  "gpt-4o-mini";
-const WHATSAPP_FAST_FORMAT_TIMEOUT_MS = 1800;
+  process.env.OPENAI_CHAT_MODEL_FAST || process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const WHATSAPP_FAST_FORMAT_TIMEOUT_MS = 15000;
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -158,12 +165,7 @@ const extractWhatsappApiKey = (req) => {
   const authorizationApiKey = normalizeApiKeyCandidate(authorizationHeader);
 
   // Prefer dedicated WhatsApp header first to avoid collisions with generic x-api-key.
-  return (
-    headerWhatsappApiKey ||
-    headerGenericApiKey ||
-    authorizationApiKey ||
-    bodyApiKey
-  );
+  return headerWhatsappApiKey || headerGenericApiKey || authorizationApiKey || bodyApiKey;
 };
 
 const normalizeText = (value) =>
@@ -196,10 +198,7 @@ const resolveWhatsappTob = ({ rawTob, aiTob }) => {
   const normalizedRawTob = normalizeText(rawTob);
   const normalizedAiTob = normalizeText(aiTob);
 
-  if (
-    isUnknownWhatsappTob(normalizedRawTob) ||
-    isUnknownWhatsappTob(normalizedAiTob)
-  ) {
+  if (isUnknownWhatsappTob(normalizedRawTob) || isUnknownWhatsappTob(normalizedAiTob)) {
     return UNKNOWN_WHATSAPP_TOB_DEFAULT;
   }
 
@@ -247,16 +246,7 @@ const normalizeGenderForKundli = (value) => {
 
   if (["m", "male", "man", "boy"].includes(normalized)) return "male";
   if (["f", "female", "woman", "girl"].includes(normalized)) return "female";
-  if (
-    [
-      "other",
-      "others",
-      "non-binary",
-      "nonbinary",
-      "nb",
-      "transgender",
-    ].includes(normalized)
-  ) {
+  if (["other", "others", "non-binary", "nonbinary", "nb", "transgender"].includes(normalized)) {
     return "other";
   }
 
@@ -273,6 +263,8 @@ const formatWhatsappKundliInputWithOpenAI = async ({
   if (!process.env.OPENAI_API_KEY) {
     return null;
   }
+  console.log("Entering extractor");
+  console.log({ userMessage, missingFields });
 
   const completion = await withTimeout(
     createChatCompletion({
@@ -288,24 +280,19 @@ const formatWhatsappKundliInputWithOpenAI = async ({
         },
         {
           role: "user",
-          content: JSON.stringify({
-            user_gender,
-            user_dob,
-            user_tob,
-            user_pob,
-          }),
+          content: JSON.stringify({ user_gender, user_dob, user_tob, user_pob }),
         },
       ],
     }, context),
     WHATSAPP_FAST_FORMAT_TIMEOUT_MS,
-    "OpenAI formatter timeout",
+    "OpenAI formatter timeout"
   );
 
   const parsed = parseAiJsonContent(completion?.choices?.[0]?.message?.content);
   if (!parsed || typeof parsed !== "object") {
     return null;
   }
-
+  console.log("Inside existing formatter");
   return {
     gender: normalizeText(parsed.gender),
     dob: normalizeText(parsed.dob),
@@ -313,7 +300,86 @@ const formatWhatsappKundliInputWithOpenAI = async ({
     place_of_birth: normalizeText(parsed.place_of_birth),
   };
 };
+const extractWhatsappKundliDetailsWithOpenAI = async ({
+  userMessage,
+  missingFields = [],
+  context = {},
+}) => {
+  if (!process.env.OPENAI_API_KEY) {
+    return null;
+  }
 
+  const completion = await withTimeout(
+    createChatCompletion(
+      {
+        model: WHATSAPP_FAST_FORMAT_MODEL,
+        response_format: { type: "json_object" },
+        temperature: 0,
+        max_tokens: 250,
+        messages: [
+          {
+            role: "system",
+            content: `
+You extract kundli details from WhatsApp messages.
+
+Return ONLY valid JSON in the following format:
+
+{
+  "name": null,
+  "gender": null,
+  "dob": null,
+  "tob": null,
+  "pob": null
+}
+
+Field Rules:
+- name: user's full name
+- gender: male, female, or other
+- dob: YYYY-MM-DD
+- tob: HH:mm:ss (24-hour format)
+- pob: place of birth (city or city,state)
+
+Extraction Rules:
+- Focus primarily on extracting the fields listed in "missingFields".
+- If other fields are clearly present in the message, extract them too.
+- Never guess values.
+- Never infer missing information.
+- If a field is unavailable, return null.
+- Return JSON only.
+- Do not return explanations, markdown, or extra text.
+            `.trim(),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              missingFields,
+              userMessage,
+            }),
+          },
+        ],
+      },
+      context
+    ),
+    WHATSAPP_FAST_FORMAT_TIMEOUT_MS,
+    "OpenAI kundli extractor timeout"
+  );
+
+  const parsed = parseAiJsonContent(
+    completion?.choices?.[0]?.message?.content
+  );
+
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  return {
+    name: normalizeText(parsed.name),
+    gender: normalizeText(parsed.gender),
+    dob: normalizeText(parsed.dob),
+    tob: normalizeText(parsed.tob),
+    pob: normalizeText(parsed.pob),
+  };
+};
 const getFormattedWhatsappKundliInput = async ({
   user_gender,
   user_dob,
@@ -339,9 +405,7 @@ const getFormattedWhatsappKundliInput = async ({
     aiFormatted = null;
   }
 
-  const mergedGender = normalizeGenderForKundli(
-    aiFormatted?.gender || rawGender,
-  );
+  const mergedGender = normalizeGenderForKundli(aiFormatted?.gender || rawGender);
   const mergedDob = normalizeText(aiFormatted?.dob || rawDob);
   const mergedTob = resolveWhatsappTob({ rawTob, aiTob: aiFormatted?.tob });
   const mergedPlace = normalizeText(aiFormatted?.place_of_birth || rawPob);
@@ -378,9 +442,7 @@ const derivePlaceCityAndState = ({ place, state }) => {
 
   const city = placeSegments[0] || "";
   const derivedState = normalizedState || placeSegments[1] || "";
-  const normalizedPlaceOfBirth = derivedState
-    ? `${city}, ${derivedState}`
-    : city;
+  const normalizedPlaceOfBirth = derivedState ? `${city}, ${derivedState}` : city;
 
   return {
     city,
@@ -389,13 +451,7 @@ const derivePlaceCityAndState = ({ place, state }) => {
   };
 };
 
-const validateKundliPayload = ({
-  dob,
-  tob,
-  placeOfBirth,
-  latitude,
-  longitude,
-}) => {
+const validateKundliPayload = ({ dob, tob, placeOfBirth, latitude, longitude }) => {
   if (!KUNDLI_DOB_REGEX.test(dob)) {
     return "dob must be in YYYY-MM-DD format";
   }
@@ -485,10 +541,11 @@ const runWhatsappSessionQuestionInBackground = async ({
   await sendMessage(delegatedRequest, delegatedResponse);
 };
 
+
+
 const createKundli = async (req, res) => {
   try {
-    const userId =
-      req.user.role === "astrologer" ? req.body.ownerUserId : req.user.id;
+    const userId = req.user.id;
     const {
       fullName,
       dateOfbirth,
@@ -505,8 +562,7 @@ const createKundli = async (req, res) => {
     if (!timeOfbirth || !placeOfBirth || !gender) {
       return res.status(400).json({
         success: false,
-        message:
-          "All birth details are required (timeOfbirth, placeOfBirth, gender)",
+        message: "All birth details are required (timeOfbirth, placeOfBirth, gender)",
       });
     }
 
@@ -562,10 +618,7 @@ const createKundli = async (req, res) => {
       if (result.status === "fulfilled") {
         return result.value;
       } else {
-        console.error(
-          `${name} failed:`,
-          result.reason?.message || result.reason,
-        );
+        console.error(`${name} failed:`, result.reason?.message || result.reason);
         return null;
       }
     };
@@ -574,23 +627,14 @@ const createKundli = async (req, res) => {
     console.log("[KundliController] Yogini Dasha settled result:", yogini);
 
     const basicDetailsVal = extractValue(basicDetails, "Basic Details");
-    const astroDetailsVal = extractValue(
-      astroDetails,
-      "Astro Details (House Cusps)",
-    );
+    const astroDetailsVal = extractValue(astroDetails, "Astro Details (House Cusps)");
     const panchangVal = extractValue(panchang, "Panchang");
     const planetaryVal = extractValue(planetary, "Planetary Positions");
     const chartsVal = extractValue(charts, "Charts");
     const dashaVal = extractValue(dasha, "Vimshottari Dasha");
     const yoginiVal = extractValue(yogini, "Yogini Dasha");
-    const manglikAnalysisVal = extractValue(
-      manglikAnalysis,
-      "Manglik Analysis",
-    );
-    const personalityVal = extractValue(
-      personality,
-      "Personality/Ascendant Report",
-    );
+    const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik Analysis");
+    const personalityVal = extractValue(personality, "Personality/Ascendant Report");
 
     const remedies = {
       gemstones: extractValue(gemstoneRemedies, "Gemstone Remedies"),
@@ -604,7 +648,7 @@ const createKundli = async (req, res) => {
     // Prepare compact Ashtakavarga structure expected by frontend
     const ashtakvargaPayload = buildAshtakvargaPayload(
       ashtakvargaData,
-      basicDetailsVal?.ascendant?.longitude ?? 0,
+      basicDetailsVal?.ascendant?.longitude ?? 0
     );
 
     // Prepare yogas list from complete horoscope if available
@@ -621,8 +665,7 @@ const createKundli = async (req, res) => {
 
     // Step 3: Create kundli record
     // Merge transit data into horoscope object (safe: keeps existing `horoscope` shape)
-    const finalHoroscope =
-      horoscope && typeof horoscope === "object" ? { ...horoscope } : {};
+    const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
     if (transitVal) {
       finalHoroscope.transit = transitVal;
     }
@@ -667,18 +710,17 @@ const createKundli = async (req, res) => {
       .then((aiFreeReport) => {
         if (aiFreeReport) {
           // Update the kundli record with AI report when ready
-          return Kundli.update({ aiFreeReport }, { where: { id: kundli.id } });
+          return Kundli.update(
+            { aiFreeReport },
+            { where: { id: kundli.id } }
+          );
         }
       })
       .catch((err) => {
-        console.error(
-          "[KundliController] Background AI Free Report generation failed:",
-          err?.message || err,
-        );
+        console.error("[KundliController] Background AI Free Report generation failed:", err?.message || err);
       });
 
-    const responseStatusCode =
-      req.responseFormat === "whatsapp-minimal" ? 200 : 201;
+    const responseStatusCode = req.responseFormat === "whatsapp-minimal" ? 200 : 201;
 
     // WhatsApp flow requests a compact payload for low-overhead integrations.
     if (req.responseFormat === "whatsapp-minimal") {
@@ -739,24 +781,20 @@ const createKundliFromWhatsapp = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res
-        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
-        .json({
-          success: false,
-          message: "WhatsApp API key validation failed",
-          reason: apiKeyValidation.reason,
-        });
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
     }
 
     const name = normalizeText(
       requestBody.name ||
         requestBody.fullName ||
         requestBody.userName ||
-        requestBody.user_name,
+        requestBody.user_name
     );
-    const rawGender = normalizeText(
-      requestBody.gender || requestBody.user_gender,
-    );
+    const rawGender = normalizeText(requestBody.gender || requestBody.user_gender);
     const rawDob =
       requestBody.dob ||
       requestBody.dateOfbirth ||
@@ -897,9 +935,7 @@ const createKundliFromWhatsapp = async (req, res) => {
     };
 
     const requestedAiAstrologerId = normalizeText(
-      requestBody.aiAstrologerId ||
-        requestBody.ai_astrologer_id ||
-        requestBody.astrologerId,
+      requestBody.aiAstrologerId || requestBody.ai_astrologer_id || requestBody.astrologerId
     );
 
     const delegatedRequest = {
@@ -929,6 +965,230 @@ const createKundliFromWhatsapp = async (req, res) => {
   }
 };
 
+//use only for whatsapp flow
+const createKundliFromWhatsappV2 = async (req, res) => {
+  try {
+    const requestBody = req.body || {};
+
+    const providedApiKey = extractWhatsappApiKey(req);
+
+    const apiKeyValidation =
+      await validateWhatsappApiKey(providedApiKey);
+
+    if (!apiKeyValidation.isValid) {
+      return res
+        .status(
+          mapWhatsappApiKeyErrorStatus(
+            apiKeyValidation.reason
+          )
+        )
+        .json({
+          success: false,
+          message:
+            "WhatsApp API key validation failed",
+          reason: apiKeyValidation.reason,
+        });
+    }
+    // TEMPORARY FOR LOCAL TESTING
+    // console.log("Skipping WhatsApp API validation");
+
+    const userMessage = normalizeText(
+      requestBody.user_details
+    );
+
+    const rawMobile =
+      requestBody.destination;
+
+    if (!userMessage) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "user_details is required",
+      });
+    }
+
+    const normalizedMobile =
+      normalizeMobileNumber(rawMobile);
+
+    if (!normalizedMobile) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid mobile number format",
+      });
+    }
+
+    const existingUser =
+      await User.findOne({
+        where: {
+          mobile: normalizedMobile,
+        },
+        attributes: [
+          "id",
+          "fullName",
+          "mobile",
+        ],
+      });
+
+    if (!existingUser) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "User not found for provided mobile number",
+      });
+    }
+    let session = await WhatsappKundliSession.findOne({
+      where: {
+        mobile: normalizedMobile,
+      },
+    });
+
+    if (!session) {
+      session = await WhatsappKundliSession.create({
+        mobile: normalizedMobile,
+        extractedData: {},
+        lastMissingFields: [
+          "name",
+          "gender",
+          "dob",
+          "pob",
+        ],
+        failedAttempts: 0,
+        status: "PENDING",
+        lastMessageAt: new Date(),
+      });
+    }
+    const extractedData =
+      await extractWhatsappKundliDetailsWithOpenAI({
+        userMessage,
+        missingFields:
+          session.lastMissingFields || [],
+        context: {
+          req,
+          feature:
+            "whatsapp_kundli_extractor",
+        },
+      });
+    if (!extractedData || !hasUsefulExtraction(extractedData)) {
+      const updatedAttempts =
+        session.failedAttempts + 1;
+
+      if (updatedAttempts >= 3) {
+        await session.destroy();
+
+        return res.status(461).json({
+          success: false,
+          status: "SESSION_EXPIRED",
+          message:
+            "Maximum attempts exceeded. Please start again.",
+        });
+      }
+
+      await session.update({
+        failedAttempts: updatedAttempts,
+        lastMessageAt: new Date(),
+      });
+
+      return res.status(462).json({
+        success: false,
+        status: "NO_USEFUL_INFORMATION",
+        attemptsRemaining:
+          3 - updatedAttempts,
+      });
+    }
+    const mergedData = mergeWhatsappKundliData(
+      session.extractedData || {},
+      extractedData
+    );
+
+    const missingFields =
+      getMissingFields(mergedData);
+    if (missingFields.length > 0) {
+      await session.update({
+        extractedData: mergedData,
+        lastMissingFields: missingFields,
+        failedAttempts: 0,
+        lastMessageAt: new Date(),
+      });
+
+      const fieldLabels = {
+        name: "full name",
+        gender: "gender",
+        dob: "date of birth",
+        pob: "place of birth",
+      };
+
+      const missingFieldMessage = missingFields
+        .map((field) => fieldLabels[field] || field)
+        .join(", ");
+
+      return res.status(460).json({
+        success: false,
+        status: "MISSING_FIELDS",
+        missingFields,
+        message: `Please provide your ${missingFieldMessage}.`,
+      });
+    }
+    const finalData = {
+      ...mergedData,
+      tob: mergedData.tob || "00:00:00",
+    };
+
+    console.log(
+      "FINAL KUNDLI DATA:",
+      finalData
+    );
+    await session.update({
+      extractedData: finalData,
+      lastMissingFields: [],
+      failedAttempts: 0,
+      status: "COMPLETED",
+      lastMessageAt: new Date(),
+    });
+    const { city, state } = derivePlaceCityAndState({
+      place: finalData.pob,
+    });
+
+    const locationResult =
+      await resolveIndianCityCoordinates({
+        city,
+        state,
+      });
+    const delegatedRequest = {
+      responseFormat: "whatsapp-minimal",
+      user: {
+        id: existingUser.id,
+      },
+      body: {
+        fullName: finalData.name,
+        gender: finalData.gender,
+        dateOfbirth: finalData.dob,
+        timeOfbirth: finalData.tob,
+        placeOfBirth: finalData.pob,
+
+        latitude: locationResult.latitude,
+        longitude: locationResult.longitude,
+      },
+    };
+    console.log("Delegating to createKundli:", delegatedRequest);
+    await session.destroy();
+    return createKundli(delegatedRequest, res);
+  } catch (error) {
+    console.error(
+      "WhatsApp Kundli V2 error:",
+      error
+    );
+
+    return res.status(
+      mapErrorStatus(error)
+    ).json({
+      success: false,
+      message:
+        "Failed to process WhatsApp kundli request",
+      error: error.message,
+    });
+  }
+};
 const formatWhatsappKundliInputFast = async (req, res) => {
   try {
     const requestBody = req.body || {};
@@ -937,24 +1197,18 @@ const formatWhatsappKundliInputFast = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res
-        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
-        .json({
-          success: false,
-          message: "WhatsApp API key validation failed",
-          reason: apiKeyValidation.reason,
-        });
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
     }
 
-    const rawGender = normalizeText(
-      requestBody.user_gender || requestBody.gender,
-    );
+    const rawGender = normalizeText(requestBody.user_gender || requestBody.gender);
     const rawDob = normalizeText(requestBody.user_dob || requestBody.dob);
     const rawTob = normalizeText(requestBody.user_tob || requestBody.tob);
     const rawPob = normalizeText(
-      requestBody.user_pob ||
-        requestBody.place_of_birth ||
-        requestBody.placeOfBirth,
+      requestBody.user_pob || requestBody.place_of_birth || requestBody.placeOfBirth
     );
     const rawState = normalizeText(requestBody.state);
 
@@ -1026,23 +1280,20 @@ const askQuestionInWhatsappSession = async (req, res) => {
 
   res.json = (payload) => {
     const payloadWithData =
-      payload &&
-      typeof payload === "object" &&
-      !Array.isArray(payload) &&
-      !payload.data
+      payload && typeof payload === "object" && !Array.isArray(payload) && !payload.data
         ? {
-            ...payload,
-            data: {
-              success: payload.success ?? responseStatusCode < 400,
-              statusCode: payload.statusCode || responseStatusCode,
-              message: payload.message || null,
-              sessionId: payload.sessionId || resolvedSessionId || null,
-              userMessage: payload.userMessage || null,
-              aiMessage: payload.aiMessage || null,
-              tokensUsed: payload.tokensUsed ?? null,
-              remainingWhatsappChatLimit,
-            },
-          }
+          ...payload,
+          data: {
+            success: payload.success ?? responseStatusCode < 400,
+            statusCode: payload.statusCode || responseStatusCode,
+            message: payload.message || null,
+            sessionId: payload.sessionId || resolvedSessionId || null,
+            userMessage: payload.userMessage || null,
+            aiMessage: payload.aiMessage || null,
+            tokensUsed: payload.tokensUsed ?? null,
+            remainingWhatsappChatLimit,
+          },
+        }
         : payload;
 
     return originalJson(payloadWithData);
@@ -1055,13 +1306,11 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const apiKeyValidation = await validateWhatsappApiKey(providedApiKey);
 
     if (!apiKeyValidation.isValid) {
-      return res
-        .status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason))
-        .json({
-          success: false,
-          message: "WhatsApp API key validation failed",
-          reason: apiKeyValidation.reason,
-        });
+      return res.status(mapWhatsappApiKeyErrorStatus(apiKeyValidation.reason)).json({
+        success: false,
+        message: "WhatsApp API key validation failed",
+        reason: apiKeyValidation.reason,
+      });
     }
 
     const sessionIdRaw = getFirstProvidedBodyValue(requestBody, [
@@ -1080,8 +1329,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
     const sessionId = normalizeText(sessionIdRaw);
     const question = normalizeText(questionRaw);
     resolvedSessionId = sessionId || null;
-    const hasTemplatePlaceholder = (value) =>
-      /^\$[a-zA-Z_]/.test(String(value || "").trim());
+    const hasTemplatePlaceholder = (value) => /^\$[a-zA-Z_]/.test(String(value || "").trim());
     const waitForReply =
       requestBody.waitForReply === true || requestBody.wait_for_reply === true;
     const runAsync =
@@ -1128,14 +1376,13 @@ const askQuestionInWhatsappSession = async (req, res) => {
           },
         },
         returning: true,
-      },
+      }
     );
 
     if (!updatedCount) {
       return res.status(400).json({
         success: false,
-        message:
-          "WhatsApp chat limit exhausted. Please recharge or contact support.",
+        message: "WhatsApp chat limit exhausted. Please recharge or contact support.",
       });
     }
 
@@ -1154,10 +1401,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
             question,
           });
         } catch (backgroundError) {
-          console.error(
-            "Background WhatsApp question processing error:",
-            backgroundError,
-          );
+          console.error("Background WhatsApp question processing error:", backgroundError);
         }
       });
 
@@ -1190,6 +1434,7 @@ const askQuestionInWhatsappSession = async (req, res) => {
     });
   }
 };
+
 
 const getKundli = async (req, res) => {
   try {
@@ -1269,6 +1514,7 @@ const getAllUserRequests = async (req, res) => {
     });
   }
 };
+
 
 const getAllKundlis = async (req, res) => {
   try {
@@ -1365,7 +1611,7 @@ const checkAiReportStatus = async (req, res) => {
 
     const kundli = await Kundli.findOne({
       where: { requestId: userRequestId },
-      attributes: ["id", "aiFreeReport"],
+      attributes: ['id', 'aiFreeReport'],
     });
 
     if (!kundli) {
@@ -1390,6 +1636,7 @@ const checkAiReportStatus = async (req, res) => {
   }
 };
 
+
 /**
  * PUT /kundli/:userRequestId/refresh-ashtakvarga
  * Re-fetches Ashtakavarga from the Python engine and overwrites the stored
@@ -1405,18 +1652,12 @@ const refreshAshtakvarga = async (req, res) => {
       where: { id: userRequestId, userId },
     });
     if (!userRequest) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User request not found" });
+      return res.status(404).json({ success: false, message: "User request not found" });
     }
 
-    const kundli = await Kundli.findOne({
-      where: { requestId: userRequestId },
-    });
+    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
     if (!kundli) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Kundli not found" });
+      return res.status(404).json({ success: false, message: "Kundli not found" });
     }
 
     // Re-fetch from astro engine (basic details for ascendant + ashtakavarga)
@@ -1425,49 +1666,29 @@ const refreshAshtakvarga = async (req, res) => {
       getAshtakavarga(userRequest),
     ]);
 
-    const basicDetailsVal =
-      basicDetailsResult.status === "fulfilled"
-        ? basicDetailsResult.value
-        : null;
-    const ashtakvargaData =
-      ashtakvargaResult.status === "fulfilled" ? ashtakvargaResult.value : null;
+    const basicDetailsVal = basicDetailsResult.status === "fulfilled" ? basicDetailsResult.value : null;
+    const ashtakvargaData = ashtakvargaResult.status === "fulfilled" ? ashtakvargaResult.value : null;
 
     if (!basicDetailsVal?.ascendant?.longitude) {
-      console.error(
-        "[refreshAshtakvarga] Could not get ascendant longitude",
-        basicDetailsVal,
-      );
+      console.error("[refreshAshtakvarga] Could not get ascendant longitude", basicDetailsVal);
     }
     if (!ashtakvargaData?.sarvashtakavarga) {
-      console.error(
-        "[refreshAshtakvarga] Could not get ashtakvarga data",
-        ashtakvargaData,
-      );
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "Failed to fetch Ashtakavarga from astro engine",
-        });
+      console.error("[refreshAshtakvarga] Could not get ashtakvarga data", ashtakvargaData);
+      return res.status(500).json({ success: false, message: "Failed to fetch Ashtakavarga from astro engine" });
     }
 
     const freshPayload = buildAshtakvargaPayload(
       ashtakvargaData,
-      basicDetailsVal?.ascendant?.longitude ?? 0,
+      basicDetailsVal?.ascendant?.longitude ?? 0
     );
 
     if (!freshPayload) {
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "Failed to build Ashtakavarga payload",
-        });
+      return res.status(500).json({ success: false, message: "Failed to build Ashtakavarga payload" });
     }
 
     await Kundli.update(
       { ashtakvarga: freshPayload },
-      { where: { requestId: userRequestId } },
+      { where: { requestId: userRequestId } }
     );
 
     // Return full updated kundli
@@ -1483,13 +1704,7 @@ const refreshAshtakvarga = async (req, res) => {
     });
   } catch (error) {
     console.error("refreshAshtakvarga error:", error);
-    res
-      .status(500)
-      .json({
-        success: false,
-        message: "Failed to refresh Ashtakavarga",
-        error: error.message,
-      });
+    res.status(500).json({ success: false, message: "Failed to refresh Ashtakavarga", error: error.message });
   }
 };
 
@@ -1516,9 +1731,7 @@ const generateKundliShareLink = async (req, res) => {
       });
     }
 
-    const kundli = await Kundli.findOne({
-      where: { requestId: userRequestId },
-    });
+    const kundli = await Kundli.findOne({ where: { requestId: userRequestId } });
     if (!kundli) {
       return res.status(404).json({
         success: false,
@@ -1530,9 +1743,7 @@ const generateKundliShareLink = async (req, res) => {
       await kundli.update({ isPublic: true });
     }
 
-    const frontendBaseUrl = (
-      process.env.FRONTEND_URL || "http://localhost:3000"
-    ).replace(/\/+$/, "");
+    const frontendBaseUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
     const shareUrl = `${frontendBaseUrl}/kundliReport?id=${encodeURIComponent(userRequestId)}`;
 
     return res.status(200).json({
@@ -1617,4 +1828,5 @@ module.exports = {
   refreshAshtakvarga,
   generateKundliShareLink,
   getSharedKundli,
+  createKundliFromWhatsappV2
 };

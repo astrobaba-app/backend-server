@@ -13,6 +13,7 @@ const {
   refreshAshtakvarga,
   generateKundliShareLink,
   getSharedKundli,
+  createKundliFromWhatsappV2
 } = require("../../controller/horoscope/kundliController");
 const {
   getUserKundlisForCall,
@@ -26,6 +27,10 @@ const checkForAstrologerRole = require("../../middleware/roleMiddleware");
 
 router.post("/create", checkForAuthenticationCookie(), createKundli);
 router.post("/whatsapp/create", createKundliFromWhatsapp);
+// new whatsapp flow api
+router.post("/whatsapp/create-v2", createKundliFromWhatsappV2);
+
+
 router.post("/whatsapp/format", formatWhatsappKundliInputFast);
 router.post("/whatsapp/session/ask", askQuestionInWhatsappSession);
 
