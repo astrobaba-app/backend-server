@@ -100,7 +100,7 @@ async function generateDailyReportPDF(reportData, userDetails) {
     const htmlContent = generateDailyHTMLTemplate(reportData, userDetails);
     browser = await puppeteer.launch(getPuppeteerLaunchOptions());
     const page = await browser.newPage();
-    
+
     await page.setContent(htmlContent, {
       waitUntil: "networkidle0"
     });
@@ -136,17 +136,17 @@ async function generateDailyReportPDF(reportData, userDetails) {
 }
 
 function generateDailyHTMLTemplate(reportData, userDetails) {
-  const coverImg = imageToDataUri("dailyfirstpage.png");
-  const contentImg = imageToDataUri("dailyeverypage.png");
-  const lastImg = imageToDataUri("dailylastpage.png");
+  const coverImg = imageToDataUri("dailyfirstpage.jpg");
+  const contentImg = imageToDataUri("daily-report.jpg");
+  const lastImg = imageToDataUri("dailylastpage.jpg");
 
   const { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth } = userDetails;
-  
+
   const basicDetails = reportData.basicDetails || {};
   const activeDasha = reportData.activeDasha || {};
   const moonTransit = reportData.moonTransit || {};
   const forecast = reportData.dailyForecast || {};
-  
+
   const reportDate = basicDetails.reportDate || new Date().toISOString().slice(0, 10);
   const formattedReportDate = new Date(reportDate).toLocaleDateString("en-US", {
     weekday: "long",

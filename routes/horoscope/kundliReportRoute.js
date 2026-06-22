@@ -12,6 +12,12 @@ const {
   generateYearlyKundaliReport,
   getYearlyKundaliHistory,
   deleteYearlyKundaliReport,
+  generateWealthKundaliReport,
+  getWealthKundaliHistory,
+  deleteWealthKundaliReport,
+  generateSadeSatiKundaliReport,
+  getSadeSatiKundaliHistory,
+  deleteSadeSatiKundaliReport,
 } = require("../../controller/horoscope/kundliReportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
@@ -44,5 +50,18 @@ router.get("/yearly-kundali", checkForAuthenticationCookie(), getYearlyKundaliHi
 // Delete a yearly report record
 router.delete("/yearly-kundali/:id", checkForAuthenticationCookie(), deleteYearlyKundaliReport);
 
-module.exports = router;
+// Wealth Kundali endpoints
+router.post("/wealth-kundali", checkForAuthenticationCookie(), generateWealthKundaliReport);
+router.get("/wealth-kundali", checkForAuthenticationCookie(), getWealthKundaliHistory);
 
+// Delete a wealth report record
+router.delete("/wealth-kundali/:id", checkForAuthenticationCookie(), deleteWealthKundaliReport);
+
+// Sade Sati Kundali endpoints
+router.post("/sade-sati-kundali", checkForAuthenticationCookie(), generateSadeSatiKundaliReport);
+router.get("/sade-sati-kundali", checkForAuthenticationCookie(), getSadeSatiKundaliHistory);
+
+// Delete a sade-sati report record
+router.delete("/sade-sati-kundali/:id", checkForAuthenticationCookie(), deleteSadeSatiKundaliReport);
+
+module.exports = router;

@@ -5,240 +5,240 @@ const path = require("path");
 const IMAGES_DIR = path.resolve(__dirname, "../images");
 
 const getSystemChromePath = () => {
-    const candidates = [
-        process.env.PUPPETEER_EXECUTABLE_PATH,
-        process.env.CHROME_PATH,
-        path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
-    ].filter(Boolean);
+  const candidates = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_PATH,
+    path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  ].filter(Boolean);
 
-    const matchedPath = candidates.find((candidate) => fs.existsSync(candidate));
-    return matchedPath || null;
+  const matchedPath = candidates.find((candidate) => fs.existsSync(candidate));
+  return matchedPath || null;
 };
 
 const getPuppeteerLaunchOptions = () => {
-    const options = {
-        headless: true,
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-gpu",
-            "--disable-features=Crashpad",
-            "--disable-crash-reporter"
-        ],
-    };
+  const options = {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-features=Crashpad",
+      "--disable-crash-reporter"
+    ],
+  };
 
-    const chromePath = getSystemChromePath();
-    if (chromePath) {
-        options.executablePath = chromePath;
-    }
+  const chromePath = getSystemChromePath();
+  if (chromePath) {
+    options.executablePath = chromePath;
+  }
 
-    return options;
+  return options;
 };
 
 const SIGN_NAME_TO_NUM = {
-    Aries: 1,
-    Taurus: 2,
-    Gemini: 3,
-    Cancer: 4,
-    Leo: 5,
-    Virgo: 6,
-    Libra: 7,
-    Scorpio: 8,
-    Sagittarius: 9,
-    Capricorn: 10,
-    Aquarius: 11,
-    Pisces: 12,
+  Aries: 1,
+  Taurus: 2,
+  Gemini: 3,
+  Cancer: 4,
+  Leo: 5,
+  Virgo: 6,
+  Libra: 7,
+  Scorpio: 8,
+  Sagittarius: 9,
+  Capricorn: 10,
+  Aquarius: 11,
+  Pisces: 12,
 };
 
 const PLANET_ABBREVIATIONS = {
-    Sun: "Su",
-    Moon: "Mo",
-    Mars: "Ma",
-    Mercury: "Me",
-    Jupiter: "Ju",
-    Venus: "Ve",
-    Saturn: "Sa",
-    Rahu: "Ra",
-    Ketu: "Ke",
-    Uranus: "Ur",
-    Neptune: "Ne",
-    Pluto: "Pl",
-    Ascendant: "Asc",
-    ascendant: "Asc",
-    Lagna: "Asc"
+  Sun: "Su",
+  Moon: "Mo",
+  Mars: "Ma",
+  Mercury: "Me",
+  Jupiter: "Ju",
+  Venus: "Ve",
+  Saturn: "Sa",
+  Rahu: "Ra",
+  Ketu: "Ke",
+  Uranus: "Ur",
+  Neptune: "Ne",
+  Pluto: "Pl",
+  Ascendant: "Asc",
+  ascendant: "Asc",
+  Lagna: "Asc"
 };
 
 const PLANET_COLORS = {
-    Su: "#FFA500",
-    Mo: "#9370DB",
-    Ma: "#DC143C",
-    Me: "#32CD32",
-    Ju: "#DAA520",
-    Ve: "#FF1493",
-    Sa: "#4169E1",
-    Ra: "#8B4513",
-    Ke: "#A0522D",
-    Ur: "#4682B4",
-    Ne: "#20B2AA",
-    Pl: "#DA70D6",
-    Asc: "#9932CC",
+  Su: "#FFA500",
+  Mo: "#9370DB",
+  Ma: "#DC143C",
+  Me: "#32CD32",
+  Ju: "#DAA520",
+  Ve: "#FF1493",
+  Sa: "#4169E1",
+  Ra: "#8B4513",
+  Ke: "#A0522D",
+  Ur: "#4682B4",
+  Ne: "#20B2AA",
+  Pl: "#DA70D6",
+  Asc: "#9932CC",
 };
 
 const NORTH_INDIAN_HOUSE_POSITIONS = [
-    { house: 1, x: 0.5, y: 0.25, numX: 0.5, numY: 0.42 },
-    { house: 2, x: 0.25, y: 0.1, numX: 0.25, numY: 0.2 },
-    { house: 3, x: 0.12, y: 0.25, numX: 0.2, numY: 0.25 },
-    { house: 4, x: 0.25, y: 0.5, numX: 0.42, numY: 0.5 },
-    { house: 5, x: 0.12, y: 0.75, numX: 0.2, numY: 0.75 },
-    { house: 6, x: 0.25, y: 0.9, numX: 0.25, numY: 0.79 },
-    { house: 7, x: 0.5, y: 0.75, numX: 0.5, numY: 0.57 },
-    { house: 8, x: 0.75, y: 0.9, numX: 0.75, numY: 0.8 },
-    { house: 9, x: 0.9, y: 0.75, numX: 0.8, numY: 0.75 },
-    { house: 10, x: 0.75, y: 0.5, numX: 0.58, numY: 0.5 },
-    { house: 11, x: 0.9, y: 0.25, numX: 0.8, numY: 0.25 },
-    { house: 12, x: 0.75, y: 0.1, numX: 0.75, numY: 0.2 },
+  { house: 1, x: 0.5, y: 0.25, numX: 0.5, numY: 0.42 },
+  { house: 2, x: 0.25, y: 0.1, numX: 0.25, numY: 0.2 },
+  { house: 3, x: 0.12, y: 0.25, numX: 0.2, numY: 0.25 },
+  { house: 4, x: 0.25, y: 0.5, numX: 0.42, numY: 0.5 },
+  { house: 5, x: 0.12, y: 0.75, numX: 0.2, numY: 0.75 },
+  { house: 6, x: 0.25, y: 0.9, numX: 0.25, numY: 0.79 },
+  { house: 7, x: 0.5, y: 0.75, numX: 0.5, numY: 0.57 },
+  { house: 8, x: 0.75, y: 0.9, numX: 0.75, numY: 0.8 },
+  { house: 9, x: 0.9, y: 0.75, numX: 0.8, numY: 0.75 },
+  { house: 10, x: 0.75, y: 0.5, numX: 0.58, numY: 0.5 },
+  { house: 11, x: 0.9, y: 0.25, numX: 0.8, numY: 0.25 },
+  { house: 12, x: 0.75, y: 0.1, numX: 0.75, numY: 0.2 },
 ];
 
 const imageToDataUri = (fileName) => {
-    try {
-        const fullPath = path.join(IMAGES_DIR, fileName);
-        if (!fs.existsSync(fullPath)) {
-            console.warn(`[Yearly PDF Service] Image not found at ${fullPath}`);
-            return "";
-        }
-        const buffer = fs.readFileSync(fullPath);
-        const ext = path.extname(fileName).toLowerCase();
-        const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
-        return `data:${mime};base64,${buffer.toString("base64")}`;
-    } catch (error) {
-        console.error(`[Yearly PDF Service] Error reading image ${fileName}:`, error);
-        return "";
+  try {
+    const fullPath = path.join(IMAGES_DIR, fileName);
+    if (!fs.existsSync(fullPath)) {
+      console.warn(`[Yearly PDF Service] Image not found at ${fullPath}`);
+      return "";
     }
+    const buffer = fs.readFileSync(fullPath);
+    const ext = path.extname(fileName).toLowerCase();
+    const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+    return `data:${mime};base64,${buffer.toString("base64")}`;
+  } catch (error) {
+    console.error(`[Yearly PDF Service] Error reading image ${fileName}:`, error);
+    return "";
+  }
 };
 
 const escapeHtml = (value) => {
-    return String(value ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 };
 
 const formatDegree = (decimalDegree) => {
-    const n = typeof decimalDegree === "number" ? decimalDegree : Number(decimalDegree);
-    const safe = !Number.isFinite(n) ? 0 : ((n % 30) + 30) % 30;
-    const degrees = Math.floor(safe);
-    const minutes = Math.floor((safe - degrees) * 60);
-    return `${degrees}\u00b0${String(minutes).padStart(2, "0")}'`;
+  const n = typeof decimalDegree === "number" ? decimalDegree : Number(decimalDegree);
+  const safe = !Number.isFinite(n) ? 0 : ((n % 30) + 30) % 30;
+  const degrees = Math.floor(safe);
+  const minutes = Math.floor((safe - degrees) * 60);
+  return `${degrees}\u00b0${String(minutes).padStart(2, "0")}'`;
 };
 
 const safeString = (val, fallback = "--") => {
-    if (val === undefined || val === null) return fallback;
-    return typeof val === "string" ? val : JSON.stringify(val);
+  if (val === undefined || val === null) return fallback;
+  return typeof val === "string" ? val : JSON.stringify(val);
 };
 
 const formatDate = (dateStr) => {
-    if (!dateStr) return "--";
-    try {
-        return new Date(dateStr).toLocaleDateString("en-US", {
-            year: "numeric",
-            month: "long",
-            day: "numeric"
-        });
-    } catch (e) {
-        return dateStr;
-    }
+  if (!dateStr) return "--";
+  try {
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+  } catch (e) {
+    return dateStr;
+  }
 };
 
 const renderChartSvg = (chartData, fallbackAscSignName, chartTitle) => {
-    if (!chartData || !chartData.planets) {
-        return `
+  if (!chartData || !chartData.planets) {
+    return `
         <div class="chart-box">
           <div style="font-size:11pt; font-weight:700; color:var(--dark-blue); margin-bottom:3mm; text-align:center;">${chartTitle}</div>
           <div style="width:280px; height:280px; display:flex; align-items:center; justify-content:center; background:#FCF8E3; border:1px solid #4C4C4C; color:#ff0000; font-size:10pt;">
             Missing ${chartTitle} Data
           </div>
         </div>`;
+  }
+
+  const anchorSignNum = chartData.planets.Ascendant?.sign_num || chartData.planets.ascendant?.sign_num || SIGN_NAME_TO_NUM[fallbackAscSignName] || 1;
+  const house1Sign = ((anchorSignNum - 1 + 12) % 12) + 1;
+
+  // Group planets by house
+  const housePlanetsMap = new Map();
+  for (let i = 1; i <= 12; i++) {
+    housePlanetsMap.set(i, []);
+  }
+
+  Object.entries(chartData.planets).forEach(([planetName, planetData]) => {
+    const longitude = planetData.original_longitude ?? planetData.longitude ?? 0;
+    const signNum = planetData.sign_num || (Math.floor(longitude / 30) % 12) + 1;
+    const degree = planetData.degree ?? (longitude % 30);
+    const name = PLANET_ABBREVIATIONS[planetName] || planetName.substring(0, 2);
+
+    let houseNum = planetData.house;
+    if (typeof houseNum !== "number" || isNaN(houseNum)) {
+      houseNum = ((signNum - house1Sign + 12) % 12) + 1;
     }
 
-    const anchorSignNum = chartData.planets.Ascendant?.sign_num || chartData.planets.ascendant?.sign_num || SIGN_NAME_TO_NUM[fallbackAscSignName] || 1;
-    const house1Sign = ((anchorSignNum - 1 + 12) % 12) + 1;
+    const hPlanets = housePlanetsMap.get(houseNum) || [];
+    hPlanets.push({ name, degree });
+    housePlanetsMap.set(houseNum, hPlanets);
+  });
 
-    // Group planets by house
-    const housePlanetsMap = new Map();
-    for (let i = 1; i <= 12; i++) {
-        housePlanetsMap.set(i, []);
+  // Check if Asc is mapped
+  const hasAsc = Array.from(housePlanetsMap.values()).some(arr => arr.some(p => p.name === "Asc"));
+  if (!hasAsc) {
+    const ascHouse = 1; // Always in house 1
+    const ascDeg = chartData.planets.Ascendant?.degree || chartData.planets.ascendant?.degree || 0;
+    const existing = housePlanetsMap.get(ascHouse) || [];
+    existing.unshift({ name: "Asc", degree: ascDeg });
+    housePlanetsMap.set(ascHouse, existing);
+  }
+
+  // Sort by degree
+  housePlanetsMap.forEach((planets) => planets.sort((a, b) => a.degree - b.degree));
+
+  // House to sign mapping for labeling
+  const houseToSignMap = {};
+  for (let house = 1; house <= 12; house++) {
+    houseToSignMap[house] = ((house1Sign - 1 + (house - 1)) % 12) + 1;
+  }
+
+  // Coordinates mapping
+  const svgWidth = 393;
+  const svgHeight = 393;
+
+  let elementsMarkup = "";
+
+  NORTH_INDIAN_HOUSE_POSITIONS.forEach(({ house, x, y, numX, numY }) => {
+    const signNum = houseToSignMap[house];
+    const planets = housePlanetsMap.get(house) || [];
+
+    // Sign number text element
+    const sX = numX * svgWidth;
+    const sY = numY * svgHeight;
+    elementsMarkup += `<text x="${sX.toFixed(1)}" y="${sY.toFixed(1)}" fill="#999999" font-size="9" font-family="Arial" text-anchor="middle" dominant-baseline="middle">${signNum}</text>\n`;
+
+    // Planets text elements
+    if (planets.length > 0) {
+      let offsetY = -(planets.length - 1) * 6;
+      planets.forEach((planet) => {
+        const color = PLANET_COLORS[planet.name] || "#333333";
+        const pX = x * svgWidth;
+        const pY = y * svgHeight + offsetY;
+        const degreeStr = formatDegree(planet.degree);
+        elementsMarkup += `<text x="${pX.toFixed(1)}" y="${pY.toFixed(1)}" fill="${color}" font-size="10" font-family="Arial" font-weight="bold" text-anchor="middle" dominant-baseline="middle">${planet.name} ${degreeStr}</text>\n`;
+        offsetY += 12;
+      });
     }
+  });
 
-    Object.entries(chartData.planets).forEach(([planetName, planetData]) => {
-        const longitude = planetData.original_longitude ?? planetData.longitude ?? 0;
-        const signNum = planetData.sign_num || (Math.floor(longitude / 30) % 12) + 1;
-        const degree = planetData.degree ?? (longitude % 30);
-        const name = PLANET_ABBREVIATIONS[planetName] || planetName.substring(0, 2);
-
-        let houseNum = planetData.house;
-        if (typeof houseNum !== "number" || isNaN(houseNum)) {
-            houseNum = ((signNum - house1Sign + 12) % 12) + 1;
-        }
-
-        const hPlanets = housePlanetsMap.get(houseNum) || [];
-        hPlanets.push({ name, degree });
-        housePlanetsMap.set(houseNum, hPlanets);
-    });
-
-    // Check if Asc is mapped
-    const hasAsc = Array.from(housePlanetsMap.values()).some(arr => arr.some(p => p.name === "Asc"));
-    if (!hasAsc) {
-        const ascHouse = 1; // Always in house 1
-        const ascDeg = chartData.planets.Ascendant?.degree || chartData.planets.ascendant?.degree || 0;
-        const existing = housePlanetsMap.get(ascHouse) || [];
-        existing.unshift({ name: "Asc", degree: ascDeg });
-        housePlanetsMap.set(ascHouse, existing);
-    }
-
-    // Sort by degree
-    housePlanetsMap.forEach((planets) => planets.sort((a, b) => a.degree - b.degree));
-
-    // House to sign mapping for labeling
-    const houseToSignMap = {};
-    for (let house = 1; house <= 12; house++) {
-        houseToSignMap[house] = ((house1Sign - 1 + (house - 1)) % 12) + 1;
-    }
-
-    // Coordinates mapping
-    const svgWidth = 393;
-    const svgHeight = 393;
-
-    let elementsMarkup = "";
-
-    NORTH_INDIAN_HOUSE_POSITIONS.forEach(({ house, x, y, numX, numY }) => {
-        const signNum = houseToSignMap[house];
-        const planets = housePlanetsMap.get(house) || [];
-
-        // Sign number text element
-        const sX = numX * svgWidth;
-        const sY = numY * svgHeight;
-        elementsMarkup += `<text x="${sX.toFixed(1)}" y="${sY.toFixed(1)}" fill="#999999" font-size="9" font-family="Arial" text-anchor="middle" dominant-baseline="middle">${signNum}</text>\n`;
-
-        // Planets text elements
-        if (planets.length > 0) {
-            let offsetY = -(planets.length - 1) * 6;
-            planets.forEach((planet) => {
-                const color = PLANET_COLORS[planet.name] || "#333333";
-                const pX = x * svgWidth;
-                const pY = y * svgHeight + offsetY;
-                const degreeStr = formatDegree(planet.degree);
-                elementsMarkup += `<text x="${pX.toFixed(1)}" y="${pY.toFixed(1)}" fill="${color}" font-size="10" font-family="Arial" font-weight="bold" text-anchor="middle" dominant-baseline="middle">${planet.name} ${degreeStr}</text>\n`;
-                offsetY += 12;
-            });
-        }
-    });
-
-    return `
+  return `
     <div class="chart-box">
       <div style="font-size:11pt; font-weight:700; color:var(--dark-blue); margin-bottom:3mm; text-align:center;">${chartTitle}</div>
       <svg viewBox="0 0 393 393" style="width:280px; height:280px; background-color:#FCF8E3; box-shadow:0px 4px 12px rgba(0, 0, 0, 0.15);">
@@ -253,97 +253,97 @@ const renderChartSvg = (chartData, fallbackAscSignName, chartTitle) => {
 };
 
 const getHouseStrength = (score) => {
-    if (score >= 30) return "Very Strong";
-    if (score >= 28) return "Strong";
-    if (score >= 24) return "Average";
-    return "Weak";
+  if (score >= 30) return "Very Strong";
+  if (score >= 28) return "Strong";
+  if (score >= 24) return "Average";
+  return "Weak";
 };
 
 const HOUSE_SIGNIFICATIONS = {
-    1: { name: "Lagna (Ascendant)", desc: "Self, personality, physical body, health, vitality, and overall life direction" },
-    2: { name: "Dhana Bhava", desc: "Wealth, family, speech, food habits, and accumulated resources" },
-    3: { name: "Sahaja Bhava", desc: "Siblings, courage, communication, short travels, skills, and self-effort" },
-    4: { name: "Sukha Bhava", desc: "Mother, home, property, vehicles, emotional peace, and domestic happiness" },
-    5: { name: "Putra Bhava", desc: "Education, intelligence, learning ability, creativity, children, romance, speculation, and past-life merit" },
-    6: { name: "Ripu Bhava", desc: "Enemies, diseases, debts, service, competition, and daily work routine" },
-    7: { name: "Kalatra Bhava", desc: "Marriage, partnerships, business associates, public dealings, and contracts" },
-    8: { name: "Randhra Bhava", desc: "Longevity, sudden events, inheritance, occult knowledge, and transformation" },
-    9: { name: "Dharma Bhava", desc: "Fortune, higher learning, father, long journeys, spirituality, and divine grace" },
-    10: { name: "Karma Bhava", desc: "Career, profession, reputation, authority, achievements, and public status" },
-    11: { name: "Labha Bhava", desc: "Gains, income, social network, elder siblings, aspirations, and fulfilment" },
-    12: { name: "Vyaya Bhava", desc: "Losses, expenses, foreign lands, spiritual liberation, and subconscious mind" }
+  1: { name: "Lagna (Ascendant)", desc: "Self, personality, physical body, health, vitality, and overall life direction" },
+  2: { name: "Dhana Bhava", desc: "Wealth, family, speech, food habits, and accumulated resources" },
+  3: { name: "Sahaja Bhava", desc: "Siblings, courage, communication, short travels, skills, and self-effort" },
+  4: { name: "Sukha Bhava", desc: "Mother, home, property, vehicles, emotional peace, and domestic happiness" },
+  5: { name: "Putra Bhava", desc: "Education, intelligence, learning ability, creativity, children, romance, speculation, and past-life merit" },
+  6: { name: "Ripu Bhava", desc: "Enemies, diseases, debts, service, competition, and daily work routine" },
+  7: { name: "Kalatra Bhava", desc: "Marriage, partnerships, business associates, public dealings, and contracts" },
+  8: { name: "Randhra Bhava", desc: "Longevity, sudden events, inheritance, occult knowledge, and transformation" },
+  9: { name: "Dharma Bhava", desc: "Fortune, higher learning, father, long journeys, spirituality, and divine grace" },
+  10: { name: "Karma Bhava", desc: "Career, profession, reputation, authority, achievements, and public status" },
+  11: { name: "Labha Bhava", desc: "Gains, income, social network, elder siblings, aspirations, and fulfilment" },
+  12: { name: "Vyaya Bhava", desc: "Losses, expenses, foreign lands, spiritual liberation, and subconscious mind" }
 };
 
 /**
  * Generate HTML template matching the reference yellow/dark blue theme
  */
 function generateHTMLTemplate(reportData, userRequest) {
-    const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
-    const year = reportData.year || new Date().getFullYear();
+  const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
+  const year = reportData.year || new Date().getFullYear();
 
-    const astro = reportData.astrologicalDetails || {};
-    const dasha = reportData.dashaCycles || {};
-    const intro = reportData.introContent || {};
-    const charts = reportData.horoscopeCharts || {};
+  const astro = reportData.astrologicalDetails || {};
+  const dasha = reportData.dashaCycles || {};
+  const intro = reportData.introContent || {};
+  const charts = reportData.horoscopeCharts || {};
 
-    // Base64 Images
-    const coverImg = imageToDataUri("Yearly Report first page.png");
-    const endImg = imageToDataUri("daily_end.png");
-    const cosmicImg = imageToDataUri("cosmic.png");
-    const transitsImg = imageToDataUri("transits.png");
-    const auspiciousImg = imageToDataUri("calandar.png");
-    const careerImg = imageToDataUri("career.png");
-    const wealthImg = imageToDataUri("wealth.png");
-    const healthImg = imageToDataUri("health.png");
-    const relationImg = imageToDataUri("relationship.png");
-    const remediesImg = imageToDataUri("remedies.png");
-    const summaryImg = imageToDataUri("summary.png");
+  // Base64 Images
+  const coverImg = imageToDataUri("Yearly Report first page.jpg");
+  const endImg = imageToDataUri("daily_end.jpg");
+  const cosmicImg = imageToDataUri("cosmic.jpg");
+  const transitsImg = imageToDataUri("transits.jpg");
+  const auspiciousImg = imageToDataUri("calandar.jpg");
+  const careerImg = imageToDataUri("career.jpg");
+  const wealthImg = imageToDataUri("wealth.jpg");
+  const healthImg = imageToDataUri("health.jpg");
+  const relationImg = imageToDataUri("relationship.jpg");
+  const remediesImg = imageToDataUri("remedies.jpg");
+  const summaryImg = imageToDataUri("summary.jpg");
 
-    const MONTHS = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
-    ];
+  const MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
 
-    // Pre-calculate month covers CSS rules to write them only once in the template
-    const monthCoversCssRules = MONTHS.map(monthName => {
-        const uri = imageToDataUri(`${monthName}.png`);
-        return `.bg-month-${monthName.toLowerCase()} { background-image: url('${uri}'); }`;
-    }).join("\n");
+  // Pre-calculate month covers CSS rules to write them only once in the template
+  const monthCoversCssRules = MONTHS.map(monthName => {
+    const uri = imageToDataUri(`${monthName}.jpg`);
+    return `.bg-month-${monthName.toLowerCase()} { background-image: url('${uri}'); }`;
+  }).join("\n");
 
-    // Generate monthly prediction pages (19 pages per month)
-    let monthsHtml = "";
-    let pageNum = 16; // Table of Contents starts January at 16
+  // Generate monthly prediction pages (19 pages per month)
+  let monthsHtml = "";
+  let pageNum = 16; // Table of Contents starts January at 16
 
-    MONTHS.forEach((monthName, monthIdx) => {
-        const pred = reportData.predictions?.[monthName] || {};
-        const timing = reportData.monthlyTimingData?.[monthName] || {};
+  MONTHS.forEach((monthName, monthIdx) => {
+    const pred = reportData.predictions?.[monthName] || {};
+    const timing = reportData.monthlyTimingData?.[monthName] || {};
 
-        const cosmic = pred.cosmicOverview || {};
-        const transit = pred.transitTable || {};
-        const auspicious = pred.auspiciousDays || {};
-        const career = pred.career || {};
-        const wealth = pred.wealth || {};
-        const health = pred.health || {};
-        const relationship = pred.relationship || {};
-        const remedies = pred.remedies || {};
-        const summary = pred.overallSummary || {};
+    const cosmic = pred.cosmicOverview || {};
+    const transit = pred.transitTable || {};
+    const auspicious = pred.auspiciousDays || {};
+    const career = pred.career || {};
+    const wealth = pred.wealth || {};
+    const health = pred.health || {};
+    const relationship = pred.relationship || {};
+    const remedies = pred.remedies || {};
+    const summary = pred.overallSummary || {};
 
-        // Month Cover Page (pageNum)
-        monthsHtml += `
+    // Month Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: ${monthName} Cover -->
         <div class="img-page-bg bg-month-${monthName.toLowerCase()}"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 1: Cosmic Overview Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 1: Cosmic Overview Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Cosmic Overview Cover -->
         <div class="img-page-bg bg-cosmic"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 1: Cosmic Overview Content (pageNum)
-        monthsHtml += `
+    // Topic 1: Cosmic Overview Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Cosmic Overview Content -->
         <div class="page">
           <div class="month-banner">
@@ -367,17 +367,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 2: Transit Focus Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 2: Transit Focus Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Transit Focus Cover -->
         <div class="img-page-bg bg-transits"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 2: Transit Focus Content (pageNum)
-        monthsHtml += `
+    // Topic 2: Transit Focus Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Transit Focus Content -->
         <div class="page">
           <div class="month-banner">
@@ -401,17 +401,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 3: Auspicious Days Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 3: Auspicious Days Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Auspicious Days Cover -->
         <div class="img-page-bg bg-auspicious"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 3: Auspicious Days Content (pageNum)
-        monthsHtml += `
+    // Topic 3: Auspicious Days Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Auspicious Days Content -->
         <div class="page">
           <div class="month-banner">
@@ -435,17 +435,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 4: Career Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 4: Career Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Career Cover -->
         <div class="img-page-bg bg-career"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 4: Career Content (pageNum)
-        monthsHtml += `
+    // Topic 4: Career Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Career Content -->
         <div class="page">
           <div class="month-banner">
@@ -468,17 +468,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 5: Wealth Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 5: Wealth Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Wealth Cover -->
         <div class="img-page-bg bg-wealth"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 5: Wealth Content (pageNum)
-        monthsHtml += `
+    // Topic 5: Wealth Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Wealth Content -->
         <div class="page">
           <div class="month-banner">
@@ -502,17 +502,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 6: Health Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 6: Health Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Health Cover -->
         <div class="img-page-bg bg-health"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 6: Health Content (pageNum)
-        monthsHtml += `
+    // Topic 6: Health Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Health Content -->
         <div class="page">
           <div class="month-banner">
@@ -536,17 +536,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 7: Relationships Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 7: Relationships Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Relationships Cover -->
         <div class="img-page-bg bg-relation"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 7: Relationships Content (pageNum)
-        monthsHtml += `
+    // Topic 7: Relationships Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Relationships Content -->
         <div class="page">
           <div class="month-banner">
@@ -569,17 +569,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 8: Remedies Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 8: Remedies Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Remedies Cover -->
         <div class="img-page-bg bg-remedies"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 8: Remedies Content (pageNum)
-        monthsHtml += `
+    // Topic 8: Remedies Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Remedies Content -->
         <div class="page">
           <div class="month-banner">
@@ -608,17 +608,17 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 9: Monthly Summary Cover Page (pageNum)
-        monthsHtml += `
+    // Topic 9: Monthly Summary Cover Page (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Monthly Summary Cover -->
         <div class="img-page-bg bg-summary"></div>
         `;
-        pageNum++;
+    pageNum++;
 
-        // Topic 9: Monthly Summary Content (pageNum)
-        monthsHtml += `
+    // Topic 9: Monthly Summary Content (pageNum)
+    monthsHtml += `
         <!-- Page ${pageNum}: Monthly Summary Content -->
         <div class="page">
           <div class="month-banner">
@@ -646,20 +646,20 @@ function generateHTMLTemplate(reportData, userRequest) {
                   <div style="font-size:9pt; font-weight:600; color:#059669; margin-bottom:1.5mm;">Favourable Days</div>
                   <div class="chip-grid">
                     ${(timing.supportDays || []).map(day => {
-                      const dVal = day.split("-")[2];
-                      const mVal = MONTHS[parseInt(day.split("-")[1], 10) - 1].substring(0, 3);
-                      return `<span class="chip support">${dVal} ${mVal}</span>`;
-                    }).join("")}
+      const dVal = day.split("-")[2];
+      const mVal = MONTHS[parseInt(day.split("-")[1], 10) - 1].substring(0, 3);
+      return `<span class="chip support">${dVal} ${mVal}</span>`;
+    }).join("")}
                   </div>
                 </div>
                 <div>
                   <div style="font-size:9pt; font-weight:600; color:#DC2626; margin-bottom:1.5mm;">Caution Days</div>
                   <div class="chip-grid">
                     ${(timing.cautionDays || []).map(day => {
-                      const dVal = day.split("-")[2];
-                      const mVal = MONTHS[parseInt(day.split("-")[1], 10) - 1].substring(0, 3);
-                      return `<span class="chip caution">${dVal} ${mVal}</span>`;
-                    }).join("")}
+      const dVal = day.split("-")[2];
+      const mVal = MONTHS[parseInt(day.split("-")[1], 10) - 1].substring(0, 3);
+      return `<span class="chip caution">${dVal} ${mVal}</span>`;
+    }).join("")}
                   </div>
                 </div>
               </div>
@@ -671,12 +671,12 @@ function generateHTMLTemplate(reportData, userRequest) {
           </div>
         </div>
         `;
-        pageNum++;
-    });
+    pageNum++;
+  });
 
-    const formattedBirthDate = formatDate(dateOfbirth);
+  const formattedBirthDate = formatDate(dateOfbirth);
 
-    return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -1713,10 +1713,10 @@ function generateHTMLTemplate(reportData, userRequest) {
           </thead>
           <tbody>
             ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(house => {
-              const score = (reportData.energyMetrics?.scores && reportData.energyMetrics.scores[house]) ?? 28;
-              const strength = getHouseStrength(score);
-              const signification = HOUSE_SIGNIFICATIONS[house];
-              return `
+    const score = (reportData.energyMetrics?.scores && reportData.energyMetrics.scores[house]) ?? 28;
+    const strength = getHouseStrength(score);
+    const signification = HOUSE_SIGNIFICATIONS[house];
+    return `
                 <tr>
                   <td style="text-align:center; font-weight:800; color:var(--gold-dark); font-size:13pt;">${house}</td>
                   <td style="text-align:center; font-weight:800; font-size:13pt;">${score}</td>
@@ -1726,7 +1726,7 @@ function generateHTMLTemplate(reportData, userRequest) {
                   <td style="font-size:12.5pt; font-weight:500;">${signification.name.split(" ")[0]}</td>
                 </tr>
               `;
-            }).join("")}
+  }).join("")}
           </tbody>
         </table>
       </div>
@@ -1755,82 +1755,82 @@ function generateHTMLTemplate(reportData, userRequest) {
  * @returns {Promise<Buffer>} PDF buffer
  */
 async function generateYearlyReportPDF(reportData, userRequest) {
-    let browser = null;
-    console.log("[Yearly PDF Service] Beginning PDF generation...");
+  let browser = null;
+  console.log("[Yearly PDF Service] Beginning PDF generation...");
+  try {
+    console.log("[Yearly PDF Service] Building HTML template...");
+    const htmlContent = generateHTMLTemplate(reportData, userRequest);
+
+    // Dump HTML for debugging and reference (matches temp folder behavior)
     try {
-        console.log("[Yearly PDF Service] Building HTML template...");
-        const htmlContent = generateHTMLTemplate(reportData, userRequest);
-
-        // Dump HTML for debugging and reference (matches temp folder behavior)
-        try {
-            const tempDir = path.join(__dirname, "../temp");
-            if (!fs.existsSync(tempDir)) {
-                fs.mkdirSync(tempDir, { recursive: true });
-            }
-            const htmlFileName = `yearly_report_${Date.now()}.html`;
-            fs.writeFileSync(path.join(tempDir, htmlFileName), htmlContent, "utf8");
-            console.log(`[Yearly PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
-        } catch (dumpErr) {
-            console.warn("[Yearly PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
-        }
-
-        console.log("[Yearly PDF Service] Launching browser...");
-        browser = await puppeteer.launch(getPuppeteerLaunchOptions());
-
-        const page = await browser.newPage();
-
-        console.log("[Yearly PDF Service] Setting page content...");
-        await page.setContent(htmlContent, {
-            waitUntil: "load",
-            timeout: 120000
-        });
-
-        console.log("[Yearly PDF Service] Printing to PDF...");
-        const pdfBuffer = await page.pdf({
-            format: "A4",
-            printBackground: true,
-            timeout: 120000,
-            margin: {
-                top: 0,
-                right: 0,
-                bottom: 0,
-                left: 0
-            }
-        });
-
-        try {
-            await browser.close();
-        } catch (closeError) {
-            console.warn("[Yearly PDF Service] Browser close warning (safe to ignore):", closeError.message);
-        }
-
-        return Buffer.from(pdfBuffer);
-
-    } catch (error) {
-        if (browser) {
-            try {
-                await browser.close();
-            } catch (closeError) {
-                console.warn("[Yearly PDF Service] Browser close warning in catch (safe to ignore):", closeError.message);
-            }
-        }
-        console.error("[Yearly PDF Service] Error generating PDF:", error);
-
-        const isMissingBrowser =
-            typeof error?.message === "string" &&
-            (error.message.includes("Could not find Chrome") ||
-                error.message.includes("Could not find Chromium"));
-
-        if (isMissingBrowser) {
-            throw new Error(
-                "Failed to generate PDF: Chrome is not installed for Puppeteer. Run `npm run install:chrome` or set PUPPETEER_EXECUTABLE_PATH."
-            );
-        }
-
-        throw new Error(`Failed to generate PDF: ${error.message}`);
+      const tempDir = path.join(__dirname, "../temp");
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+      const htmlFileName = `yearly_report_${Date.now()}.html`;
+      fs.writeFileSync(path.join(tempDir, htmlFileName), htmlContent, "utf8");
+      console.log(`[Yearly PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
+    } catch (dumpErr) {
+      console.warn("[Yearly PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
     }
+
+    console.log("[Yearly PDF Service] Launching browser...");
+    browser = await puppeteer.launch(getPuppeteerLaunchOptions());
+
+    const page = await browser.newPage();
+
+    console.log("[Yearly PDF Service] Setting page content...");
+    await page.setContent(htmlContent, {
+      waitUntil: "load",
+      timeout: 120000
+    });
+
+    console.log("[Yearly PDF Service] Printing to PDF...");
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      timeout: 120000,
+      margin: {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0
+      }
+    });
+
+    try {
+      await browser.close();
+    } catch (closeError) {
+      console.warn("[Yearly PDF Service] Browser close warning (safe to ignore):", closeError.message);
+    }
+
+    return Buffer.from(pdfBuffer);
+
+  } catch (error) {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.warn("[Yearly PDF Service] Browser close warning in catch (safe to ignore):", closeError.message);
+      }
+    }
+    console.error("[Yearly PDF Service] Error generating PDF:", error);
+
+    const isMissingBrowser =
+      typeof error?.message === "string" &&
+      (error.message.includes("Could not find Chrome") ||
+        error.message.includes("Could not find Chromium"));
+
+    if (isMissingBrowser) {
+      throw new Error(
+        "Failed to generate PDF: Chrome is not installed for Puppeteer. Run `npm run install:chrome` or set PUPPETEER_EXECUTABLE_PATH."
+      );
+    }
+
+    throw new Error(`Failed to generate PDF: ${error.message}`);
+  }
 }
 
 module.exports = {
-    generateYearlyReportPDF,
+  generateYearlyReportPDF,
 };
