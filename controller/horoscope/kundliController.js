@@ -1215,6 +1215,9 @@ const getAllKundlis = async (req, res) => {
         "dateOfbirth",
         "timeOfbirth",
         "placeOfBirth",
+        "gender",
+        "latitude",
+        "longitude",
       ],
       order: [["createdAt", "DESC"]],
     });

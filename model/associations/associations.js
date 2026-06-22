@@ -2,6 +2,9 @@ const User = require("../user/userAuth");
 const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
 const KundliReport = require("../horoscope/kundliReport");
+const YearlyReport = require("../horoscope/yearlyReport");
+const WealthReport = require("../horoscope/wealthReport");
+const SadeSatiReport = require("../horoscope/sadeSatiReport");
 const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
@@ -100,6 +103,78 @@ const PalmOrder = require("../palm/palmOrder");
   });
 
   KundliReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated YearlyReport
+  UserRequest.hasOne(YearlyReport, {
+    foreignKey: "userRequestId",
+    as: "yearlyReport",
+    onDelete: "CASCADE",
+  });
+
+  YearlyReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated yearly reports
+  User.hasMany(YearlyReport, {
+    foreignKey: "userId",
+    as: "yearlyReports",
+    onDelete: "CASCADE",
+  });
+
+  YearlyReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated WealthReport
+  UserRequest.hasOne(WealthReport, {
+    foreignKey: "userRequestId",
+    as: "wealthReport",
+    onDelete: "CASCADE",
+  });
+
+  WealthReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated wealth reports
+  User.hasMany(WealthReport, {
+    foreignKey: "userId",
+    as: "wealthReports",
+    onDelete: "CASCADE",
+  });
+
+  WealthReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated SadeSatiReport
+  UserRequest.hasOne(SadeSatiReport, {
+    foreignKey: "userRequestId",
+    as: "sadeSatiReport",
+    onDelete: "CASCADE",
+  });
+
+  SadeSatiReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated Sade Sati reports
+  User.hasMany(SadeSatiReport, {
+    foreignKey: "userId",
+    as: "sadeSatiReports",
+    onDelete: "CASCADE",
+  });
+
+  SadeSatiReport.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });
