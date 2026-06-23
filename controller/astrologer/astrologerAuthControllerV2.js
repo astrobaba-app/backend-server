@@ -1,5 +1,7 @@
 const Astrologer = require("../../model/astrologer/astrologer");
 const redis = require("../../config/redis/redis");
+const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
+const pushNotificationService = require("../../services/pushNotificationService");
 const sendAstrologerOtpV2 = require("../../services/otpProviders/sendAstrologerOtpV2");
 const {
   createToken,
@@ -18,6 +20,39 @@ const generate4DigitOTP = () =>
   Math.floor(1000 + Math.random() * 9000).toString();
 
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
+
+const normalizeDeviceType = (value) =>
+  ["ios", "android", "web"].includes(value) ? value : "android";
+
+const normalizeDeviceName = (deviceName, deviceType) => {
+  const trimmed = (deviceName || "").trim();
+  if (trimmed) return trimmed.slice(0, 120);
+  return deviceType === "ios" ? "iOS device" : "Android device";
+};
+
+const buildAstrologerLoginResponse = (astrologer, phoneNumber, token, astrologerToken) => ({
+  success: true,
+  message: "Login successful",
+  phoneNumber,
+  requiresRegistration: false,
+  astrologer: {
+    id: astrologer.id,
+    phoneNumber: astrologer.phoneNumber,
+    email: astrologer.email,
+    fullName: astrologer.fullName,
+    photo: astrologer.photo,
+    isApproved: astrologer.isApproved,
+    isActive: astrologer.isActive,
+    isOnline: astrologer.isOnline,
+    languages: astrologer.languages,
+    skills: astrologer.skills,
+    yearsOfExperience: astrologer.yearsOfExperience,
+    rating: parseFloat(astrologer.rating),
+    totalConsultations: astrologer.totalConsultations,
+  },
+  token,
+  astrologerToken,
+});
 
 const toStringArray = (value) => {
   if (value === undefined || value === null) return [];
@@ -115,11 +150,22 @@ const verifyOTPV2 = async (req, res) => {
   try {
     const phoneNumber = normalizeIndianMobile(req.body.phoneNumber);
     const otp = (req.body.otp || "").trim();
+    const deviceId = (req.body.deviceId || "").trim();
+    const forceLogout = req.body.forceLogout === true;
+    const deviceType = normalizeDeviceType(req.body.deviceType);
+    const deviceName = normalizeDeviceName(req.body.deviceName, deviceType);
 
     if (!phoneNumber || !otp) {
       return res.status(400).json({
         success: false,
         message: "Phone number and OTP are required",
+      });
+    }
+
+    if (!deviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Device id is required",
       });
     }
 
@@ -149,8 +195,6 @@ const verifyOTPV2 = async (req, res) => {
       });
     }
 
-    await redis.del(otpKey);
-
     const astrologer = await Astrologer.findOne({ where: { phoneNumber } });
 
     if (!astrologer) {
@@ -160,6 +204,7 @@ const verifyOTPV2 = async (req, res) => {
         verifiedAt: Date.now(),
         source: "v2",
       });
+      await redis.del(otpKey);
 
       return res.status(200).json({
         success: true,
@@ -185,41 +230,119 @@ const verifyOTPV2 = async (req, res) => {
       });
     }
 
-    const authPayload = { id: astrologer.id, role: "astrologer" };
+    const hasOtherActiveDevice =
+      astrologer.activeDeviceId && astrologer.activeDeviceId !== deviceId;
+
+    if (hasOtherActiveDevice && !forceLogout) {
+      return res.status(409).json({
+        success: false,
+        code: "ASTROLOGER_SESSION_ACTIVE",
+        sessionConflict: true,
+        message: `Session is already logged in the '${
+          astrologer.activeDeviceName || "other device"
+        }'`,
+        activeSession: {
+          deviceId: astrologer.activeDeviceId,
+          deviceName: astrologer.activeDeviceName || "other device",
+          deviceType: astrologer.activeDeviceType,
+          startedAt: astrologer.activeSessionStartedAt,
+        },
+      });
+    }
+
+    const nextSessionVersion = forceLogout
+      ? (astrologer.sessionVersion || 0) + 1
+      : astrologer.sessionVersion || 0;
+
+    if (forceLogout) {
+      await pushNotificationService.deactivateAstrologerDeviceTokens(astrologer.id, {
+        exceptDeviceId: deviceId,
+      });
+    }
+
+    await astrologer.update({
+      sessionVersion: nextSessionVersion,
+      activeDeviceId: deviceId,
+      activeDeviceName: deviceName,
+      activeDeviceType: deviceType,
+      activeSessionStartedAt: new Date(),
+    });
+
+    const authPayload = {
+      id: astrologer.id,
+      role: "astrologer",
+      sessionVersion: astrologer.sessionVersion,
+    };
     const token = createToken(authPayload);
     const astrologerToken = createMiddlewareToken(authPayload);
     const refreshToken = createRefreshToken(authPayload);
 
     setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
+    await redis.del(otpKey);
 
-    return res.status(200).json({
-      success: true,
-      message: "Login successful",
-      phoneNumber,
-      requiresRegistration: false,
-      astrologer: {
-        id: astrologer.id,
-        phoneNumber: astrologer.phoneNumber,
-        email: astrologer.email,
-        fullName: astrologer.fullName,
-        photo: astrologer.photo,
-        isApproved: astrologer.isApproved,
-        isActive: astrologer.isActive,
-        isOnline: astrologer.isOnline,
-        languages: astrologer.languages,
-        skills: astrologer.skills,
-        yearsOfExperience: astrologer.yearsOfExperience,
-        rating: parseFloat(astrologer.rating),
-        totalConsultations: astrologer.totalConsultations,
-      },
-      token,
-      astrologerToken,
-    });
+    return res
+      .status(200)
+      .json(buildAstrologerLoginResponse(astrologer, phoneNumber, token, astrologerToken));
   } catch (error) {
     console.error("Verify OTP V2 error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to verify OTP",
+      error: error.message,
+    });
+  }
+};
+
+const logoutV2 = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const token = (req.body.token || "").trim();
+    const deviceId = (req.body.deviceId || "").trim();
+
+    const astrologer = await Astrologer.findByPk(astrologerId);
+    if (!astrologer) {
+      clearTokenCookieAstrologer(res);
+      return res.status(401).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    if (token) {
+      await pushNotificationService.removeAstrologerDeviceToken(token);
+    } else if (deviceId) {
+      await pushNotificationService.deactivateAstrologerDeviceTokens(astrologerId, {
+        deviceId,
+      });
+    }
+
+    const shouldClearActiveDevice =
+      !deviceId || !astrologer.activeDeviceId || astrologer.activeDeviceId === deviceId;
+
+    await astrologer.update({
+      sessionVersion: (astrologer.sessionVersion || 0) + 1,
+      isOnline: false,
+      ...(shouldClearActiveDevice
+        ? {
+            activeDeviceId: null,
+            activeDeviceName: null,
+            activeDeviceType: null,
+            activeSessionStartedAt: null,
+          }
+        : {}),
+    });
+
+    clearTokenCookieAstrologer(res);
+
+    return res.status(200).json({
+      success: true,
+      message: "Logout successful",
+    });
+  } catch (error) {
+    console.error("Logout V2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to logout",
       error: error.message,
     });
   }
@@ -414,4 +537,5 @@ module.exports = {
   sendRegistrationOTPV2,
   verifyOTPV2,
   completeRegistrationV2,
+  logoutV2,
 };

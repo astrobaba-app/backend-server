@@ -10,7 +10,7 @@ const {
 
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
 
-async function completeChatSessionWithBilling(session, io) {
+async function completeChatSessionWithBilling(session, io, options = {}) {
   const dbTransaction = await sequelize.transaction();
   let committed = false;
 
@@ -62,7 +62,11 @@ async function completeChatSessionWithBilling(session, io) {
       };
     }
 
-    const endTime = new Date();
+    const requestedEndTime = options.endTime ? new Date(options.endTime) : null;
+    const endTime =
+      requestedEndTime && Number.isFinite(requestedEndTime.getTime())
+        ? requestedEndTime
+        : new Date();
     const startTime = new Date(lockedSession.startTime);
     const durationMs = endTime - startTime;
     const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));

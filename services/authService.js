@@ -30,6 +30,7 @@ function createToken(user) {
       id:user.id,
       role: user.role || null,
       fullName: user.fullName || null,
+      sessionVersion: user.sessionVersion,
     };
     return JWT.sign(payload, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
   } catch (error) {
@@ -43,6 +44,7 @@ const createMiddlewareToken = (user) => {
     { id: user.id,
       role: user.role || null,
       fullName: user.fullName || null,
+      sessionVersion: user.sessionVersion,
      }, 
     process.env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
@@ -59,6 +61,7 @@ const createRefreshToken = (user) => {
       id: user.id,
       role: user.role || null,
       actorType: resolveActorType(user),
+      sessionVersion: user.sessionVersion,
     },
     process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_EXPIRES_IN }

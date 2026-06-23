@@ -33,6 +33,10 @@ const AstrologerDeviceToken = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    deviceName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     isActive: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
