@@ -10,6 +10,8 @@ const {
   resumePalmOrder,
   getPalmReadingJob,
   getPalmReadingHistory,
+  downloadPalmReadingPdf,
+  regeneratePalmReadingPdf,
   getPalmReadingTrustIndicator,
   payPalmCheckoutWithWallet,
   createPalmCheckoutRazorpay,
@@ -29,6 +31,8 @@ router.post("/orders/:orderId/resume", checkForAuthenticationCookie(), resumePal
 router.get("/orders/:orderId", checkForAuthenticationCookie(), getPalmOrder);
 router.get("/jobs/:jobId", checkForAuthenticationCookie(), getPalmReadingJob);
 router.get("/history", checkForAuthenticationCookie(), getPalmReadingHistory);
+router.get("/reports/:palmUploadId/pdf", checkForAuthenticationCookie(), downloadPalmReadingPdf);
+router.post("/reports/:palmUploadId/regenerate-pdf", checkForAuthenticationCookie(), regeneratePalmReadingPdf);
 router.get("/trust-indicator", getPalmReadingTrustIndicator);
 
 module.exports = router;

@@ -2,6 +2,9 @@ const User = require("../user/userAuth");
 const UserRequest = require("../user/userRequest");
 const Kundli = require("../horoscope/kundli");
 const KundliReport = require("../horoscope/kundliReport");
+const YearlyReport = require("../horoscope/yearlyReport");
+const WealthReport = require("../horoscope/wealthReport");
+const SadeSatiReport = require("../horoscope/sadeSatiReport");
 const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
@@ -16,6 +19,8 @@ const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
 const Review = require("../review/review");
+const ReportGenerationRequest = require("../report/reportGenerationRequest");
+const ReportPurchase = require("../report/reportPurchase");
 const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
 const ChatHistorySession = require("../chat/chatHistorySession");
@@ -100,6 +105,78 @@ const PalmOrder = require("../palm/palmOrder");
   });
 
   KundliReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated YearlyReport
+  UserRequest.hasOne(YearlyReport, {
+    foreignKey: "userRequestId",
+    as: "yearlyReport",
+    onDelete: "CASCADE",
+  });
+
+  YearlyReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated yearly reports
+  User.hasMany(YearlyReport, {
+    foreignKey: "userId",
+    as: "yearlyReports",
+    onDelete: "CASCADE",
+  });
+
+  YearlyReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated WealthReport
+  UserRequest.hasOne(WealthReport, {
+    foreignKey: "userRequestId",
+    as: "wealthReport",
+    onDelete: "CASCADE",
+  });
+
+  WealthReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated wealth reports
+  User.hasMany(WealthReport, {
+    foreignKey: "userId",
+    as: "wealthReports",
+    onDelete: "CASCADE",
+  });
+
+  WealthReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated SadeSatiReport
+  UserRequest.hasOne(SadeSatiReport, {
+    foreignKey: "userRequestId",
+    as: "sadeSatiReport",
+    onDelete: "CASCADE",
+  });
+
+  SadeSatiReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated Sade Sati reports
+  User.hasMany(SadeSatiReport, {
+    foreignKey: "userId",
+    as: "sadeSatiReports",
+    onDelete: "CASCADE",
+  });
+
+  SadeSatiReport.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });
@@ -229,6 +306,22 @@ const PalmOrder = require("../palm/palmOrder");
   WalletTransaction.belongsTo(Wallet, {
     foreignKey: "walletId",
     as: "wallet",
+  });
+
+  User.hasMany(ReportPurchase, {
+    foreignKey: "userId",
+    as: "reportPurchases",
+    onDelete: "CASCADE",
+  });
+
+  ReportPurchase.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  ReportPurchase.belongsTo(WalletTransaction, {
+    foreignKey: "walletTransactionId",
+    as: "walletTransaction",
   });
 
   // Blog associations
@@ -903,6 +996,14 @@ const PalmOrder = require("../palm/palmOrder");
   PalmFeature.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
   PalmUpload.hasOne(PalmReport, { foreignKey: "palmUploadId", as: "report", onDelete: "CASCADE" });
   PalmReport.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  UserRequest.hasMany(PalmReport, { foreignKey: "userRequestId", as: "palmReports", onDelete: "SET NULL" });
+  PalmReport.belongsTo(UserRequest, { foreignKey: "userRequestId", as: "userRequest" });
+  User.hasMany(ReportGenerationRequest, { foreignKey: "userId", as: "reportGenerationRequests", onDelete: "CASCADE" });
+  ReportGenerationRequest.belongsTo(User, { foreignKey: "userId", as: "user" });
+  UserRequest.hasMany(ReportGenerationRequest, { foreignKey: "userRequestId", as: "reportGenerationRequests", onDelete: "SET NULL" });
+  ReportGenerationRequest.belongsTo(UserRequest, { foreignKey: "userRequestId", as: "userRequest" });
+  Kundli.hasMany(ReportGenerationRequest, { foreignKey: "kundliId", as: "reportGenerationRequests", onDelete: "SET NULL" });
+  ReportGenerationRequest.belongsTo(Kundli, { foreignKey: "kundliId", as: "kundli" });
   User.hasMany(AIJob, { foreignKey: "userId", as: "aiJobs", onDelete: "CASCADE" });
   AIJob.belongsTo(User, { foreignKey: "userId", as: "user" });
   PalmUpload.hasOne(AIJob, { foreignKey: "palmUploadId", as: "aiJob", onDelete: "CASCADE" });

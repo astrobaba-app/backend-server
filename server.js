@@ -178,9 +178,9 @@ const locationRoute = require("./routes/maps/locationRoute");
 const forumRoute = require("./routes/forum/forumRoute");
 const jobRoute = require("./routes/job/jobRoute");
 const palmReadingRoute = require("./routes/palm/palmReadingRoute");
+const reportPurchaseRoute = require("./routes/report/reportPurchaseRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
 const tempOtpRoute = require("./routes/internal/tempOtpRoute");
-const { startPalmQueueWorker } = require("./services/palmQueueService");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -213,6 +213,7 @@ app.use("/api/location", locationRoute);
 app.use("/api/forum", forumRoute);
 app.use("/api/jobs", jobRoute);
 app.use("/api/palm-reading", palmReadingRoute);
+app.use("/api/report-purchases", reportPurchaseRoute);
 app.use("/api/internal", internalLogRoute);
 app.use("/api/internal/temp-otp", tempOtpRoute);
 
@@ -299,8 +300,8 @@ initDB(() => {
     startForumDuplicateWorker();
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
-    startPalmQueueWorker();
-    scheduledNotificationService.startWorker();
+    const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
+    startReportWorkerScheduler();
     console.log("Live viewer count sync enabled (every 30 seconds)");
   });
 });
