@@ -3,6 +3,7 @@ const KundliReport = require("../../model/horoscope/kundliReport");
 const YearlyReport = require("../../model/horoscope/yearlyReport");
 const WealthReport = require("../../model/horoscope/wealthReport");
 const SadeSatiReport = require("../../model/horoscope/sadeSatiReport");
+const ReportGenerationRequest = require("../../model/report/reportGenerationRequest");
 const UserRequest = require("../../model/user/userRequest");
 const { generateKundliReportContent } = require("../../services/kundliReportAiService");
 const { generateKundliReportPDF: buildKundliReportPDF } = require("../../services/kundliReportPdfService");
@@ -31,7 +32,20 @@ const {
 const {
   generateSadeSatiReportPDF,
 } = require("../../services/sadeSatiReportPdfService");
-// Note: dailyReportPdfService removed — PDF is now generated on the frontend via html2pdf.js
+const {
+  generateDailyReportPDF,
+} = require("../../services/dailyReportPdfService");
+const { generateQueuedPalmPdf } = require("../../services/palmReportPdfGenerationService");
+const {
+  REPORT_QUEUE_ENABLED,
+  enqueueReportLlmRequest,
+  enqueueReportPdfRequest,
+} = require("../../services/reportGenerationQueueService");
+const { markPalmJobCompletedAfterPdf } = require("../../services/palmQueueService");
+const {
+  assertReportPurchaseAccess,
+  markReportPurchaseConsumed,
+} = require("../../services/reportPurchaseService");
 
 const {
   getBasicDetails,
@@ -49,6 +63,200 @@ const {
   getTransitChart,
   getCompleteHoroscope,
 } = require("../../services/astroEngineService");
+
+const DAILY_REPORT_GENERATION_PRICE = Number(process.env.DAILY_REPORT_GENERATION_PRICE || 0);
+const YEARLY_REPORT_GENERATION_PRICE = Number(process.env.YEARLY_REPORT_GENERATION_PRICE || 0);
+const WEALTH_REPORT_GENERATION_PRICE = Number(process.env.WEALTH_REPORT_GENERATION_PRICE || 0);
+
+const isReportQueueWorkerMode = (req) => req?.reportQueueMode === "llm_worker";
+
+const respondQueuedReport = async ({ req, res, reportType, message }) => {
+  const reportRequest = await enqueueReportLlmRequest({
+    userId: req.user.id,
+    reportType,
+    payload: req.body || {},
+  });
+
+  return res.status(202).json({
+    success: true,
+    queued: true,
+    message,
+    report: {
+      reportRequestId: reportRequest.id,
+      userRequestId: reportRequest.userRequestId || req.body?.userRequestId || null,
+      status: reportRequest.status,
+      reportType,
+      createdAt: reportRequest.createdAt,
+    },
+  });
+};
+
+const saveReportGenerationRequest = async (req, values) => {
+  if (req?.reportGenerationRequestId) {
+    const existing = await ReportGenerationRequest.findByPk(req.reportGenerationRequestId);
+    if (existing) {
+      await existing.update(values);
+      return existing;
+    }
+  }
+  return ReportGenerationRequest.create(values);
+};
+
+const REPORT_HISTORY_PENDING_STATUSES = [
+  "queued",
+  "processing",
+  "llm_processing",
+  "retry_queued",
+  "llm_completed",
+  "pdf_processing",
+  "pdf_failed",
+  "failed",
+  "reportllmworker_failed",
+  "reportpdfworker_failed",
+];
+
+const formatQueuedReportHistoryItem = (request) => {
+  const payload = request.requestPayload || {};
+  const metadata = request.metadata || {};
+  return {
+    id: request.sourceId || request.id,
+    reportRequestId: request.id,
+    userRequestId: request.userRequestId || null,
+    status: String(request.status || "").includes("failed") ? "failed" : "generating",
+    fullName: payload.fullName || metadata.fullName || "Report request",
+    dateOfbirth: payload.dateOfbirth || metadata.dateOfbirth || null,
+    placeOfBirth: payload.placeOfBirth || metadata.placeOfBirth || "",
+    timeOfbirth: payload.timeOfbirth || metadata.timeOfbirth || null,
+    gender: payload.gender || metadata.gender || null,
+    createdAt: request.createdAt,
+    pdfUrl: request.pdfUrl || null,
+    reportData: request.reportData || null,
+    error: request.error || null,
+  };
+};
+
+const getQueuedReportHistoryItems = async ({ userId, reportType, existingReports = [] }) => {
+  const requests = await ReportGenerationRequest.findAll({
+    where: {
+      userId,
+      reportType,
+      status: REPORT_HISTORY_PENDING_STATUSES,
+    },
+    order: [["createdAt", "DESC"]],
+  });
+
+  const existingReportIds = new Set(existingReports.map((report) => String(report.id)));
+  const existingRequestIds = new Set(existingReports.map((report) => String(report.reportRequestId || "")));
+
+  return requests
+    .filter((request) => {
+      if (request.sourceId && existingReportIds.has(String(request.sourceId))) return false;
+      if (existingRequestIds.has(String(request.id))) return false;
+      return true;
+    })
+    .map(formatQueuedReportHistoryItem);
+};
+
+const createNoopReportResponse = (label) => ({
+  status(code) {
+    this.statusCode = code;
+    return this;
+  },
+  json(payload) {
+    console.log(`[${label}] Background response`, {
+      statusCode: this.statusCode || 200,
+      success: payload?.success,
+      reportId: payload?.report?.id || null,
+      reportRequestId: payload?.report?.reportRequestId || null,
+      message: payload?.message || null,
+    });
+    return payload;
+  },
+});
+
+const handoffToPdfQueueIfWorker = async (req, reportGenerationRequest, sourceId = null) => {
+  if (!isReportQueueWorkerMode(req) || !reportGenerationRequest) return false;
+  await reportGenerationRequest.update({
+    status: "llm_completed",
+    metadata: {
+      ...(reportGenerationRequest.metadata || {}),
+      processingStatus: "pending_pdf",
+      llmCompletedAt: new Date().toISOString(),
+    },
+  });
+  await enqueueReportPdfRequest({
+    reportRequest: reportGenerationRequest,
+    sourceId: sourceId || reportGenerationRequest.sourceId,
+  });
+  return true;
+};
+
+const saveCachedReportGenerationRequestForWorker = async ({
+  req,
+  userId,
+  userRequest,
+  reportRecord,
+  reportType,
+  sourceType,
+  price,
+  finalResponseData,
+  kundliId = null,
+  requestPayload = {},
+  llmResponse = {},
+  metadata = {},
+}) => {
+  if (!isReportQueueWorkerMode(req) || !reportRecord || !finalResponseData) return null;
+
+  const pdfMetadata = getStoredPdfMetadata(reportRecord);
+  const hasPdf = Boolean(pdfMetadata.pdfUrl);
+
+  const reportGenerationRequest = await saveReportGenerationRequest(req, {
+    userId,
+    userRequestId: userRequest.id,
+    kundliId,
+    reportType,
+    sourceType,
+    sourceId: reportRecord.id,
+    status: hasPdf ? "completed" : "llm_completed",
+    price,
+    currency: "INR",
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    tokenUsage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      skippedOpenAI: true,
+      reason: "cached_report_data_used_by_worker",
+    },
+    requestPayload,
+    llmResponse,
+    reportData: finalResponseData,
+    pdfUrl: pdfMetadata.pdfUrl || null,
+    pdfPublicId: pdfMetadata.pdfPublicId || null,
+    pdfFileName: pdfMetadata.pdfFileName || null,
+    pdfUploadedAt: pdfMetadata.pdfUploadedAt || null,
+    startedAt: new Date(),
+    completedAt: hasPdf ? new Date() : null,
+    metadata: {
+      ...metadata,
+      cachedReportDataUsed: true,
+      pdfGeneration: hasPdf ? "uploaded" : "pending",
+    },
+  });
+
+  console.log("[ReportQueue][LLM][CACHED_HANDOFF]", {
+    reportRequestId: reportGenerationRequest.id,
+    userId,
+    userRequestId: userRequest.id,
+    reportType,
+    sourceId: reportRecord.id,
+    hasPdf,
+  });
+
+  return reportGenerationRequest;
+};
 
 function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
   if (!ashtakvargaData || !ashtakvargaData.sarvashtakavarga) return null;
@@ -77,19 +285,95 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
 }
 
 const getUserRequestWithKundli = async (userId, userRequestId) => {
-  return UserRequest.findOne({
+  const userRequest = await UserRequest.findOne({
     where: {
       id: userRequestId,
       userId,
     },
-    include: [
-      {
-        model: Kundli,
-        as: "kundli",
-        required: true,
-      },
-    ],
   });
+
+  if (!userRequest) return null;
+
+  const kundli = await Kundli.findOne({
+    where: { requestId: userRequest.id },
+  });
+
+  if (!kundli) return null;
+
+  userRequest.kundli = kundli;
+  return userRequest;
+};
+
+const findOrCreateUserRequestWithKundli = async ({
+  userId,
+  userRequestId,
+  fullName,
+  gender,
+  dateOfbirth,
+  timeOfbirth,
+  placeOfBirth,
+  latitude,
+  longitude,
+}) => {
+  if (userRequestId) {
+    const userRequest = await UserRequest.findOne({
+      where: {
+        id: userRequestId,
+        userId,
+      },
+    });
+
+    if (!userRequest) {
+      const error = new Error("Selected Kundli was not found for this user");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const kundli = await Kundli.findOne({
+      where: { requestId: userRequest.id },
+    });
+
+    if (!kundli) {
+      const error = new Error("Selected Kundli does not have saved Kundli data");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    userRequest.kundli = kundli;
+    return userRequest;
+  }
+
+  const parsedDob = new Date(dateOfbirth);
+  let userRequest = await UserRequest.findOne({
+    where: {
+      userId,
+      fullName: fullName.trim(),
+      dateOfbirth: parsedDob,
+      timeOfbirth: timeOfbirth.trim(),
+      placeOfBirth: placeOfBirth.trim(),
+      gender: gender.trim(),
+    },
+  });
+
+  if (!userRequest) {
+    userRequest = await UserRequest.create({
+      userId,
+      fullName: fullName.trim(),
+      dateOfbirth: parsedDob,
+      timeOfbirth: timeOfbirth.trim(),
+      placeOfBirth: placeOfBirth.trim(),
+      gender: gender.trim(),
+      latitude: latitude ? parseFloat(latitude) : null,
+      longitude: longitude ? parseFloat(longitude) : null,
+    });
+  }
+
+  const kundli = await Kundli.findOne({
+    where: { requestId: userRequest.id },
+  });
+
+  userRequest.kundli = kundli || null;
+  return userRequest;
 };
 
 const buildUserDetails = (userRequest) => {
@@ -181,6 +465,78 @@ const ensureStoredDailyPdf = async ({ reportRecord, pdfBuffer, userDetails, user
   } catch (error) {
     console.error("[Daily Report PDF] Cloudinary upload failed:", error.message || error);
   }
+
+  return getStoredPdfMetadata(reportRecord);
+};
+
+const uploadDailyPdfBuffer = async ({ reportRecord, pdfBuffer, userDetails, userRequestId }) => {
+  if (!reportRecord || !pdfBuffer) {
+    return getStoredPdfMetadata(reportRecord);
+  }
+
+  const fileName = `daily_${buildKundliPdfFileName(userDetails, userRequestId)}`;
+  const uploadResult = await uploadPdfBuffer({
+    buffer: pdfBuffer,
+    fileName,
+    folder: "graho/daily-reports",
+  });
+
+  await reportRecord.update({
+    pdfUrl: uploadResult.secure_url,
+    pdfPublicId: uploadResult.public_id,
+    pdfFileName: fileName,
+    pdfUploadedAt: uploadResult.created_at
+      ? new Date(uploadResult.created_at)
+      : new Date(),
+  });
+
+  return getStoredPdfMetadata(reportRecord);
+};
+
+const uploadYearlyPdfBuffer = async ({ reportRecord, pdfBuffer, userDetails, userRequestId }) => {
+  if (!reportRecord || !pdfBuffer) {
+    return getStoredPdfMetadata(reportRecord);
+  }
+
+  const fileName = `yearly_${buildKundliPdfFileName(userDetails, userRequestId)}`;
+  const uploadResult = await uploadPdfBuffer({
+    buffer: pdfBuffer,
+    fileName,
+    folder: "graho/yearly-reports",
+  });
+
+  await reportRecord.update({
+    pdfUrl: uploadResult.secure_url,
+    pdfPublicId: uploadResult.public_id,
+    pdfFileName: fileName,
+    pdfUploadedAt: uploadResult.created_at
+      ? new Date(uploadResult.created_at)
+      : new Date(),
+  });
+
+  return getStoredPdfMetadata(reportRecord);
+};
+
+const uploadWealthPdfBuffer = async ({ reportRecord, pdfBuffer, userDetails, userRequestId }) => {
+  if (!reportRecord || !pdfBuffer) {
+    return getStoredPdfMetadata(reportRecord);
+  }
+
+  const fileName = `wealth_${buildKundliPdfFileName(userDetails, userRequestId)}`;
+  const uploadResult = await uploadPdfBuffer({
+    buffer: pdfBuffer,
+    fileName,
+    folder: "graho/wealth-reports",
+  });
+
+  await reportRecord.update({
+    pdfUrl: uploadResult.secure_url,
+    pdfPublicId: uploadResult.public_id,
+    pdfFileName: fileName,
+    pdfUploadedAt: uploadResult.created_at
+      ? new Date(uploadResult.created_at)
+      : new Date(),
+  });
 
   return getStoredPdfMetadata(reportRecord);
 };
@@ -551,48 +907,126 @@ const generateDailyKundaliReport = async (req, res) => {
       placeOfBirth,
       latitude,
       longitude,
+      userRequestId,
     } = req.body;
 
-    if (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth) {
+    if (!userRequestId && (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth)) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields (fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
+        message: "Missing required fields (userRequestId or fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
       });
     }
 
-    console.log("Received daily report request for:", { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    console.log("Received daily report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
 
-    // Find or create UserRequest using robust date parsing to avoid duplicate creation
-    const parsedDob = new Date(dateOfbirth);
-    let userRequest = await UserRequest.findOne({
-      where: {
+    if (!req.dailyReportBackgroundMode) {
+      const reportPurchase = await assertReportPurchaseAccess({
         userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-      },
-      include: [
-        {
-          model: Kundli,
-          as: "kundli",
+        reportType: "daily",
+        accessToken: req.body.reportAccessToken,
+      });
+
+      const userRequest = await findOrCreateUserRequestWithKundli({
+        userId,
+        userRequestId,
+        fullName,
+        gender,
+        dateOfbirth,
+        timeOfbirth,
+        placeOfBirth,
+        latitude,
+        longitude,
+      });
+
+      const reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: userRequest.kundli?.id || null,
+        reportType: "daily_kundali",
+        sourceType: "kundli_report",
+        sourceId: null,
+        status: "processing",
+        price: DAILY_REPORT_GENERATION_PRICE,
+        currency: "INR",
+        requestPayload: {
+          ...(req.body || {}),
+          userRequestId: userRequest.id,
+          fullName: userRequest.fullName || fullName,
+          gender: userRequest.gender || gender,
+          dateOfbirth: userRequest.dateOfbirth || dateOfbirth,
+          timeOfbirth: userRequest.timeOfbirth || timeOfbirth,
+          placeOfBirth: userRequest.placeOfBirth || placeOfBirth,
         },
-      ],
-    });
+        metadata: {
+          fullName: userRequest.fullName || fullName,
+          gender: userRequest.gender || gender,
+          dateOfbirth: userRequest.dateOfbirth || dateOfbirth,
+          timeOfbirth: userRequest.timeOfbirth || timeOfbirth,
+          placeOfBirth: userRequest.placeOfBirth || placeOfBirth,
+          processingStatus: "background_started",
+        },
+        startedAt: new Date(),
+      });
 
-    if (!userRequest) {
-      userRequest = await UserRequest.create({
-        userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
+      await markReportPurchaseConsumed(reportPurchase, {
+        reportGenerationRequestId: reportGenerationRequest.id,
+        userRequestId: userRequest.id,
+      });
+
+      setImmediate(() => {
+        const backgroundReq = {
+          user: { id: userId },
+          body: { ...(req.body || {}) },
+          dailyReportBackgroundMode: true,
+          reportGenerationRequestId: reportGenerationRequest.id,
+        };
+        const backgroundRes = createNoopReportResponse("DailyReport");
+
+        generateDailyKundaliReport(backgroundReq, backgroundRes).catch(async (error) => {
+          console.error("[DailyReport][Background] Failed:", {
+            reportRequestId: reportGenerationRequest.id,
+            userId,
+            message: error.message || String(error),
+          });
+          await reportGenerationRequest.update({
+            status: "failed",
+            error: error.message || String(error),
+            completedAt: new Date(),
+            metadata: {
+              ...(reportGenerationRequest.metadata || {}),
+              processingStatus: "background_failed",
+            },
+          });
+        });
+      });
+
+      return res.status(202).json({
+        success: true,
+        queued: false,
+        background: true,
+        message: "Daily report request accepted. Track generation in My Reports.",
+        report: {
+          id: reportGenerationRequest.id,
+          reportRequestId: reportGenerationRequest.id,
+          userRequestId: userRequest.id,
+          reportType: "daily_kundali",
+          status: "processing",
+          createdAt: reportGenerationRequest.createdAt,
+        },
       });
     }
+
+    const userRequest = await findOrCreateUserRequestWithKundli({
+      userId,
+      userRequestId,
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+      latitude,
+      longitude,
+    });
 
     // Check if we have a KundliReport generated TODAY
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -604,8 +1038,24 @@ const generateDailyKundaliReport = async (req, res) => {
     });
 
     let finalResponseData;
+    let reportGenerationRequest = null;
+    let pdfMetadata = {};
+    let dailyKundli = null;
+    let dailyPayload = null;
+    let dailyForecast = null;
+    let tokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, raw: {} };
+    const dailyUserDetails = {
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+    };
     if (reportRecord && reportRecord.generatedAt.toISOString().slice(0, 10) === todayStr) {
       finalResponseData = reportRecord.reportData;
+      if (userRequest.kundli) {
+        dailyKundli = userRequest.kundli.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
+      }
     } else {
       // Reuse existing Kundli from DB if available, otherwise fetch and save it
       let kundli;
@@ -706,13 +1156,18 @@ const generateDailyKundaliReport = async (req, res) => {
         kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
       }
 
+      dailyKundli = kundli;
+
       const timezone = req.body.timezone || "Asia/Kolkata";
       const currentDate = req.body.currentDate || todayStr;
       const lat = latitude ? parseFloat(latitude) : userRequest.latitude;
       const lng = longitude ? parseFloat(longitude) : userRequest.longitude;
 
       const payload = await buildDailyReportPayload(kundli, currentDate, timezone, lat, lng, userRequest);
-      const dailyForecast = await generateDailyReport(payload, userRequest);
+      dailyPayload = payload;
+      const dailyReportResult = await generateDailyReport(payload, userRequest, { includeMeta: true });
+      dailyForecast = dailyReportResult.data;
+      tokenUsage = dailyReportResult.tokenUsage || tokenUsage;
       const dailyReportBasicDetails = extractBasicDetails(kundli, userRequest, currentDate);
 
       const disclaimer = `## Disclaimer
@@ -746,6 +1201,150 @@ May this report serve as a source of awareness, reflection, and guidance as you 
           generatedAt: new Date(),
         });
       }
+
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: dailyKundli?.id || null,
+        reportType: "daily_kundali",
+        sourceType: "kundli_report",
+        sourceId: reportRecord.id,
+        status: "llm_completed",
+        price: DAILY_REPORT_GENERATION_PRICE,
+        currency: "INR",
+        inputTokens: tokenUsage.inputTokens || 0,
+        outputTokens: tokenUsage.outputTokens || 0,
+        totalTokens: tokenUsage.totalTokens || 0,
+        tokenUsage,
+        requestPayload: dailyPayload || {},
+        llmResponse: dailyForecast || {},
+        reportData: finalResponseData || {},
+        startedAt: new Date(),
+        metadata: {
+          reportDate: payload?.basicDetails?.reportDate || currentDate,
+          timezone,
+          pdfGeneration: "pending",
+        },
+      });
+
+      console.log("[DailyReport][ReportRequest] LLM response saved", {
+        reportRequestId: reportGenerationRequest.id,
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: dailyKundli?.id || null,
+        price: DAILY_REPORT_GENERATION_PRICE,
+        inputTokens: tokenUsage.inputTokens || 0,
+        outputTokens: tokenUsage.outputTokens || 0,
+        totalTokens: tokenUsage.totalTokens || 0,
+      });
+    }
+
+    if (!reportGenerationRequest && req.reportGenerationRequestId && reportRecord && finalResponseData) {
+      const cachedPdfMetadata = getStoredPdfMetadata(reportRecord);
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: dailyKundli?.id || userRequest.kundli?.id || null,
+        reportType: "daily_kundali",
+        sourceType: "kundli_report",
+        sourceId: reportRecord.id,
+        status: cachedPdfMetadata?.pdfUrl ? "completed" : "llm_completed",
+        price: DAILY_REPORT_GENERATION_PRICE,
+        currency: "INR",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        tokenUsage: {},
+        requestPayload: req.body || {},
+        llmResponse: dailyForecast || finalResponseData?.dailyForecast || finalResponseData || {},
+        reportData: finalResponseData || {},
+        pdfUrl: cachedPdfMetadata?.pdfUrl || null,
+        pdfPublicId: cachedPdfMetadata?.pdfPublicId || null,
+        pdfFileName: cachedPdfMetadata?.pdfFileName || null,
+        pdfUploadedAt: cachedPdfMetadata?.pdfUploadedAt || null,
+        completedAt: cachedPdfMetadata?.pdfUrl ? new Date() : null,
+        metadata: {
+          reportDate: finalResponseData?.basicDetails?.reportDate || todayStr,
+          pdfGeneration: cachedPdfMetadata?.pdfUrl ? "uploaded" : "pending",
+          processingStatus: cachedPdfMetadata?.pdfUrl ? "cached_completed" : "cached_pdf_pending",
+        },
+      });
+    }
+
+    if (!reportGenerationRequest) {
+      reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({
+        req,
+        userId,
+        userRequest,
+        reportRecord,
+        reportType: "daily_kundali",
+        sourceType: "kundli_report",
+        price: DAILY_REPORT_GENERATION_PRICE,
+        finalResponseData,
+        kundliId: dailyKundli?.id || userRequest.kundli?.id || null,
+        requestPayload: req.body || {},
+        llmResponse: dailyForecast || finalResponseData?.dailyForecast || finalResponseData || {},
+        metadata: {
+          reportDate: finalResponseData?.basicDetails?.reportDate || todayStr,
+        },
+      });
+    }
+
+    try {
+      if (reportRecord?.pdfUrl) {
+        pdfMetadata = getStoredPdfMetadata(reportRecord);
+      } else {
+        console.log("[DailyReport][PDF] Generating daily report PDF", {
+          userId,
+          userRequestId: userRequest.id,
+          reportId: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+        });
+
+        const pdfBuffer = await generateDailyReportPDF(finalResponseData, dailyUserDetails);
+        pdfMetadata = await ensureStoredDailyPdf({
+          reportRecord,
+          pdfBuffer,
+          userDetails: dailyUserDetails,
+          userRequestId: userRequest.id,
+        });
+
+        console.log("[DailyReport][PDF] Uploaded daily report PDF", {
+          userId,
+          userRequestId: userRequest.id,
+          reportId: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          pdfUrl: pdfMetadata?.pdfUrl || null,
+        });
+      }
+
+      if (reportGenerationRequest) {
+        await reportGenerationRequest.update({
+          status: "completed",
+          pdfUrl: pdfMetadata?.pdfUrl || null,
+          pdfPublicId: pdfMetadata?.pdfPublicId || null,
+          pdfFileName: pdfMetadata?.pdfFileName || null,
+          pdfUploadedAt: pdfMetadata?.pdfUploadedAt || null,
+          completedAt: new Date(),
+          metadata: {
+            ...(reportGenerationRequest.metadata || {}),
+            pdfGeneration: pdfMetadata?.pdfUrl ? "uploaded" : "skipped",
+          },
+        });
+      }
+    } catch (pdfError) {
+      console.error("[DailyReport][PDF] Generation/upload failed:", pdfError.message || pdfError);
+      if (reportGenerationRequest) {
+        await reportGenerationRequest.update({
+          status: "pdf_failed",
+          error: pdfError.message || String(pdfError),
+          completedAt: new Date(),
+          metadata: {
+            ...(reportGenerationRequest.metadata || {}),
+            pdfGeneration: "failed",
+          },
+        });
+      }
     }
 
     console.log("final response data for daily report:", finalResponseData);
@@ -753,10 +1352,33 @@ May this report serve as a source of awareness, reflection, and guidance as you 
     res.status(200).json({
       success: true,
       data: finalResponseData,
+      report: {
+        id: reportRecord?.id || null,
+        reportRequestId: reportGenerationRequest?.id || null,
+        ...pdfMetadata,
+      },
     });
   } catch (error) {
     console.error("Error in generateDailyKundaliReport:", error);
-    res.status(500).json({
+    if (req.dailyReportBackgroundMode && req.reportGenerationRequestId) {
+      try {
+        const reportGenerationRequest = await ReportGenerationRequest.findByPk(req.reportGenerationRequestId);
+        if (reportGenerationRequest) {
+          await reportGenerationRequest.update({
+            status: "failed",
+            error: error.message || String(error),
+            completedAt: new Date(),
+            metadata: {
+              ...(reportGenerationRequest.metadata || {}),
+              processingStatus: "background_failed",
+            },
+          });
+        }
+      } catch (statusError) {
+        console.error("[DailyReport][Background] Failed to update failure status:", statusError.message || statusError);
+      }
+    }
+    res.status(error.statusCode || 500).json({
       success: false,
       message: "Failed to generate daily kundali report",
       error: error.message,
@@ -791,10 +1413,15 @@ const getDailyKundaliHistory = async (req, res) => {
       pdfUrl: r.pdfUrl || null,
       reportData: r.reportData || null,
     }));
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "daily_kundali",
+      existingReports: formattedReports,
+    });
 
     res.status(200).json({
       success: true,
-      reports: formattedReports,
+      reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     });
   } catch (error) {
     console.error("Error in getDailyKundaliHistory:", error);
@@ -848,31 +1475,205 @@ const deleteDailyKundaliReport = async (req, res) => {
   }
 };
 
-const generateYearlyPdfInBackground = async (reportRecord, userRequest) => {
+const getDailyReportRecordForUser = async ({ userId, reportId }) => {
+  return KundliReport.findOne({
+    where: { id: reportId, userId },
+    include: [
+      {
+        model: UserRequest,
+        as: "userRequest",
+        required: true,
+      },
+    ],
+  });
+};
+
+const buildDailyUserDetailsFromRecord = (reportRecord) => ({
+  fullName: reportRecord.userRequest.fullName,
+  gender: reportRecord.userRequest.gender,
+  dateOfbirth: reportRecord.userRequest.dateOfbirth,
+  timeOfbirth: reportRecord.userRequest.timeOfbirth,
+  placeOfBirth: reportRecord.userRequest.placeOfBirth,
+});
+
+const regenerateDailyReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getDailyReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Daily report not found or you do not have permission to access it",
+      });
+    }
+
+    if (!reportRecord.reportData) {
+      return res.status(409).json({
+        success: false,
+        message: "Stored daily report data is not available for PDF regeneration",
+      });
+    }
+
+    const userDetails = buildDailyUserDetailsFromRecord(reportRecord);
+    const reportRequest = await ReportGenerationRequest.create({
+      userId,
+      userRequestId: reportRecord.userRequestId,
+      kundliId: null,
+      reportType: "daily_kundali",
+      sourceType: "daily_temp_regen",
+      sourceId: reportRecord.id,
+      status: "pdf_regenerating",
+      price: 0,
+      currency: "INR",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, skippedOpenAI: true },
+      requestPayload: { reportId: reportRecord.id, userRequestId: reportRecord.userRequestId },
+      llmResponse: {},
+      reportData: reportRecord.reportData,
+      startedAt: new Date(),
+      metadata: { reason: "temporary_pdf_regeneration_from_stored_daily_data" },
+    });
+
+    const pdfBuffer = await generateDailyReportPDF(reportRecord.reportData, userDetails);
+    const pdfMetadata = await uploadDailyPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId: reportRecord.userRequestId,
+    });
+
+    await reportRequest.update({
+      status: "completed",
+      pdfUrl: pdfMetadata.pdfUrl,
+      pdfPublicId: pdfMetadata.pdfPublicId,
+      pdfFileName: pdfMetadata.pdfFileName,
+      pdfUploadedAt: pdfMetadata.pdfUploadedAt,
+      completedAt: new Date(),
+    });
+
+    console.log("[Daily PDF] regenerated from stored data", {
+      userId,
+      reportId: reportRecord.id,
+      reportRequestId: reportRequest.id,
+      pdfUrl: pdfMetadata.pdfUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Daily report PDF regenerated from stored data",
+      reportRequestId: reportRequest.id,
+      ...pdfMetadata,
+    });
+  } catch (error) {
+    console.error("[Daily PDF] regenerate failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to regenerate daily report PDF",
+      error: error.message,
+    });
+  }
+};
+
+const downloadDailyReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getDailyReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Daily report not found or you do not have permission to access it",
+      });
+    }
+
+    let pdfMetadata = getStoredPdfMetadata(reportRecord);
+    if (!pdfMetadata.pdfUrl) {
+      if (!reportRecord.reportData) {
+        return res.status(409).json({
+          success: false,
+          message: "Stored daily report data is not available for PDF generation",
+        });
+      }
+
+      const userDetails = buildDailyUserDetailsFromRecord(reportRecord);
+      const pdfBuffer = await generateDailyReportPDF(reportRecord.reportData, userDetails);
+      pdfMetadata = await uploadDailyPdfBuffer({
+        reportRecord,
+        pdfBuffer,
+        userDetails,
+        userRequestId: reportRecord.userRequestId,
+      });
+    }
+
+    const cloudinaryResponse = await fetch(pdfMetadata.pdfUrl);
+    if (!cloudinaryResponse.ok) {
+      throw new Error(`Cloudinary PDF fetch failed with status ${cloudinaryResponse.status}`);
+    }
+
+    const pdfBuffer = Buffer.from(await cloudinaryResponse.arrayBuffer());
+    const fileName = pdfMetadata.pdfFileName || `daily_report_${String(id).slice(0, 8)}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("[Daily PDF] download failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to download daily report PDF",
+      error: error.message,
+    });
+  }
+};
+
+const generateYearlyPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
   try {
     console.log(`[Yearly PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
     const pdfBuffer = await generateYearlyReportPDF(reportRecord.reportData, userRequest);
 
-    const safeName = (userRequest.fullName ?? "yearly_report").replace(/\s+/g, "_");
-    const fileName = `yearly_report_${safeName}_${Date.now()}.pdf`;
-
     console.log(`[Yearly PDF Background] Uploading to Cloudinary...`);
-    const uploadResult = await uploadPdfBuffer({
-      buffer: pdfBuffer,
-      fileName,
-      folder: "graho/yearly-reports",
+    const pdfMetadata = await uploadYearlyPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails: userRequest,
+      userRequestId: userRequest.id,
     });
 
-    console.log(`[Yearly PDF Background] Saving pdfUrl in database...`);
-    await reportRecord.update({
-      pdfUrl: uploadResult.secure_url,
-      pdfPublicId: uploadResult.public_id,
-      pdfFileName: fileName,
-      pdfUploadedAt: new Date(),
-    });
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed",
+        pdfUrl: pdfMetadata.pdfUrl,
+        pdfPublicId: pdfMetadata.pdfPublicId,
+        pdfFileName: pdfMetadata.pdfFileName,
+        pdfUploadedAt: pdfMetadata.pdfUploadedAt,
+        completedAt: new Date(),
+        metadata: {
+          ...(reportGenerationRequest.metadata || {}),
+          pdfGeneration: "uploaded",
+        },
+      });
+    }
+
     console.log(`[Yearly PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
   } catch (error) {
     console.error(`[Yearly PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "pdf_failed",
+        error: error.message || String(error),
+        completedAt: new Date(),
+        metadata: {
+          ...(reportGenerationRequest.metadata || {}),
+          pdfGeneration: "failed",
+        },
+      });
+    }
   }
 };
 
@@ -887,46 +1688,54 @@ const generateYearlyKundaliReport = async (req, res) => {
       placeOfBirth,
       latitude,
       longitude,
+      userRequestId,
     } = req.body;
 
-    if (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth) {
+    if (!userRequestId && (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth)) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields (fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
+        message: "Missing required fields (userRequestId or fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
       });
     }
 
-    console.log("Received yearly report request for:", { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
-
-    // Find or create UserRequest using robust date parsing to avoid duplicate creation
-    const parsedDob = new Date(dateOfbirth);
-    let userRequest = await UserRequest.findOne({
-      where: {
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({
         userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-      },
-      include: [
-        {
-          model: Kundli,
-          as: "kundli",
-        },
-      ],
+        reportType: "yearly",
+        accessToken: req.body.reportAccessToken,
+      });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, {
+        queuedReportType: "yearly_kundali",
+      });
+      return respondQueuedReport({
+        req,
+        res,
+        reportType: "yearly_kundali",
+        message: "Yearly report request queued. It will be processed by the scheduled report worker.",
+      });
+    }
+
+    console.log("Received yearly report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+
+    const userRequest = await findOrCreateUserRequestWithKundli({
+      userId,
+      userRequestId,
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+      latitude,
+      longitude,
     });
 
-    if (!userRequest) {
-      userRequest = await UserRequest.create({
-        userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
+    if (reportPurchase) {
+      await markReportPurchaseConsumed(reportPurchase, {
+        userRequestId: userRequest.id,
       });
     }
 
@@ -944,11 +1753,15 @@ const generateYearlyKundaliReport = async (req, res) => {
     });
 
     let finalResponseData;
+    let yearlyKundli = null;
+    let reportGenerationRequest = null;
     if (reportRecord && reportRecord.reportData?.year === year) {
       finalResponseData = reportRecord.reportData;
       console.log(`[YearlyReportController] Serving cached predictions for year ${year}`);
       if (!reportRecord.pdfUrl) {
-        generateYearlyPdfInBackground(reportRecord, userRequest);
+        if (!isReportQueueWorkerMode(req)) {
+          generateYearlyPdfInBackground(reportRecord, userRequest);
+        }
       }
     } else {
       // Reuse existing Kundli from DB if available, otherwise fetch and save it
@@ -1050,6 +1863,7 @@ const generateYearlyKundaliReport = async (req, res) => {
         kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
       }
 
+      yearlyKundli = kundli;
       finalResponseData = await generateYearlyReport(kundli, year, timezone, lat, lng, userRequest);
       //   console.log("finalResponseData", JSON.stringify(finalResponseData, null, 2));
       if (reportRecord) {
@@ -1066,8 +1880,117 @@ const generateYearlyKundaliReport = async (req, res) => {
           generatedAt: new Date(),
         });
       }
+
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: yearlyKundli?.id || null,
+        reportType: "yearly_kundali",
+        sourceType: "yearly_kundli_report",
+        sourceId: reportRecord.id,
+        status: "llm_completed",
+        price: YEARLY_REPORT_GENERATION_PRICE,
+        currency: "INR",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          unavailableBecause: "yearly_service_llm_logic_left_unchanged",
+        },
+        requestPayload: {
+          year,
+          timezone,
+          latitude: lat,
+          longitude: lng,
+          userRequestId: userRequest.id,
+        },
+        llmResponse: finalResponseData || {},
+        reportData: finalResponseData || {},
+        startedAt: new Date(),
+        metadata: {
+          reportYear: year,
+          pdfGeneration: "pending",
+        },
+      });
+
+      console.log("[YearlyReport][ReportRequest] LLM response saved", {
+        reportRequestId: reportGenerationRequest.id,
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: yearlyKundli?.id || null,
+        price: YEARLY_REPORT_GENERATION_PRICE,
+        tokenUsageCaptured: false,
+      });
+
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+        return res.status(202).json({
+          success: true,
+          queued: true,
+          message: "Yearly report LLM completed. PDF generation queued.",
+          report: {
+            id: reportRecord?.id || null,
+            reportRequestId: reportGenerationRequest?.id || null,
+            status: "llm_completed",
+          },
+        });
+      }
+
       // console.log("pdf start hoga");
-      generateYearlyPdfInBackground(reportRecord, userRequest);
+      generateYearlyPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+    }
+
+    if (!reportGenerationRequest) {
+      reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({
+        req,
+        userId,
+        userRequest,
+        reportRecord,
+        reportType: "yearly_kundali",
+        sourceType: "yearly_kundli_report",
+        price: YEARLY_REPORT_GENERATION_PRICE,
+        finalResponseData,
+        kundliId: userRequest.kundli?.id || null,
+        requestPayload: {
+          ...(req.body || {}),
+          userRequestId: userRequest.id,
+          year,
+          timezone,
+        },
+        llmResponse: finalResponseData || {},
+        metadata: {
+          reportYear: year,
+        },
+      });
+    }
+
+    if (isReportQueueWorkerMode(req) && reportGenerationRequest?.pdfUrl) {
+      return res.status(200).json({
+        success: true,
+        cached: true,
+        message: "Yearly report already has a PDF. Queue request marked completed.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "completed",
+          ...getStoredPdfMetadata(reportRecord),
+        },
+      });
+    }
+
+    if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        message: "Yearly report LLM completed. PDF generation queued.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "llm_completed",
+        },
+      });
     }
 
     // console.log("final response data for yearly report prediction:");
@@ -1076,10 +1999,15 @@ const generateYearlyKundaliReport = async (req, res) => {
     res.status(200).json({
       success: true,
       data: finalResponseData,
+      report: {
+        id: reportRecord?.id || null,
+        reportRequestId: reportGenerationRequest?.id || null,
+        ...getStoredPdfMetadata(reportRecord),
+      },
     });
   } catch (error) {
     console.error("Error in generateYearlyKundaliReport:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: "Failed to generate yearly report",
       error: error.message,
@@ -1116,10 +2044,15 @@ const getYearlyKundaliHistory = async (req, res) => {
       pdfUrl: r.pdfUrl || null,
       reportData: r.reportData || null,
     }));
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "yearly_kundali",
+      existingReports: formattedReports,
+    });
 
     res.status(200).json({
       success: true,
-      reports: formattedReports,
+      reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     });
   } catch (error) {
     console.error("Error in getYearlyKundaliHistory:", error);
@@ -1170,31 +2103,209 @@ const deleteYearlyKundaliReport = async (req, res) => {
   }
 };
 
-const generateWealthPdfInBackground = async (reportRecord, userRequest) => {
+const getYearlyReportRecordForUser = async ({ userId, reportId }) => {
+  return YearlyReport.findOne({
+    where: { id: reportId, userId },
+    include: [
+      {
+        model: UserRequest,
+        as: "userRequest",
+        required: true,
+      },
+    ],
+  });
+};
+
+const buildYearlyUserDetailsFromRecord = (reportRecord) => ({
+  id: reportRecord.userRequest.id,
+  userId: reportRecord.userId,
+  fullName: reportRecord.userRequest.fullName,
+  gender: reportRecord.userRequest.gender,
+  dateOfbirth: reportRecord.userRequest.dateOfbirth,
+  timeOfbirth: reportRecord.userRequest.timeOfbirth,
+  placeOfBirth: reportRecord.userRequest.placeOfBirth,
+  latitude: reportRecord.userRequest.latitude,
+  longitude: reportRecord.userRequest.longitude,
+});
+
+const regenerateYearlyReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getYearlyReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Yearly report not found or you do not have permission to access it",
+      });
+    }
+
+    if (!reportRecord.reportData) {
+      return res.status(409).json({
+        success: false,
+        message: "Stored yearly report data is not available for PDF regeneration",
+      });
+    }
+
+    const userDetails = buildYearlyUserDetailsFromRecord(reportRecord);
+    const reportRequest = await ReportGenerationRequest.create({
+      userId,
+      userRequestId: reportRecord.userRequestId,
+      kundliId: null,
+      reportType: "yearly_kundali",
+      sourceType: "yearly_temp_regen",
+      sourceId: reportRecord.id,
+      status: "pdf_regenerating",
+      price: 0,
+      currency: "INR",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, skippedOpenAI: true },
+      requestPayload: { reportId: reportRecord.id, userRequestId: reportRecord.userRequestId },
+      llmResponse: {},
+      reportData: reportRecord.reportData,
+      startedAt: new Date(),
+      metadata: { reason: "temporary_pdf_regeneration_from_stored_yearly_data" },
+    });
+
+    const pdfBuffer = await generateYearlyReportPDF(reportRecord.reportData, userDetails);
+    const pdfMetadata = await uploadYearlyPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId: reportRecord.userRequestId,
+    });
+
+    await reportRequest.update({
+      status: "completed",
+      pdfUrl: pdfMetadata.pdfUrl,
+      pdfPublicId: pdfMetadata.pdfPublicId,
+      pdfFileName: pdfMetadata.pdfFileName,
+      pdfUploadedAt: pdfMetadata.pdfUploadedAt,
+      completedAt: new Date(),
+    });
+
+    console.log("[Yearly PDF] regenerated from stored data", {
+      userId,
+      reportId: reportRecord.id,
+      reportRequestId: reportRequest.id,
+      pdfUrl: pdfMetadata.pdfUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Yearly report PDF regenerated from stored data",
+      reportRequestId: reportRequest.id,
+      ...pdfMetadata,
+    });
+  } catch (error) {
+    console.error("[Yearly PDF] regenerate failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to regenerate yearly report PDF",
+      error: error.message,
+    });
+  }
+};
+
+const downloadYearlyReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getYearlyReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Yearly report not found or you do not have permission to access it",
+      });
+    }
+
+    let pdfMetadata = getStoredPdfMetadata(reportRecord);
+    if (!pdfMetadata.pdfUrl) {
+      if (!reportRecord.reportData) {
+        return res.status(409).json({
+          success: false,
+          message: "Stored yearly report data is not available for PDF generation",
+        });
+      }
+
+      const userDetails = buildYearlyUserDetailsFromRecord(reportRecord);
+      const pdfBuffer = await generateYearlyReportPDF(reportRecord.reportData, userDetails);
+      pdfMetadata = await uploadYearlyPdfBuffer({
+        reportRecord,
+        pdfBuffer,
+        userDetails,
+        userRequestId: reportRecord.userRequestId,
+      });
+    }
+
+    const cloudinaryResponse = await fetch(pdfMetadata.pdfUrl);
+    if (!cloudinaryResponse.ok) {
+      throw new Error(`Cloudinary PDF fetch failed with status ${cloudinaryResponse.status}`);
+    }
+
+    const pdfBuffer = Buffer.from(await cloudinaryResponse.arrayBuffer());
+    const fileName = pdfMetadata.pdfFileName || `yearly_report_${String(id).slice(0, 8)}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("[Yearly PDF] download failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to download yearly report PDF",
+      error: error.message,
+    });
+  }
+};
+
+const generateWealthPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
   try {
     console.log(`[Wealth PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
     const pdfBuffer = await generateWealthReportPDF(reportRecord.reportData, userRequest);
 
-    const safeName = (userRequest.fullName ?? "wealth_report").replace(/\s+/g, "_");
-    const fileName = `wealth_report_${safeName}_${Date.now()}.pdf`;
-
     console.log(`[Wealth PDF Background] Uploading to Cloudinary...`);
-    const uploadResult = await uploadPdfBuffer({
-      buffer: pdfBuffer,
-      fileName,
-      folder: "graho/wealth-reports",
+    const pdfMetadata = await uploadWealthPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails: userRequest,
+      userRequestId: userRequest.id,
     });
 
-    console.log(`[Wealth PDF Background] Saving pdfUrl in database...`);
-    await reportRecord.update({
-      pdfUrl: uploadResult.secure_url,
-      pdfPublicId: uploadResult.public_id,
-      pdfFileName: fileName,
-      pdfUploadedAt: new Date(),
-    });
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed",
+        pdfUrl: pdfMetadata.pdfUrl,
+        pdfPublicId: pdfMetadata.pdfPublicId,
+        pdfFileName: pdfMetadata.pdfFileName,
+        pdfUploadedAt: pdfMetadata.pdfUploadedAt,
+        completedAt: new Date(),
+        metadata: {
+          ...(reportGenerationRequest.metadata || {}),
+          pdfGeneration: "uploaded",
+        },
+      });
+    }
+
     console.log(`[Wealth PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
   } catch (error) {
     console.error(`[Wealth PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "pdf_failed",
+        error: error.message || String(error),
+        completedAt: new Date(),
+        metadata: {
+          ...(reportGenerationRequest.metadata || {}),
+          pdfGeneration: "failed",
+        },
+      });
+    }
   }
 };
 
@@ -1209,46 +2320,54 @@ const generateWealthKundaliReport = async (req, res) => {
       placeOfBirth,
       latitude,
       longitude,
+      userRequestId,
     } = req.body;
 
-    if (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth) {
+    if (!userRequestId && (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth)) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields (fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
+        message: "Missing required fields (userRequestId or fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
       });
     }
 
-    console.log("Received wealth report request for:", { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
-
-    // Find or create UserRequest using robust date parsing to avoid duplicate creation
-    const parsedDob = new Date(dateOfbirth);
-    let userRequest = await UserRequest.findOne({
-      where: {
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({
         userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-      },
-      include: [
-        {
-          model: Kundli,
-          as: "kundli",
-        },
-      ],
+        reportType: "wealth",
+        accessToken: req.body.reportAccessToken,
+      });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, {
+        queuedReportType: "wealth_kundali",
+      });
+      return respondQueuedReport({
+        req,
+        res,
+        reportType: "wealth_kundali",
+        message: "Wealth report request queued. It will be processed by the scheduled report worker.",
+      });
+    }
+
+    console.log("Received wealth report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+
+    const userRequest = await findOrCreateUserRequestWithKundli({
+      userId,
+      userRequestId,
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+      latitude,
+      longitude,
     });
 
-    if (!userRequest) {
-      userRequest = await UserRequest.create({
-        userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
+    if (reportPurchase) {
+      await markReportPurchaseConsumed(reportPurchase, {
+        userRequestId: userRequest.id,
       });
     }
 
@@ -1265,11 +2384,45 @@ const generateWealthKundaliReport = async (req, res) => {
     });
 
     let finalResponseData;
+    let wealthKundli = null;
+    let reportGenerationRequest = null;
     if (reportRecord) {
       finalResponseData = reportRecord.reportData;
       console.log(`[WealthReportController] Serving cached predictions`);
       if (!reportRecord.pdfUrl) {
-        generateWealthPdfInBackground(reportRecord, userRequest);
+        reportGenerationRequest = await saveReportGenerationRequest(req, {
+          userId,
+          userRequestId: userRequest.id,
+          kundliId: userRequest.kundli?.id || null,
+          reportType: "wealth_kundali",
+          sourceType: "wealth_cached_pdf_generation",
+          sourceId: reportRecord.id,
+          status: "pdf_regenerating",
+          price: 0,
+          currency: "INR",
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, skippedOpenAI: true },
+          requestPayload: { reportId: reportRecord.id, userRequestId: userRequest.id },
+          llmResponse: {},
+          reportData: finalResponseData || {},
+          startedAt: new Date(),
+          metadata: { reason: "cached_wealth_report_missing_pdf" },
+        });
+        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+          return res.status(202).json({
+            success: true,
+            queued: true,
+            message: "Cached wealth report found. PDF generation queued.",
+            report: {
+              id: reportRecord?.id || null,
+              reportRequestId: reportGenerationRequest?.id || null,
+              status: "llm_completed",
+            },
+          });
+        }
+        generateWealthPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
       }
     } else {
       // Reuse existing Kundli from DB if available, otherwise fetch and save it
@@ -1371,6 +2524,7 @@ const generateWealthKundaliReport = async (req, res) => {
         kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
       }
 
+      wealthKundli = kundli;
       finalResponseData = await generateWealthReport(kundli, userRequest);
       
       if (reportRecord) {
@@ -1387,16 +2541,129 @@ const generateWealthKundaliReport = async (req, res) => {
           generatedAt: new Date(),
         });
       }
-      generateWealthPdfInBackground(reportRecord, userRequest);
+
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: wealthKundli?.id || null,
+        reportType: "wealth_kundali",
+        sourceType: "wealth_kundli_report",
+        sourceId: reportRecord.id,
+        status: "llm_completed",
+        price: WEALTH_REPORT_GENERATION_PRICE,
+        currency: "INR",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          unavailableBecause: "wealth_service_llm_logic_left_unchanged",
+        },
+        requestPayload: {
+          timezone,
+          latitude: lat,
+          longitude: lng,
+          userRequestId: userRequest.id,
+        },
+        llmResponse: finalResponseData || {},
+        reportData: finalResponseData || {},
+        startedAt: new Date(),
+        metadata: {
+          pdfGeneration: "pending",
+        },
+      });
+
+      console.log("[WealthReport][ReportRequest] LLM response saved", {
+        reportRequestId: reportGenerationRequest.id,
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: wealthKundli?.id || null,
+        price: WEALTH_REPORT_GENERATION_PRICE,
+        tokenUsageCaptured: false,
+      });
+
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+        return res.status(202).json({
+          success: true,
+          queued: true,
+          message: "Wealth report LLM completed. PDF generation queued.",
+          report: {
+            id: reportRecord?.id || null,
+            reportRequestId: reportGenerationRequest?.id || null,
+            status: "llm_completed",
+          },
+        });
+      }
+
+      generateWealthPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+    }
+
+    if (!reportGenerationRequest) {
+      reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({
+        req,
+        userId,
+        userRequest,
+        reportRecord,
+        reportType: "wealth_kundali",
+        sourceType: "wealth_kundli_report",
+        price: WEALTH_REPORT_GENERATION_PRICE,
+        finalResponseData,
+        kundliId: userRequest.kundli?.id || wealthKundli?.id || null,
+        requestPayload: {
+          ...(req.body || {}),
+          userRequestId: userRequest.id,
+          timezone,
+          latitude: lat,
+          longitude: lng,
+        },
+        llmResponse: finalResponseData || {},
+        metadata: {
+          reportKind: "wealth",
+        },
+      });
+    }
+
+    if (isReportQueueWorkerMode(req) && reportGenerationRequest?.pdfUrl) {
+      return res.status(200).json({
+        success: true,
+        cached: true,
+        message: "Wealth report already has a PDF. Queue request marked completed.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "completed",
+          ...getStoredPdfMetadata(reportRecord),
+        },
+      });
+    }
+
+    if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        message: "Wealth report LLM completed. PDF generation queued.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "llm_completed",
+        },
+      });
     }
 
     res.status(200).json({
       success: true,
       data: finalResponseData,
+      report: {
+        id: reportRecord?.id || null,
+        reportRequestId: reportGenerationRequest?.id || null,
+        ...getStoredPdfMetadata(reportRecord),
+      },
     });
   } catch (error) {
     console.error("Error in generateWealthKundaliReport:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: "Failed to generate wealth report",
       error: error.message,
@@ -1433,10 +2700,15 @@ const getWealthKundaliHistory = async (req, res) => {
       pdfUrl: r.pdfUrl || null,
       reportData: r.reportData || null,
     }));
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "wealth_kundali",
+      existingReports: formattedReports,
+    });
 
     res.status(200).json({
       success: true,
-      reports: formattedReports,
+      reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     });
   } catch (error) {
     console.error("Error in getWealthKundaliHistory:", error);
@@ -1487,6 +2759,190 @@ const deleteWealthKundaliReport = async (req, res) => {
   }
 };
 
+const getWealthReportRecordForUser = async ({ userId, reportId }) => {
+  return WealthReport.findOne({
+    where: { id: reportId, userId },
+    include: [
+      {
+        model: UserRequest,
+        as: "userRequest",
+        required: true,
+      },
+    ],
+  });
+};
+
+const buildWealthUserDetailsFromRecord = (reportRecord) => ({
+  id: reportRecord.userRequest.id,
+  userId: reportRecord.userId,
+  fullName: reportRecord.userRequest.fullName,
+  gender: reportRecord.userRequest.gender,
+  dateOfbirth: reportRecord.userRequest.dateOfbirth,
+  timeOfbirth: reportRecord.userRequest.timeOfbirth,
+  placeOfBirth: reportRecord.userRequest.placeOfBirth,
+  latitude: reportRecord.userRequest.latitude,
+  longitude: reportRecord.userRequest.longitude,
+});
+
+const uploadSadeSatiPdfBuffer = async ({ reportRecord, pdfBuffer, userRequest }) => {
+  if (!reportRecord || !pdfBuffer) {
+    return getStoredPdfMetadata(reportRecord);
+  }
+
+  const safeName = (userRequest.fullName ?? "sadesati_report").replace(/\s+/g, "_");
+  const fileName = `sadesati_report_${safeName}_${Date.now()}.pdf`;
+  const uploadResult = await uploadPdfBuffer({
+    buffer: pdfBuffer,
+    fileName,
+    folder: "graho/sadesati-reports",
+  });
+
+  await reportRecord.update({
+    pdfUrl: uploadResult.secure_url,
+    pdfPublicId: uploadResult.public_id,
+    pdfFileName: fileName,
+    pdfUploadedAt: uploadResult.created_at ? new Date(uploadResult.created_at) : new Date(),
+  });
+
+  return getStoredPdfMetadata(reportRecord);
+};
+
+const regenerateWealthReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getWealthReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Wealth report not found or you do not have permission to access it",
+      });
+    }
+
+    if (!reportRecord.reportData) {
+      return res.status(409).json({
+        success: false,
+        message: "Stored wealth report data is not available for PDF regeneration",
+      });
+    }
+
+    const userDetails = buildWealthUserDetailsFromRecord(reportRecord);
+    const reportRequest = await ReportGenerationRequest.create({
+      userId,
+      userRequestId: reportRecord.userRequestId,
+      kundliId: null,
+      reportType: "wealth_kundali",
+      sourceType: "wealth_temp_regen",
+      sourceId: reportRecord.id,
+      status: "pdf_regenerating",
+      price: 0,
+      currency: "INR",
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, skippedOpenAI: true },
+      requestPayload: { reportId: reportRecord.id, userRequestId: reportRecord.userRequestId },
+      llmResponse: {},
+      reportData: reportRecord.reportData,
+      startedAt: new Date(),
+      metadata: { reason: "temporary_pdf_regeneration_from_stored_wealth_data" },
+    });
+
+    const pdfBuffer = await generateWealthReportPDF(reportRecord.reportData, userDetails);
+    const pdfMetadata = await uploadWealthPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId: reportRecord.userRequestId,
+    });
+
+    await reportRequest.update({
+      status: "completed",
+      pdfUrl: pdfMetadata.pdfUrl,
+      pdfPublicId: pdfMetadata.pdfPublicId,
+      pdfFileName: pdfMetadata.pdfFileName,
+      pdfUploadedAt: pdfMetadata.pdfUploadedAt,
+      completedAt: new Date(),
+    });
+
+    console.log("[Wealth PDF] regenerated from stored data", {
+      userId,
+      reportId: reportRecord.id,
+      reportRequestId: reportRequest.id,
+      pdfUrl: pdfMetadata.pdfUrl,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Wealth report PDF regenerated from stored data",
+      reportRequestId: reportRequest.id,
+      ...pdfMetadata,
+    });
+  } catch (error) {
+    console.error("[Wealth PDF] regenerate failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to regenerate wealth report PDF",
+      error: error.message,
+    });
+  }
+};
+
+const downloadWealthReportPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    const reportRecord = await getWealthReportRecordForUser({ userId, reportId: id });
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Wealth report not found or you do not have permission to access it",
+      });
+    }
+
+    let pdfMetadata = getStoredPdfMetadata(reportRecord);
+    if (!pdfMetadata.pdfUrl) {
+      if (!reportRecord.reportData) {
+        return res.status(409).json({
+          success: false,
+          message: "Stored wealth report data is not available for PDF generation",
+        });
+      }
+
+      const userDetails = buildWealthUserDetailsFromRecord(reportRecord);
+      const pdfBuffer = await generateWealthReportPDF(reportRecord.reportData, userDetails);
+      pdfMetadata = await uploadWealthPdfBuffer({
+        reportRecord,
+        pdfBuffer,
+        userDetails,
+        userRequestId: reportRecord.userRequestId,
+      });
+    }
+
+    const cloudinaryResponse = await fetch(pdfMetadata.pdfUrl);
+    if (!cloudinaryResponse.ok) {
+      throw new Error(`Cloudinary PDF fetch failed with status ${cloudinaryResponse.status}`);
+    }
+
+    const pdfBuffer = Buffer.from(await cloudinaryResponse.arrayBuffer());
+    const fileName = pdfMetadata.pdfFileName || `wealth_report_${String(id).slice(0, 8)}.pdf`;
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
+    return res.send(pdfBuffer);
+  } catch (error) {
+    console.error("[Wealth PDF] download failed:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to download wealth report PDF",
+      error: error.message,
+    });
+  }
+};
+
 const generateSadeSatiPdfInBackground = async (reportRecord, userRequest) => {
   try {
     console.log(`[Sade Sati PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
@@ -1526,48 +2982,38 @@ const generateSadeSatiKundaliReport = async (req, res) => {
       placeOfBirth,
       latitude,
       longitude,
+      userRequestId,
     } = req.body;
 
-    if (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth) {
+    if (!userRequestId && (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth)) {
       return res.status(400).json({
         success: false,
-        message: "Missing required fields (fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
+        message: "Missing required fields (userRequestId or fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
       });
     }
 
-    console.log("Received Sade Sati report request for:", { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      return respondQueuedReport({
+        req,
+        res,
+        reportType: "sade_sati_kundali",
+        message: "Sade Sati report request queued. It will be processed by the scheduled report worker.",
+      });
+    }
 
-    // Find or create UserRequest using robust date parsing to avoid duplicate creation
-    const parsedDob = new Date(dateOfbirth);
-    let userRequest = await UserRequest.findOne({
-      where: {
-        userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-      },
-      include: [
-        {
-          model: Kundli,
-          as: "kundli",
-        },
-      ],
+    console.log("Received Sade Sati report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+
+    const userRequest = await findOrCreateUserRequestWithKundli({
+      userId,
+      userRequestId,
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+      latitude,
+      longitude,
     });
-
-    if (!userRequest) {
-      userRequest = await UserRequest.create({
-        userId,
-        fullName: fullName.trim(),
-        dateOfbirth: parsedDob,
-        timeOfbirth: timeOfbirth.trim(),
-        placeOfBirth: placeOfBirth.trim(),
-        gender: gender.trim(),
-        latitude: latitude ? parseFloat(latitude) : null,
-        longitude: longitude ? parseFloat(longitude) : null,
-      });
-    }
 
     // Check if we have a SadeSatiReport generated already for this request
     let reportRecord = await SadeSatiReport.findOne({
@@ -1578,10 +3024,40 @@ const generateSadeSatiKundaliReport = async (req, res) => {
     });
 
     let finalResponseData;
+    let reportGenerationRequest = null;
+    let sadeSatiKundli = null;
     if (reportRecord) {
       finalResponseData = reportRecord.reportData;
       console.log(`[SadeSatiReportController] Serving cached predictions`);
       if (!reportRecord.pdfUrl) {
+        reportGenerationRequest = await saveReportGenerationRequest(req, {
+          userId,
+          userRequestId: userRequest.id,
+          kundliId: userRequest.kundli?.id || null,
+          reportType: "sade_sati_kundali",
+          sourceType: "sade_sati_cached_pdf_generation",
+          sourceId: reportRecord.id,
+          status: "llm_completed",
+          price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
+          currency: "INR",
+          requestPayload: { reportId: reportRecord.id, userRequestId: userRequest.id },
+          llmResponse: {},
+          reportData: finalResponseData || {},
+          startedAt: new Date(),
+          metadata: { reason: "cached_sade_sati_report_missing_pdf", pdfGeneration: "pending" },
+        });
+        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+          return res.status(202).json({
+            success: true,
+            queued: true,
+            message: "Cached Sade Sati report found. PDF generation queued.",
+            report: {
+              id: reportRecord?.id || null,
+              reportRequestId: reportGenerationRequest?.id || null,
+              status: "llm_completed",
+            },
+          });
+        }
         generateSadeSatiPdfInBackground(reportRecord, userRequest);
       }
     } else {
@@ -1684,6 +3160,7 @@ const generateSadeSatiKundaliReport = async (req, res) => {
         kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
       }
 
+      sadeSatiKundli = kundli;
       finalResponseData = await generateSadeSatiReport(kundli, userRequest);
       
       if (reportRecord) {
@@ -1700,16 +3177,113 @@ const generateSadeSatiKundaliReport = async (req, res) => {
           generatedAt: new Date(),
         });
       }
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId,
+        userRequestId: userRequest.id,
+        kundliId: sadeSatiKundli?.id || null,
+        reportType: "sade_sati_kundali",
+        sourceType: "sade_sati_kundli_report",
+        sourceId: reportRecord.id,
+        status: "llm_completed",
+        price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
+        currency: "INR",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        tokenUsage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          unavailableBecause: "sade_sati_service_llm_logic_left_unchanged",
+        },
+        requestPayload: {
+          userRequestId: userRequest.id,
+        },
+        llmResponse: finalResponseData || {},
+        reportData: finalResponseData || {},
+        startedAt: new Date(),
+        metadata: {
+          pdfGeneration: "pending",
+        },
+      });
+
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+        return res.status(202).json({
+          success: true,
+          queued: true,
+          message: "Sade Sati report LLM completed. PDF generation queued.",
+          report: {
+            id: reportRecord?.id || null,
+            reportRequestId: reportGenerationRequest?.id || null,
+            status: "llm_completed",
+          },
+        });
+      }
+
       generateSadeSatiPdfInBackground(reportRecord, userRequest);
+    }
+
+    if (!reportGenerationRequest) {
+      reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({
+        req,
+        userId,
+        userRequest,
+        reportRecord,
+        reportType: "sade_sati_kundali",
+        sourceType: "sade_sati_kundli_report",
+        price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
+        finalResponseData,
+        kundliId: userRequest.kundli?.id || sadeSatiKundli?.id || null,
+        requestPayload: {
+          ...(req.body || {}),
+          userRequestId: userRequest.id,
+        },
+        llmResponse: finalResponseData || {},
+        metadata: {
+          reportKind: "sade_sati",
+        },
+      });
+    }
+
+    if (isReportQueueWorkerMode(req) && reportGenerationRequest?.pdfUrl) {
+      return res.status(200).json({
+        success: true,
+        cached: true,
+        message: "Sade Sati report already has a PDF. Queue request marked completed.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "completed",
+          ...getStoredPdfMetadata(reportRecord),
+        },
+      });
+    }
+
+    if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+      return res.status(202).json({
+        success: true,
+        queued: true,
+        message: "Sade Sati report LLM completed. PDF generation queued.",
+        report: {
+          id: reportRecord?.id || null,
+          reportRequestId: reportGenerationRequest?.id || null,
+          status: "llm_completed",
+        },
+      });
     }
 
     res.status(200).json({
       success: true,
       data: finalResponseData,
+      report: {
+        id: reportRecord?.id || null,
+        reportRequestId: reportGenerationRequest?.id || null,
+        ...getStoredPdfMetadata(reportRecord),
+      },
     });
   } catch (error) {
     console.error("Error in generateSadeSatiKundaliReport:", error);
-    res.status(500).json({
+    res.status(error.statusCode || 500).json({
       success: false,
       message: "Failed to generate Sade Sati report",
       error: error.message,
@@ -1746,10 +3320,15 @@ const getSadeSatiKundaliHistory = async (req, res) => {
       pdfUrl: r.pdfUrl || null,
       reportData: r.reportData || null,
     }));
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "sade_sati_kundali",
+      existingReports: formattedReports,
+    });
 
     res.status(200).json({
       success: true,
-      reports: formattedReports,
+      reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
     });
   } catch (error) {
     console.error("Error in getSadeSatiKundaliHistory:", error);
@@ -1800,6 +3379,84 @@ const deleteSadeSatiKundaliReport = async (req, res) => {
   }
 };
 
+const generateQueuedReportPdf = async (reportGenerationRequest) => {
+  if (!reportGenerationRequest?.sourceId) {
+    throw new Error("Queued PDF job is missing sourceId");
+  }
+
+  let reportRecord;
+  let userDetails;
+  let pdfBuffer;
+  let pdfMetadata;
+
+  if (reportGenerationRequest.reportType === "yearly_kundali") {
+    reportRecord = await getYearlyReportRecordForUser({
+      userId: reportGenerationRequest.userId,
+      reportId: reportGenerationRequest.sourceId,
+    });
+    if (!reportRecord?.reportData) throw new Error("Yearly report data not found for queued PDF");
+    userDetails = buildYearlyUserDetailsFromRecord(reportRecord);
+    pdfBuffer = await generateYearlyReportPDF(reportRecord.reportData, userDetails);
+    pdfMetadata = await uploadYearlyPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId: reportRecord.userRequestId,
+    });
+  } else if (reportGenerationRequest.reportType === "wealth_kundali") {
+    reportRecord = await getWealthReportRecordForUser({
+      userId: reportGenerationRequest.userId,
+      reportId: reportGenerationRequest.sourceId,
+    });
+    if (!reportRecord?.reportData) throw new Error("Wealth report data not found for queued PDF");
+    userDetails = buildWealthUserDetailsFromRecord(reportRecord);
+    pdfBuffer = await generateWealthReportPDF(reportRecord.reportData, userDetails);
+    pdfMetadata = await uploadWealthPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId: reportRecord.userRequestId,
+    });
+  } else if (reportGenerationRequest.reportType === "sade_sati_kundali") {
+    reportRecord = await SadeSatiReport.findOne({
+      where: { id: reportGenerationRequest.sourceId, userId: reportGenerationRequest.userId },
+      include: [{ model: UserRequest, as: "userRequest", required: true }],
+    });
+    if (!reportRecord?.reportData) throw new Error("Sade Sati report data not found for queued PDF");
+    pdfBuffer = await generateSadeSatiReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    pdfMetadata = await uploadSadeSatiPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userRequest: reportRecord.userRequest,
+    });
+  } else if (reportGenerationRequest.reportType === "palmistry") {
+    pdfMetadata = await generateQueuedPalmPdf(reportGenerationRequest);
+    await markPalmJobCompletedAfterPdf({
+      jobId: reportGenerationRequest.metadata?.jobId || null,
+      userId: reportGenerationRequest.userId,
+    });
+  } else {
+    throw new Error(`Unsupported queued PDF report type: ${reportGenerationRequest.reportType}`);
+  }
+
+  await reportGenerationRequest.update({
+    status: "completed",
+    pdfUrl: pdfMetadata?.pdfUrl || null,
+    pdfPublicId: pdfMetadata?.pdfPublicId || null,
+    pdfFileName: pdfMetadata?.pdfFileName || null,
+    pdfUploadedAt: pdfMetadata?.pdfUploadedAt || null,
+    completedAt: new Date(),
+    metadata: {
+      ...(reportGenerationRequest.metadata || {}),
+      processingStatus: "completed",
+      pdfGeneration: pdfMetadata?.pdfUrl ? "uploaded" : "skipped",
+      pdfCompletedAt: new Date().toISOString(),
+    },
+  });
+
+  return pdfMetadata;
+};
+
 module.exports = {
   getUserKundlisForReport,
   generateKundliReport,
@@ -1809,13 +3466,20 @@ module.exports = {
   generateDailyKundaliReport,
   getDailyKundaliHistory,
   deleteDailyKundaliReport,
+  regenerateDailyReportPdf,
+  downloadDailyReportPdf,
   generateYearlyKundaliReport,
   getYearlyKundaliHistory,
   deleteYearlyKundaliReport,
+  regenerateYearlyReportPdf,
+  downloadYearlyReportPdf,
   generateWealthKundaliReport,
   getWealthKundaliHistory,
   deleteWealthKundaliReport,
+  regenerateWealthReportPdf,
+  downloadWealthReportPdf,
   generateSadeSatiKundaliReport,
   getSadeSatiKundaliHistory,
   deleteSadeSatiKundaliReport,
+  generateQueuedReportPdf,
 };

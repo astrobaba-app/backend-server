@@ -2,6 +2,7 @@ const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
 
+
 const IMAGES_DIR = path.resolve(__dirname, "../images");
 
 const getSystemChromePath = () => {
@@ -75,19 +76,28 @@ const formatDate = (dateStr) => {
   }
 };
 
-function generateSadeSatiHtmlTemplate(reportData, userRequest) {
+async function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
   const pred = reportData.predictions || {};
   const astro = reportData.astrologyBasics || {};
 
   // Load Cover & Dividers Base64 Data URIs
-  const coverUri = imageToDataUri("sadhesatistartingpage.jpg");
-  const endUri = imageToDataUri("sadhesatiendingpage.jpg");
-
-  const divOverview = imageToDataUri("UnderstandingSadeSati.jpg");
-  const divPhases = imageToDataUri("TheThreePhases.jpg");
-  const divImpact = imageToDataUri("MinorCycles&Impact.jpg");
-  const divRemedies = imageToDataUri("Guidance&Conclusion.jpg");
+  const sadeSatiAsset = (fileName) => imageToDataUri(fileName);
+  const [
+    coverUri,
+    endUri,
+    divOverview,
+    divPhases,
+    divImpact,
+    divRemedies,
+  ] = await Promise.all([
+    sadeSatiAsset("sadhesatistartingpage.jpg"),
+    sadeSatiAsset("sadhesatiendingpage.jpg"),
+    sadeSatiAsset("UnderstandingSadeSati.jpg"),
+    sadeSatiAsset("TheThreePhases.jpg"),
+    sadeSatiAsset("MinorCycles&Impact.jpg"),
+    sadeSatiAsset("Guidance&Conclusion.jpg"),
+  ]);
 
   const formattedDob = formatDate(dateOfbirth);
   const formattedReportDate = formatDate(new Date());
@@ -2202,7 +2212,7 @@ async function generateSadeSatiReportPDF(reportData, userRequest) {
   let browser = null;
   try {
     console.log("[Sade Sati PDF Service] Compiling HTML template...");
-    const htmlContent = generateSadeSatiHtmlTemplate(reportData, userRequest);
+    const htmlContent = await generateSadeSatiHtmlTemplate(reportData, userRequest);
 
     try {
       const tempDir = path.resolve(__dirname, "../temp");

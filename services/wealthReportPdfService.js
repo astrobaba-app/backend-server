@@ -1,6 +1,10 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
+const {
+  buildSharedReportClosingPage,
+  buildSharedReportClosingStyles,
+} = require("./reportClosingPageService");
 
 const IMAGES_DIR = path.resolve(__dirname, "../images");
 
@@ -122,6 +126,170 @@ const formatDegree = (decimalDegree) => {
 const safeString = (val, fallback = "--") => {
   if (val === undefined || val === null) return fallback;
   return typeof val === "string" ? val : JSON.stringify(val);
+};
+
+const compactText = (value, maxChars = 360, maxSentences = 2) => {
+  const text = safeString(value, "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+
+  const sentences = text.match(/[^.!?]+[.!?]+(?:\s|$)/g) || [];
+  const compact = sentences.length > 0
+    ? sentences.slice(0, maxSentences).join(" ").trim()
+    : text;
+
+  if (compact.length <= maxChars) return compact;
+
+  const clipped = compact.slice(0, maxChars).trim();
+  const lastSpace = clipped.lastIndexOf(" ");
+  return `${(lastSpace > 180 ? clipped.slice(0, lastSpace) : clipped).trim()}...`;
+};
+
+const isPlainObject = (value) => {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+};
+
+const hasRenderableValue = (value) => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (isPlainObject(value)) return Object.keys(value).length > 0;
+  return true;
+};
+
+const mergeMeaningfulValues = (target, source) => {
+  if (!isPlainObject(source)) return target;
+
+  Object.entries(source).forEach(([key, value]) => {
+    if (!hasRenderableValue(value)) return;
+
+    if (isPlainObject(value) && isPlainObject(target[key])) {
+      mergeMeaningfulValues(target[key], value);
+      return;
+    }
+
+    if (!hasRenderableValue(target[key])) {
+      target[key] = value;
+    }
+  });
+
+  return target;
+};
+
+const findNestedValueByKey = (source, key, seen = new Set()) => {
+  if (!isPlainObject(source) && !Array.isArray(source)) return undefined;
+  if (seen.has(source)) return undefined;
+  seen.add(source);
+
+  if (isPlainObject(source) && Object.prototype.hasOwnProperty.call(source, key)) {
+    const directValue = source[key];
+    if (hasRenderableValue(directValue)) return directValue;
+  }
+
+  const values = Array.isArray(source) ? source : Object.values(source);
+  for (const value of values) {
+    const found = findNestedValueByKey(value, key, seen);
+    if (hasRenderableValue(found)) return found;
+  }
+
+  return undefined;
+};
+
+const getPredictionCandidates = (reportData) => {
+  const candidates = [
+    reportData?.predictions,
+    reportData?.llmResponse,
+    reportData?.reportData?.predictions,
+    reportData?.reportData,
+    reportData?.data?.predictions,
+    reportData?.data,
+    reportData,
+  ];
+
+  return candidates.filter(isPlainObject);
+};
+
+const normalizeWealthPredictions = (reportData) => {
+  const expectedSections = [
+    "tableOfContents",
+    "executiveSummary",
+    "wealthBlueprint",
+    "divisionalAnalysis",
+    "moneyDirection",
+    "howYouEarnBest",
+    "incomeStability",
+    "wealthDashboard",
+    "housePlanetsSummary",
+    "blocksRemedies",
+    "wealthSpeed",
+    "riskLossDebts",
+    "propertyAssets",
+    "finalVerdict",
+  ];
+
+  const candidates = getPredictionCandidates(reportData);
+  const normalized = {};
+
+  candidates.forEach((candidate) => {
+    expectedSections.forEach((section) => {
+      if (isPlainObject(candidate[section])) {
+        normalized[section] = mergeMeaningfulValues(normalized[section] || {}, candidate[section]);
+      }
+    });
+  });
+
+  expectedSections.forEach((section) => {
+    if (hasRenderableValue(normalized[section])) return;
+
+    for (const candidate of candidates) {
+      const nestedSection = findNestedValueByKey(candidate, section);
+      if (isPlainObject(nestedSection)) {
+        normalized[section] = mergeMeaningfulValues(normalized[section] || {}, nestedSection);
+        break;
+      }
+    }
+  });
+
+  return normalized;
+};
+
+const logWealthPredictionCoverage = (pred) => {
+  const requiredFieldsBySection = {
+    wealthBlueprint: ["traits", "weakPoints", "archetype"],
+    divisionalAnalysis: ["d1Meaning", "d2Meaning", "d4Meaning", "ashtakavargaMeaning"],
+    moneyDirection: ["moneyStyle", "dashaEffect", "whatHelps", "whatSlows", "verdict"],
+    howYouEarnBest: ["role", "industry", "workStyle", "skillsToMonetize", "workEnvironments", "whatToAvoid"],
+    incomeStability: ["pattern", "preference", "gainsArrival", "fluctuations", "managementAdvice"],
+    wealthDashboard: ["earningPower", "savingPower", "riskLevel", "propertyPotential", "longTermPotential", "oneLineSummary"],
+    housePlanetsSummary: ["keyPlanetSummary", "strongestHouse", "weakHouse", "liftingFactors", "blockingFactors"],
+    blocksRemedies: ["problemRemedies", "mantras", "behaviorCorrections", "dailyHabits", "spiritualRemedies", "practicalRemedies"],
+    wealthSpeed: ["speedVerdict", "timelineCompound", "sourceStyle", "baseSpeed", "currentMomentum", "compoundingAbility", "accelerationWindow", "growthAdvice"],
+    riskLossDebts: ["borrowingTendency", "speculativeRisk", "reserveAdvice", "investmentStyle", "disciplineChecklist", "debtToleranceTable"],
+    propertyAssets: ["propertyPotential", "holdingStyle", "roadmap", "assetPreference", "holdingAdvice", "bestAssetType"],
+    finalVerdict: ["tier", "yogaStrengths", "realisticCeiling", "bestPeriods", "topRecommendations", "plan30Days", "plan1Year", "oneLineVerdict"],
+  };
+
+  const missingSections = [];
+  const missingFields = {};
+
+  Object.entries(requiredFieldsBySection).forEach(([section, fields]) => {
+    const sectionData = pred[section];
+    if (!isPlainObject(sectionData)) {
+      missingSections.push(section);
+      missingFields[section] = fields;
+      return;
+    }
+
+    const missing = fields.filter((field) => !hasRenderableValue(sectionData[field]));
+    if (missing.length > 0) {
+      missingFields[section] = missing;
+    }
+  });
+
+  console.log("[Wealth PDF Service] prediction coverage", {
+    availableSections: Object.keys(pred).filter((key) => hasRenderableValue(pred[key])),
+    missingSections,
+    missingFields,
+  });
 };
 
 const formatDate = (dateStr) => {
@@ -294,24 +462,44 @@ const renderSavChartSvg = (ashtakavargaData, fallbackAscSignName, chartTitle) =>
 /**
  * Generate Wealth Report HTML content
  */
-function generateWealthHtmlTemplate(reportData, userRequest) {
+async function generateWealthHtmlTemplate(reportData, userRequest) {
   const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
-  const pred = reportData.predictions || {};
+  const pred = normalizeWealthPredictions(reportData);
   const astro = reportData.astrologyBasics || {};
   const charts = reportData.horoscopeCharts || {};
+  logWealthPredictionCoverage(pred);
 
   // Load Cover & Dividers Base64 Data URIs
-  const coverUri = imageToDataUri("frontpage_wealth.jpg");
-  const endUri = imageToDataUri("daily_end.jpg");
-
-  const divMoney = imageToDataUri("YOURMONEYDIRECTION.jpg");
-  const divEarn = imageToDataUri("HOWYOUEARNBEST.jpg");
-  const divStability = imageToDataUri("INCOMESTABILITYVSVOLATILITY.jpg");
-  const divRemedies = imageToDataUri("MajorFinancialBlocksAndRemedies.jpg");
-  const divSpeed = imageToDataUri("wealthbuildingspeed.jpg");
-  const divRisk = imageToDataUri("RiskLOSSAndDebts.jpg");
-  const divProperty = imageToDataUri("PropertyAndLongTermAssets.jpg");
-  const divRich = imageToDataUri("HowRichCanYouGet.jpg");
+  const wealthAsset = (fileName) => imageToDataUri(fileName);
+  const loadSharedClosingAssets = () => ({
+    logo: imageToDataUri("logo.png"),
+    qrCode: imageToDataUri("QR.png"),
+    googlePlayBadge: imageToDataUri("googleplay.png"),
+    appStoreBadge: imageToDataUri("appstore.png"),
+  });
+  const [
+    coverUri,
+    divMoney,
+    divEarn,
+    divStability,
+    divRemedies,
+    divSpeed,
+    divRisk,
+    divProperty,
+    divRich,
+    closingAssets,
+  ] = [
+    wealthAsset("frontpage_wealth.jpg"),
+    wealthAsset("YOURMONEYDIRECTION.jpg"),
+    wealthAsset("HOWYOUEARNBEST.jpg"),
+    wealthAsset("INCOMESTABILITYVSVOLATILITY.jpg"),
+    wealthAsset("MajorFinancialBlocksAndRemedies.jpg"),
+    wealthAsset("wealthbuildingspeed.jpg"),
+    wealthAsset("RiskLOSSAndDebts.jpg"),
+    wealthAsset("PropertyAndLongTermAssets.jpg"),
+    wealthAsset("HowRichCanYouGet.jpg"),
+    loadSharedClosingAssets(),
+  ];
 
   const formattedDob = formatDate(dateOfbirth);
   const formattedReportDate = formatDate(new Date());
@@ -399,7 +587,6 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     
     /* Cover overlays */
     .bg-cover { background-image: url('${coverUri}'); }
-    .bg-end { background-image: url('${endUri}'); }
     
     .bg-div-money { background-image: url('${divMoney}'); }
     .bg-div-earn { background-image: url('${divEarn}'); }
@@ -409,6 +596,8 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     .bg-div-risk { background-image: url('${divRisk}'); }
     .bg-div-property { background-image: url('${divProperty}'); }
     .bg-div-rich { background-image: url('${divRich}'); }
+
+    ${buildSharedReportClosingStyles()}
 
     /* Standard Header styles */
     .header {
@@ -615,6 +804,22 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     .premium-table {
       width: 100%;
       border-collapse: collapse;
+    }
+
+    .compact-report-table td {
+      font-size: 9.4pt;
+      line-height: 1.32;
+      padding: 2.2mm 3mm;
+      vertical-align: top;
+    }
+
+    .compact-report-table th {
+      font-size: 9.5pt;
+      padding: 2.3mm 3mm;
+    }
+
+    .compact-report-table td:first-child {
+      width: 27%;
     }
     
     .premium-table th {
@@ -1629,7 +1834,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     </div>
     <div style="flex:1;">
       <div class="table-wrap">
-        <table class="premium-table">
+        <table class="premium-table compact-report-table">
           <thead>
             <tr>
               <th>Profile Metric</th>
@@ -1639,19 +1844,19 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
           <tbody>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Primary Income Driver</td>
-              <td>${escapeHtml(pred.incomeStability?.primaryIncomeDriver)}</td>
+              <td>${escapeHtml(compactText(pred.incomeStability?.primaryIncomeDriver))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Growth Pattern</td>
-              <td>${escapeHtml(pred.incomeStability?.growthPattern)}</td>
+              <td>${escapeHtml(compactText(pred.incomeStability?.growthPattern))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Savings Style</td>
-              <td>${escapeHtml(pred.incomeStability?.savingsStyle)}</td>
+              <td>${escapeHtml(compactText(pred.incomeStability?.savingsStyle))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Risk Style</td>
-              <td>${escapeHtml(pred.incomeStability?.riskStyle)}</td>
+              <td>${escapeHtml(compactText(pred.incomeStability?.riskStyle))}</td>
             </tr>
           </tbody>
         </table>
@@ -1659,12 +1864,12 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
       
       <div class="narrative-block" style="margin-top:6mm;">
         <div class="narrative-label">Prudent Fluctuations &amp; Management Advice</div>
-        <div class="narrative-text">${escapeHtml(pred.incomeStability?.fluctuations)}</div>
+        <div class="narrative-text">${escapeHtml(compactText(pred.incomeStability?.fluctuations, 460, 2))}</div>
       </div>
       <div class="info-card">
         <div class="info-card-title">Money Management Box</div>
-        <div style="font-size:11.5pt; line-height:1.65; color:var(--text-main); font-style:italic;">
-          ${escapeHtml(pred.incomeStability?.managementAdvice)}
+        <div style="font-size:11.5pt; line-height:1.45; color:var(--text-main); font-style:italic;">
+          ${escapeHtml(compactText(pred.incomeStability?.managementAdvice, 420, 2))}
         </div>
       </div>
     </div>
@@ -1882,7 +2087,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     </div>
     <div style="flex:1;">
       <div class="table-wrap">
-        <table class="premium-table">
+        <table class="premium-table compact-report-table">
           <thead>
             <tr>
               <th>Velocity Dimension</th>
@@ -1892,19 +2097,19 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
           <tbody>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Base Speed</td>
-              <td>${escapeHtml(pred.wealthSpeed?.baseSpeed)}</td>
+              <td>${escapeHtml(compactText(pred.wealthSpeed?.baseSpeed))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Current Momentum</td>
-              <td>${escapeHtml(pred.wealthSpeed?.currentMomentum)}</td>
+              <td>${escapeHtml(compactText(pred.wealthSpeed?.currentMomentum))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Compounding Ability</td>
-              <td>${escapeHtml(pred.wealthSpeed?.compoundingAbility)}</td>
+              <td>${escapeHtml(compactText(pred.wealthSpeed?.compoundingAbility))}</td>
             </tr>
             <tr>
               <td style="font-weight:700; color:var(--dark-blue);">Acceleration Window</td>
-              <td style="font-weight:700; color:var(--gold-dark);">${escapeHtml(pred.wealthSpeed?.accelerationWindow)}</td>
+              <td style="font-weight:700; color:var(--gold-dark);">${escapeHtml(compactText(pred.wealthSpeed?.accelerationWindow))}</td>
             </tr>
           </tbody>
         </table>
@@ -1912,7 +2117,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
       
       <div class="narrative-block" style="margin-top:6mm;">
         <div class="narrative-label">Practical Growth Advice</div>
-        <div class="narrative-text">${escapeHtml(pred.wealthSpeed?.growthAdvice)}</div>
+        <div class="narrative-text">${escapeHtml(compactText(pred.wealthSpeed?.growthAdvice, 460, 2))}</div>
       </div>
     </div>
     <div class="footer">
@@ -2235,8 +2440,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     </div>
   </div>
 
-  <!-- PAGE 52: END CLOSING COVER -->
-  <div class="img-page-bg bg-end"></div>
+  ${buildSharedReportClosingPage({ ...closingAssets, extraClass: "wealth-shared-closing" })}
 
 </body>
 </html>`;
@@ -2247,9 +2451,10 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
  */
 async function generateWealthReportPDF(reportData, userRequest) {
   let browser = null;
+  let htmlDumpPath = null;
   try {
     console.log("[Wealth PDF Service] Compiling HTML template...");
-    const htmlContent = generateWealthHtmlTemplate(reportData, userRequest);
+    const htmlContent = await generateWealthHtmlTemplate(reportData, userRequest);
 
     try {
       const tempDir = path.resolve(__dirname, "../temp");
@@ -2257,7 +2462,8 @@ async function generateWealthReportPDF(reportData, userRequest) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
       const htmlFileName = `wealth_report_${Date.now()}.html`;
-      fs.writeFileSync(path.join(tempDir, htmlFileName), htmlContent, "utf8");
+      htmlDumpPath = path.join(tempDir, htmlFileName);
+      fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
       console.log(`[Wealth PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
     } catch (dumpErr) {
       console.warn("[Wealth PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
@@ -2273,6 +2479,14 @@ async function generateWealthReportPDF(reportData, userRequest) {
       waitUntil: "load",
       timeout: 120000
     });
+    if (htmlDumpPath) {
+      try {
+        fs.unlinkSync(htmlDumpPath);
+        console.log("[Wealth PDF Service] Deleted temp HTML dump after page load");
+      } catch (cleanupErr) {
+        console.warn("[Wealth PDF Service] Failed to delete temp HTML dump (safe to ignore):", cleanupErr.message);
+      }
+    }
 
     console.log("[Wealth PDF Service] Printing to PDF...");
     const pdfBuffer = await page.pdf({

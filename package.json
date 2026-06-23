@@ -6,7 +6,10 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "verify:chat-schema": "node scripts/verifyChatSchema.js",
-    "install:chrome": "npx puppeteer browsers install chrome"
+    "install:chrome": "npx puppeteer browsers install chrome",
+    "report:llm-worker": "node scripts/runReportLlmWorker.js",
+    "report:pdf-worker": "node scripts/runReportPdfWorker.js",
+    "report:worker-scheduler": "node scripts/scheduleReportWorkers.js"
   },
   "keywords": [],
   "author": "",

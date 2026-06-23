@@ -2,7 +2,12 @@ const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer");
 const axios = require("axios");
+const {
+  buildSharedReportClosingPage,
+  buildSharedReportClosingStyles,
+} = require("./reportClosingPageService");
 
+const BACKEND_REPORT_IMAGES = path.resolve(__dirname, "../images");
 const FRONTEND_PUBLIC_IMAGES = path.resolve(__dirname, "../../Frontend-server/public/images");
 
 const getSystemChromePath = () => {
@@ -51,9 +56,22 @@ const stripMarkdown = (value) =>
 
 const imageToDataUri = (fileName) => {
   try {
-    const fullPath = path.join(FRONTEND_PUBLIC_IMAGES, fileName);
+    const requestedPath = path.join(BACKEND_REPORT_IMAGES, fileName);
+    const parsed = path.parse(fileName);
+    const candidates = [
+      requestedPath,
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.png`),
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.jpg`),
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.jpeg`),
+      path.join(FRONTEND_PUBLIC_IMAGES, fileName),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.png`),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.jpg`),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.jpeg`),
+    ];
+    const fullPath = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!fullPath) return "";
     const buffer = fs.readFileSync(fullPath);
-    const ext = path.extname(fileName).toLowerCase();
+    const ext = path.extname(fullPath).toLowerCase();
     const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
     return `data:${mime};base64,${buffer.toString("base64")}`;
   } catch {
@@ -66,9 +84,12 @@ const remoteImageToDataUri = async (url) => {
   if (!source || source.startsWith("data:image/")) return source;
 
   try {
-    const response = await axios.get(source, {
+    const optimizedSource = source.includes("res.cloudinary.com") && source.includes("/image/upload/")
+      ? source.replace("/image/upload/", "/image/upload/f_jpg,q_auto:good,w_1200,c_limit/")
+      : source;
+    const response = await axios.get(optimizedSource, {
       responseType: "arraybuffer",
-      timeout: 15000,
+      timeout: 30000,
       maxContentLength: 12 * 1024 * 1024,
       maxBodyLength: 12 * 1024 * 1024,
     });
@@ -250,11 +271,11 @@ const featureLineSummary = (value, fallback) => {
 
 const normalizeLinePlates = (structuredInsights, features) => {
   const fallback = [
-    ["life_line", "Life Line", "life-line.png", "The line of vitality, recovery, and major transitions."],
-    ["love_line", "Love / Heart Line", "love-line.png", "The line of emotional rhythm, attachment, and partnership."],
-    ["wisdom_line", "Wisdom / Head Line", "wisdom-line.png", "The line of thought, judgment, and decision-making."],
-    ["fate_line", "Fate / Career Line", "fate-line.png", "The line of work direction, responsibility, and ambition."],
-    ["summary_line", "Life Direction Summary", "summary-line.png", "A synthesis of the strongest visible palm themes."],
+    ["life_line", "Life Line", "life-line.jpeg", "The line of vitality, recovery, and major transitions."],
+    ["love_line", "Love / Heart Line", "love-line.jpeg", "The line of emotional rhythm, attachment, and partnership."],
+    ["wisdom_line", "Wisdom / Head Line", "wisdom-line.jpeg", "The line of thought, judgment, and decision-making."],
+    ["fate_line", "Fate / Career Line", "fate-line.jpeg", "The line of work direction, responsibility, and ambition."],
+    ["summary_line", "Life Direction Summary", "summary-line.jpeg", "A synthesis of the strongest visible palm themes."],
   ];
   const source = structuredInsights?.line_interpretations || {};
 
@@ -344,12 +365,25 @@ const tableMarkup = (rows) => {
   `;
 };
 
-const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNarrative, generatedAt }) => {
-  const coverImage = imageToDataUri("palmistry-report.png");
-  const grahoLogo = imageToDataUri("footer_logo.png");
-  const appQrCode = imageToDataUri("QR.png");
-  const googlePlayBadge = imageToDataUri("googleplay.png");
-  const appStoreBadge = imageToDataUri("appstore.png");
+const buildPalmReportHtml = async ({ palmImages, features, structuredInsights, finalNarrative, generatedAt }) => {
+  const [coverImage, closingAssets] = [
+    imageToDataUri("palmistry-report.jpeg"),
+    {
+      logo: imageToDataUri("logo.png"),
+      qrCode: imageToDataUri("QR.png"),
+      googlePlayBadge: imageToDataUri("googleplay.png"),
+      appStoreBadge: imageToDataUri("appstore.png"),
+    },
+  ];
+  const websiteUrl = "https://www.graho.in";
+  const playStoreUrl = "https://play.google.com/store/apps/details?id=com.graho";
+  const appStoreUrl = "https://apps.apple.com";
+  const policyLinks = [
+    { label: "Terms & Conditions", url: `${websiteUrl}/policies/terms_conditions` },
+    { label: "Privacy Policy", url: `${websiteUrl}/policies/privacy` },
+    { label: "Cancellation & Refund Policy", url: `${websiteUrl}/policies/cancellation_refund` },
+    { label: "Shipping Policy", url: `${websiteUrl}/policies/shipping_delivery` },
+  ];
   const sections = normalizeReportSections(structuredInsights, finalNarrative);
   const linePlates = normalizeLinePlates(structuredInsights, features);
   const profileRows = normalizeProfileRows(structuredInsights, features);
@@ -395,11 +429,33 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
             <div class="chapter-header">
               <span class="num">${chapterNumber}</span>
               <div>
-                ${section.opening ? `<p class="muted" style="margin-top:6px; font-size:12px;"><b>${escapeHtml(section.opening)}</b></p>` : ""}
+                ${section.opening ? `<p class="muted chapter-opening"><b>${escapeHtml(section.opening)}</b></p>` : ""}
               </div>
             </div>
             ${section.body ? `<p class="chapter-body">${escapeHtml(section.body)}</p>` : ""}
             ${tableMarkup(section.table)}
+            ${
+              !includeFinalGuidance && (asArray(section.success_codes).length || asArray(section.golden_warnings).length)
+                ? `<div class="codes-grid">
+                    ${
+                      asArray(section.success_codes).length
+                        ? `<div class="codes-box">
+                            <b>Success Codes</b>
+                            <ul>${listMarkup(section.success_codes.slice(0, 3))}</ul>
+                          </div>`
+                        : ""
+                    }
+                    ${
+                      asArray(section.golden_warnings).length
+                        ? `<div class="codes-box warn">
+                            <b>Golden Warnings</b>
+                            <ul>${listMarkup(section.golden_warnings.slice(0, 2))}</ul>
+                          </div>`
+                        : ""
+                    }
+                  </div>`
+                : ""
+            }
             ${
               includeFinalGuidance
                 ? `<div class="summary-page">
@@ -425,38 +481,10 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
     if (!line) return "";
 
     return `
-      <section class="page white">
-        <div class="page-content">
-          <div class="line-title-row">
-            <p class="kicker" style="margin:0;">Line Detail</p>
-            <div class="line-rule"></div>
-            <span class="line-star">&#10022;</span>
-            <div class="line-rule"></div>
-          </div>
-          <div class="line-header">
-            <div>
-              <h2 style="font-size:38px;">${escapeHtml(line.label)}</h2>
-              <p class="muted" style="margin-top:8px; font-size:15.8px; line-height:1.55;">${escapeHtml(line.summary)}</p>
-            </div>
-            <div class="line-header-mark">
-              ${line.image ? `<img src="${line.image}" alt="${escapeHtml(line.label)} sketch" />` : ""}
-            </div>
-          </div>
-          <div class="line-page" style="margin-top:10mm;">
-            <div class="line-visual">
-              ${line.image ? `<img src="${line.image}" alt="${escapeHtml(line.label)}" />` : ""}
-            </div>
-            <div>
-              <div class="line-observed">Observed Pattern</div>
-              <div class="line-copy-box">
-                <span class="quality">${escapeHtml(line.quality)}</span>
-                <p style="margin-top:16px;">${escapeHtml(buildLineNarrative(line))}</p>
-                <p style="margin-top:18px;">${escapeHtml(line.summary)}</p>
-              </div>
-            </div>
-          </div>
+      <section class="page image-only-page">
+        <div class="image-only-wrap line-image-only">
+          ${line.image ? `<img src="${line.image}" alt="${escapeHtml(line.label)}" />` : ""}
         </div>
-        <div class="footer"><span>${escapeHtml(line.label)}</span><span>${escapeHtml(chapterLabel)}</span></div>
       </section>`;
   };
 
@@ -923,16 +951,25 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
       line-height: 1.8;
     }
     .chapter-dense .chapter-body {
-      font-size: 10.8px;
-      line-height: 1.58;
+      font-size: 9.8px;
+      line-height: 1.43;
     }
     .chapter-dense .chapter-table {
       margin-top: 8px;
       font-size: 9.4px;
     }
     .chapter-very-dense .chapter-body {
-      font-size: 9.5px;
-      line-height: 1.42;
+      font-size: 8.8px;
+      line-height: 1.34;
+    }
+    .chapter-very-dense .codes-grid {
+      gap: 5px;
+      margin-top: 6px;
+    }
+    .chapter-very-dense .codes-box {
+      padding: 7px;
+      font-size: 7.7px;
+      line-height: 1.25;
     }
     .chapter-very-dense .chapter-table {
       margin-top: 6px;
@@ -1169,6 +1206,548 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
       letter-spacing: 1.8px;
       text-transform: uppercase;
     }
+
+    ${buildSharedReportClosingStyles()}
+
+    /* Final professional report skin: clean white pages, no ornamental frames. */
+    body {
+      background: #ffffff !important;
+      color: #111827;
+      font-size: 15px !important;
+    }
+    .page:not(.cover-page):not(.image-only-page):not(.uploaded-image-page),
+    .page.white {
+      background: #ffffff !important;
+      padding: 14mm 16mm 10mm;
+    }
+    .cover-page {
+      background: #fff9e8 !important;
+      padding: 0 !important;
+    }
+    .cover-full {
+      display: block;
+      height: 297mm;
+      object-fit: cover;
+      width: 210mm;
+    }
+    .page::before,
+    .page::after,
+    .cover-page::before,
+    .cover-page::after {
+      content: none !important;
+      display: none !important;
+    }
+    .palm-photo-wrap,
+    .line-visual,
+    .line-detail,
+    .line-copy-box {
+      border: 0 !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+    .toc-ornament,
+    .line-title-row,
+    .closing-rule {
+      display: none !important;
+    }
+    h1,
+    h2,
+    h3 {
+      color: #14213d;
+    }
+    h2 {
+      font-size: 34px !important;
+      line-height: 1.18 !important;
+    }
+    h3 {
+      font-size: 20px !important;
+      line-height: 1.25 !important;
+    }
+    .kicker {
+      color: #b7791f !important;
+      font-size: 11px !important;
+      letter-spacing: 1.8px;
+    }
+    .muted,
+    .footer {
+      color: #6b7280;
+      font-size: 12px !important;
+    }
+    .footer {
+      border-top: 1px solid #e5e7eb;
+      padding-top: 4mm;
+    }
+    .num {
+      background: #ffffff !important;
+      border: 1px solid #d1d5db;
+      box-shadow: none !important;
+      color: #111827 !important;
+    }
+    .quality,
+    .line-observed,
+    .toc-group-title {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      color: #9a5f08 !important;
+    }
+    .toc-card,
+    .line-card,
+    .note-card,
+    .policy-panel {
+      background: #fffaf0 !important;
+      border: 0 !important;
+      box-shadow: none !important;
+    }
+    .toc-group-title {
+      font-size: 13px !important;
+      letter-spacing: 1.5px !important;
+    }
+    .toc-entry {
+      font-size: 14px !important;
+      line-height: 1.5 !important;
+      padding: 2.2mm 0 !important;
+    }
+    .toc-entry b {
+      font-size: 13px !important;
+    }
+    .toc-entry-list {
+      padding-top: 3mm !important;
+    }
+    .profile-card b {
+      font-size: 10.5px !important;
+    }
+    .profile-card span {
+      font-size: 11px !important;
+      line-height: 1.45 !important;
+    }
+    .chapter {
+      background:
+        linear-gradient(180deg, rgba(255, 251, 240, 0.98), rgba(255, 255, 255, 0.98)) !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      padding: 8mm 9mm 7mm;
+    }
+    .prose-page p {
+      font-size: 15.2px !important;
+      line-height: 1.9 !important;
+    }
+    .prose-lead {
+      font-size: 16px !important;
+      line-height: 1.78 !important;
+    }
+    .chapter-header .muted {
+      font-size: 14px !important;
+      line-height: 1.58 !important;
+    }
+    .chapter-body {
+      font-size: 16px !important;
+      line-height: 1.72 !important;
+    }
+    .chapter-dense .chapter-body {
+      font-size: 14px !important;
+      line-height: 1.58 !important;
+    }
+    .chapter-very-dense .chapter-body,
+    .chapter-with-guidance .chapter-body {
+      font-size: 12.4px !important;
+      line-height: 1.48 !important;
+    }
+    .chapter-table {
+      font-size: 12px !important;
+    }
+    .chapter-table {
+      border: 1px solid #e5e7eb !important;
+      border-collapse: collapse;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+    .chapter-table th {
+      background: #fff2cc !important;
+      color: #14213d !important;
+      font-size: 9.6px !important;
+      padding: 9px !important;
+    }
+    .chapter-table td {
+      background: #ffffff !important;
+      border-top: 1px solid #e5e7eb;
+      padding: 10px !important;
+    }
+    .codes-box {
+      background: #fff8e6 !important;
+      border: 0 !important;
+      padding: 6mm 7mm;
+      font-size: 12px !important;
+      line-height: 1.5 !important;
+    }
+    .codes-box b {
+      font-size: 10px !important;
+    }
+    .codes-box li {
+      margin-bottom: 5px !important;
+    }
+    .codes-box.warn {
+      background: #fff1f2 !important;
+    }
+    .image-only-page {
+      align-items: center;
+      justify-content: center;
+      padding: 0 !important;
+    }
+    .image-only-wrap {
+      align-items: center;
+      background: #ffffff;
+      display: flex;
+      height: 297mm;
+      justify-content: center;
+      width: 210mm;
+    }
+    .image-only-wrap img {
+      display: block;
+      max-height: 270mm;
+      max-width: 190mm;
+      object-fit: contain;
+    }
+    .line-image-only img {
+      mix-blend-mode: normal;
+    }
+    .uploaded-image-page {
+      background: #ffffff !important;
+      padding: 14mm 16mm 12mm !important;
+      justify-content: flex-start;
+    }
+    .uploaded-image-title {
+      color: #14213d;
+      font-size: 34px;
+      margin: 0 0 8mm;
+    }
+    .uploaded-image-wrap {
+      align-items: center;
+      background: #ffffff;
+      display: flex;
+      flex: 1;
+      justify-content: center;
+      width: 100%;
+    }
+    .uploaded-image-wrap img {
+      display: block;
+      max-height: 242mm;
+      max-width: 178mm;
+      object-fit: contain;
+    }
+    .closing-page {
+      height: 100%;
+      margin: 0 auto;
+      max-width: 178mm;
+      position: relative;
+      text-align: left;
+    }
+    .closing-page::before {
+      content: "Graho   Graho   Graho   Graho   Graho   Graho   Graho   Graho   Graho   Graho   Graho   Graho";
+      color: rgba(226, 178, 62, 0.09);
+      font-size: 13px;
+      left: 0;
+      letter-spacing: 20px;
+      line-height: 30mm;
+      position: absolute;
+      right: 0;
+      top: 7mm;
+      transform: rotate(-12deg);
+      white-space: normal;
+      z-index: 0;
+    }
+    .closing-inner {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      position: relative;
+      z-index: 1;
+    }
+    .closing-topbar {
+      align-items: center;
+      border-bottom: 1.5px solid #4f8f86;
+      display: flex;
+      justify-content: space-between;
+      padding-bottom: 3mm;
+    }
+    .closing-topbar .kicker {
+      margin: 0;
+    }
+    .closing-topbar span {
+      color: #6b7280;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .closing-brand {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      margin: 9mm 0 5mm;
+      text-align: center;
+    }
+    .closing-logo {
+      height: 20mm;
+      object-fit: contain;
+      width: 20mm;
+    }
+    .closing-tagline {
+      color: #6b4b11;
+      font-size: 13px;
+      font-style: italic;
+      margin-top: 2mm;
+    }
+    .closing-main-rule {
+      background: #b8894a;
+      height: 1px;
+      margin: 0 0 6mm;
+      width: 100%;
+    }
+    .closing-grid {
+      display: grid;
+      gap: 7mm;
+      grid-template-columns: 1fr 1fr;
+    }
+    .closing-card {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid #eadcc7;
+      border-radius: 8px;
+      padding: 6mm 8mm;
+    }
+    .policy-only-card {
+      margin: 0 auto;
+      max-width: 118mm;
+      width: 100%;
+    }
+    .closing-card h3 {
+      border-bottom: 1px solid #cda66e;
+      color: #257267;
+      font-size: 22px;
+      margin: 0 0 5mm;
+      padding-bottom: 2mm;
+    }
+    .closing-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .closing-list li {
+      color: #2f3a4a;
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 2.6mm;
+      padding-left: 4mm;
+      position: relative;
+    }
+    .closing-list li::before {
+      color: #b7791f;
+      content: "+";
+      font-weight: 700;
+      left: 0;
+      position: absolute;
+    }
+    .closing-list a {
+      color: #2f3a4a;
+      text-decoration: none;
+    }
+    .app-download-panel {
+      background: #eefaf8 !important;
+      border: 1px solid #b7d9d4 !important;
+      border-radius: 8px !important;
+      box-shadow: none !important;
+      display: grid;
+      gap: 7mm;
+      grid-template-columns: 31mm 1fr;
+      margin-top: 8mm;
+      padding: 6mm;
+    }
+    .app-qr {
+      background: #ffffff;
+      border: 1px solid #d7e8e4;
+      border-radius: 3px;
+      height: 31mm;
+      object-fit: contain;
+      padding: 2mm;
+      width: 31mm;
+    }
+    .app-download-panel h3 {
+      color: #257267;
+      font-size: 18px;
+      margin: 0;
+    }
+    .app-download-panel p {
+      color: #2f3a4a;
+      font-size: 12.5px;
+      line-height: 1.55;
+      margin-top: 2mm;
+    }
+    .store-badges {
+      display: flex;
+      gap: 3mm;
+      margin-top: 3mm;
+    }
+    .store-badges img {
+      height: 8.5mm;
+      object-fit: contain;
+      width: auto;
+    }
+    .closing-copyright {
+      border-top: 1.5px solid #4f8f86;
+      color: #6b4b11;
+      font-size: 11px;
+      letter-spacing: 0.2px;
+      margin-top: auto;
+      padding-top: 4mm;
+      position: static;
+      text-align: center;
+    }
+    .closing-url {
+      color: #b7791f;
+      display: block;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1.6px;
+      margin-top: 2mm;
+      text-transform: uppercase;
+    }
+
+    /* Typography consistency lock for every text-bearing report page. */
+    .page:not(.cover-page):not(.image-only-page) {
+      font-size: 16px !important;
+    }
+    .chapter-opening {
+      font-size: 16px !important;
+      line-height: 1.58 !important;
+      margin-top: 6px !important;
+    }
+    .chapter-body,
+    .chapter-dense .chapter-body,
+    .chapter-very-dense .chapter-body,
+    .chapter-with-guidance .chapter-body {
+      font-size: 16px !important;
+      line-height: 1.68 !important;
+      max-height: none !important;
+      overflow: visible !important;
+    }
+    .chapter-with-guidance .summary-page {
+      gap: 12px !important;
+      margin-top: 12px !important;
+    }
+    .chapter-with-guidance .codes-box,
+    .chapter-very-dense .codes-box,
+    .codes-box {
+      font-size: 13.5px !important;
+      line-height: 1.55 !important;
+      max-height: none !important;
+      overflow: visible !important;
+      padding: 6mm 7mm !important;
+    }
+    .chapter-with-guidance .codes-box b,
+    .chapter-very-dense .codes-box b,
+    .codes-box b {
+      font-size: 11.5px !important;
+    }
+    .chapter-table,
+    .chapter-dense .chapter-table,
+    .chapter-very-dense .chapter-table,
+    .chapter-with-guidance .chapter-table {
+      font-size: 12.5px !important;
+    }
+    .toc-entry,
+    .closing-list li,
+    .app-download-panel p,
+    .footer,
+    .muted {
+      font-size: 14px !important;
+    }
+    .toc-page {
+      padding: 10mm 16mm 8mm !important;
+    }
+    .toc-page .toc-book {
+      margin-top: 3mm !important;
+      max-width: 156mm !important;
+    }
+    .toc-page h2 {
+      font-size: 28px !important;
+      margin-top: 2mm !important;
+    }
+    .toc-page .kicker {
+      font-size: 9px !important;
+    }
+    .toc-page .toc-group {
+      margin-top: 3.2mm !important;
+      break-inside: auto !important;
+    }
+    .toc-page .toc-group-title {
+      font-size: 10.5px !important;
+      letter-spacing: 1.2px !important;
+      padding: 1.2mm 0 !important;
+    }
+    .toc-page .toc-entry-list {
+      padding: 1mm 2mm 0 3mm !important;
+    }
+    .toc-page .toc-entry {
+      font-size: 10.8px !important;
+      line-height: 1.22 !important;
+      padding: 1.05mm 0 !important;
+    }
+    .toc-page .toc-entry b {
+      font-size: 10.5px !important;
+    }
+    .toc-page .footer {
+      font-size: 8.8px !important;
+      margin-top: 4mm !important;
+      padding-top: 2mm !important;
+    }
+    .policy-only-card {
+      background: transparent !important;
+      border: 0 !important;
+      box-shadow: none !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+
+    /* Long narrative chapters must paginate instead of clipping or colliding. */
+    .page:not(.cover-page):not(.image-only-page):not(.uploaded-image-page) {
+      -webkit-box-decoration-break: clone;
+      box-decoration-break: clone;
+      height: auto !important;
+      min-height: 297mm !important;
+      overflow: visible !important;
+      padding-top: 18mm !important;
+      padding-bottom: 14mm !important;
+    }
+    .page:not(.cover-page):not(.image-only-page):not(.uploaded-image-page) .page-content {
+      padding-top: 0;
+    }
+    .chapter,
+    .chapter-dense,
+    .chapter-very-dense,
+    .chapter-with-guidance {
+      break-inside: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      page-break-inside: auto !important;
+    }
+    .chapter-table,
+    .codes-grid,
+    .codes-box,
+    .summary-page {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .shared-report-closing {
+      height: 297mm !important;
+      min-height: 297mm !important;
+      overflow: hidden !important;
+      padding-bottom: 18mm !important;
+    }
+    .shared-app-panel {
+      margin-bottom: 9mm !important;
+    }
+    .shared-closing-footer {
+      margin-top: 7mm !important;
+      position: relative !important;
+    }
   </style>
 </head>
 <body>
@@ -1210,7 +1789,7 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
     <div class="footer"><span>Disclaimer</span><span>graho.in</span></div>
   </section>
 
-  <section class="page white">
+  <section class="page white toc-page">
     <div class="page-content">
       <div class="toc-book">
         <div class="toc-ornament"><span>&#10022;</span></div>
@@ -1222,75 +1801,22 @@ const buildPalmReportHtml = ({ palmImages, features, structuredInsights, finalNa
     <div class="footer"><span>Table of Contents</span><span>graho.in</span></div>
   </section>
 
-  <section class="page">
-    <div class="page-content">
-      <div class="palm-source">
-        <div class="palm-profile-header">
-          <div>
-            <p class="kicker">Your Palm Reading Profile</p>
-            <h2>Uploaded palm used for analysis</h2>
-            <p class="muted" style="margin-top:8px;">
-              The interpretation remains connected to the visible structures in this image.
-            </p>
-          </div>
-          <div class="profile-grid">
-            ${profileRows
-              .slice(0, 4)
-              .map((row) => `<div class="profile-card"><b>${escapeHtml(row.label)}</b><span>${escapeHtml(row.value)}</span></div>`)
-              .join("")}
-          </div>
-        </div>
-        <div class="palm-photo-wrap">
-          ${palmImage ? `<img class="palm-photo" src="${escapeHtml(palmImage)}" alt="Uploaded palm image" />` : `<p class="muted">Uploaded palm image unavailable.</p>`}
-        </div>
-      </div>
+  <section class="page uploaded-image-page">
+    <h2 class="uploaded-image-title">User Uploaded Image</h2>
+    <div class="uploaded-image-wrap uploaded-palm-only">
+      ${palmImage ? `<img src="${escapeHtml(palmImage)}" alt="Uploaded palm image" />` : `<p class="muted">Uploaded palm image unavailable.</p>`}
     </div>
-    <div class="footer"><span>Uploaded Palm</span><span>graho.in</span></div>
   </section>
 
   ${publicationPages}
 
-  <section class="page white">
-    <div class="page-content closing-page">
-      <p class="kicker">About Graho</p>
-      <div class="closing-rule"></div>
-      ${grahoLogo ? `<img class="closing-logo" src="${grahoLogo}" alt="Graho" />` : `<h2>Graho</h2>`}
-      <p class="closing-tagline">Ancient guidance, thoughtfully presented.</p>
-      <div class="closing-rule"></div>
-
-      <div class="policy-panel">
-        <h3>Quick Links &amp; Policies</h3>
-        <ul class="policy-list">
-          <li>Terms &amp; Conditions</li>
-          <li>Privacy Policy</li>
-          <li>Cancellation &amp; Refund Policy</li>
-          <li>Shipping Policy</li>
-          <li>Disclaimer</li>
-          <li>Careers at Graho</li>
-        </ul>
-      </div>
-
-      <div class="app-download-panel">
-        ${appQrCode ? `<img class="app-qr" src="${appQrCode}" alt="Download Graho app QR code" />` : ""}
-        <div>
-          <h3>Download the Graho App</h3>
-          <p class="muted" style="margin-top:2mm; font-size:10.5px;">
-            Scan the QR code to access personalized daily guidance, astrology reports, and your Graho journey anytime.
-          </p>
-          <div class="store-badges">
-            ${googlePlayBadge ? `<img src="${googlePlayBadge}" alt="Get it on Google Play" />` : ""}
-            ${appStoreBadge ? `<img src="${appStoreBadge}" alt="Download on the App Store" />` : ""}
-          </div>
-        </div>
-      </div>
-
-      <div class="closing-copyright">
-        Copyright &copy; 2025-26 Graho. All Rights Reserved.
-        <span class="closing-url">www.graho.in</span>
-      </div>
-    </div>
-    <div class="footer"><span>About Graho</span><span>graho.in</span></div>
-  </section>
+  ${buildSharedReportClosingPage({
+    ...closingAssets,
+    websiteUrl,
+    playStoreUrl,
+    appStoreUrl,
+    policyLinks,
+  })}
 </body>
 </html>`;
 };
@@ -1299,7 +1825,7 @@ const generatePalmReportPDF = async ({ palmImages, features, structuredInsights,
   let browser = null;
   try {
     const embeddedPalmImages = await Promise.all(asArray(palmImages).map(remoteImageToDataUri));
-    const html = buildPalmReportHtml({
+    const html = await buildPalmReportHtml({
       palmImages: embeddedPalmImages,
       features,
       structuredInsights,
@@ -1308,7 +1834,7 @@ const generatePalmReportPDF = async ({ palmImages, features, structuredInsights,
     });
     browser = await puppeteer.launch(getPuppeteerLaunchOptions());
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.setContent(html, { waitUntil: "load", timeout: 120000 });
     await page.evaluate(async () => {
       const images = Array.from(document.images || []);
       await Promise.all(
@@ -1327,6 +1853,7 @@ const generatePalmReportPDF = async ({ palmImages, features, structuredInsights,
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
+      timeout: 120000,
       margin: { top: 0, right: 0, bottom: 0, left: 0 },
     });
     try {
@@ -1334,7 +1861,7 @@ const generatePalmReportPDF = async ({ palmImages, features, structuredInsights,
     } catch (closeError) {
       console.warn("[Palm PDF Service] Browser close warning (safe to ignore):", closeError.message);
     }
-    return pdfBuffer;
+    return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
   } catch (error) {
     if (browser) {
       try {

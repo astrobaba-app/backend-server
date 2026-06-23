@@ -69,6 +69,10 @@ const Notification = require("../model/notification/notification");
 // Review models
 const Review = require("../model/review/review");
 
+// Report generation models
+const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
+const ReportPurchase = require("../model/report/reportPurchase");
+
 // Store models
 const Cart = require("../model/store/cart");
 const Order = require("../model/store/order");
@@ -1193,6 +1197,53 @@ async function ensurePalmUploadColumns() {
   }
 }
 
+async function ensurePalmReportColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_reports");
+    const operations = [];
+
+    const addColumnIfMissing = (camelName, snakeName, definition) => {
+      if (!table[camelName] && !table[snakeName]) {
+        operations.push(queryInterface.addColumn("palm_reports", camelName, definition));
+      }
+    };
+
+    addColumnIfMissing("userRequestId", "user_request_id", {
+      type: DataTypes.UUID,
+      allowNull: true,
+    });
+    addColumnIfMissing("reportData", "report_data", {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: {},
+    });
+    addColumnIfMissing("pdfUrl", "pdf_url", {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfPublicId", "pdf_public_id", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfFileName", "pdf_file_name", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfUploadedAt", "pdf_uploaded_at", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_reports PDF and kundli columns exist");
+    }
+  } catch (error) {
+    console.log("palm_reports table will be created by sequelize.sync()");
+  }
+}
+
 async function ensurePalmOrderColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -1331,6 +1382,7 @@ const initDB = (callback) => {
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())
     .then(() => ensurePalmUploadColumns())
+    .then(() => ensurePalmReportColumns())
     .then(() => ensurePalmOrderColumns())
     .then(() => ensureSupportTicketActorColumns())
     .then(() => {

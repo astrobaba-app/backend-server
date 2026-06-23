@@ -9,12 +9,18 @@ const {
   generateDailyKundaliReport,
   getDailyKundaliHistory,
   deleteDailyKundaliReport,
+  regenerateDailyReportPdf,
+  downloadDailyReportPdf,
   generateYearlyKundaliReport,
   getYearlyKundaliHistory,
   deleteYearlyKundaliReport,
+  regenerateYearlyReportPdf,
+  downloadYearlyReportPdf,
   generateWealthKundaliReport,
   getWealthKundaliHistory,
   deleteWealthKundaliReport,
+  regenerateWealthReportPdf,
+  downloadWealthReportPdf,
   generateSadeSatiKundaliReport,
   getSadeSatiKundaliHistory,
   deleteSadeSatiKundaliReport,
@@ -39,6 +45,8 @@ router.post("/preview", checkForAuthenticationCookie(), previewKundliReportPDF);
 // Daily Kundali endpoints
 router.post("/daily-kundali", checkForAuthenticationCookie(), generateDailyKundaliReport);
 router.get("/daily-kundali", checkForAuthenticationCookie(), getDailyKundaliHistory);
+router.get("/daily-kundali/:id/pdf", checkForAuthenticationCookie(), downloadDailyReportPdf);
+router.post("/daily-kundali/:id/regenerate-pdf", checkForAuthenticationCookie(), regenerateDailyReportPdf);
 
 // Delete a daily report record
 router.delete("/daily-kundali/:id", checkForAuthenticationCookie(), deleteDailyKundaliReport);
@@ -46,6 +54,8 @@ router.delete("/daily-kundali/:id", checkForAuthenticationCookie(), deleteDailyK
 // Yearly Kundali endpoints
 router.post("/yearly-kundali", checkForAuthenticationCookie(), generateYearlyKundaliReport);
 router.get("/yearly-kundali", checkForAuthenticationCookie(), getYearlyKundaliHistory);
+router.get("/yearly-kundali/:id/pdf", checkForAuthenticationCookie(), downloadYearlyReportPdf);
+router.post("/yearly-kundali/:id/regenerate-pdf", checkForAuthenticationCookie(), regenerateYearlyReportPdf);
 
 // Delete a yearly report record
 router.delete("/yearly-kundali/:id", checkForAuthenticationCookie(), deleteYearlyKundaliReport);
@@ -53,6 +63,8 @@ router.delete("/yearly-kundali/:id", checkForAuthenticationCookie(), deleteYearl
 // Wealth Kundali endpoints
 router.post("/wealth-kundali", checkForAuthenticationCookie(), generateWealthKundaliReport);
 router.get("/wealth-kundali", checkForAuthenticationCookie(), getWealthKundaliHistory);
+router.get("/wealth-kundali/:id/pdf", checkForAuthenticationCookie(), downloadWealthReportPdf);
+router.post("/wealth-kundali/:id/regenerate-pdf", checkForAuthenticationCookie(), regenerateWealthReportPdf);
 
 // Delete a wealth report record
 router.delete("/wealth-kundali/:id", checkForAuthenticationCookie(), deleteWealthKundaliReport);

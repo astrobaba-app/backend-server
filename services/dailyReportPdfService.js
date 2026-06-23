@@ -1,7 +1,12 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
+const {
+  buildSharedReportClosingPage,
+  buildSharedReportClosingStyles,
+} = require("./reportClosingPageService");
 
+const BACKEND_REPORT_IMAGES = path.resolve(__dirname, "../images");
 const FRONTEND_PUBLIC_IMAGES = path.resolve(__dirname, "../../Frontend-server/public/images");
 
 const getSystemChromePath = () => {
@@ -40,13 +45,24 @@ const getPuppeteerLaunchOptions = () => {
 
 const imageToDataUri = (fileName) => {
   try {
-    const fullPath = path.join(FRONTEND_PUBLIC_IMAGES, fileName);
-    if (!fs.existsSync(fullPath)) {
-      console.warn(`[Daily PDF Service] Image not found at ${fullPath}`);
+    const parsed = path.parse(fileName);
+    const candidates = [
+      path.join(BACKEND_REPORT_IMAGES, fileName),
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.png`),
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.jpg`),
+      path.join(BACKEND_REPORT_IMAGES, `${parsed.name}.jpeg`),
+      path.join(FRONTEND_PUBLIC_IMAGES, fileName),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.png`),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.jpg`),
+      path.join(FRONTEND_PUBLIC_IMAGES, `${parsed.name}.jpeg`),
+    ];
+    const fullPath = candidates.find((candidate) => fs.existsSync(candidate));
+    if (!fullPath) {
+      console.warn(`[Daily PDF Service] Image not found for ${fileName}`);
       return "";
     }
     const buffer = fs.readFileSync(fullPath);
-    const ext = path.extname(fileName).toLowerCase();
+    const ext = path.extname(fullPath).toLowerCase();
     const mime = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
     return `data:${mime};base64,${buffer.toString("base64")}`;
   } catch (error) {
@@ -97,12 +113,13 @@ const formatMarkdownToHtml = (markdown) => {
 async function generateDailyReportPDF(reportData, userDetails) {
   let browser = null;
   try {
-    const htmlContent = generateDailyHTMLTemplate(reportData, userDetails);
+    const htmlContent = await generateDailyHTMLTemplate(reportData, userDetails);
     browser = await puppeteer.launch(getPuppeteerLaunchOptions());
     const page = await browser.newPage();
 
     await page.setContent(htmlContent, {
-      waitUntil: "networkidle0"
+      waitUntil: "domcontentloaded",
+      timeout: 45000,
     });
 
     const pdfBuffer = await page.pdf({
@@ -113,7 +130,8 @@ async function generateDailyReportPDF(reportData, userDetails) {
         right: 0,
         bottom: 0,
         left: 0
-      }
+      },
+      timeout: 120000,
     });
 
     try {
@@ -121,7 +139,7 @@ async function generateDailyReportPDF(reportData, userDetails) {
     } catch (closeError) {
       console.warn("[Daily PDF Service] Browser close warning (safe to ignore):", closeError.message);
     }
-    return pdfBuffer;
+    return Buffer.isBuffer(pdfBuffer) ? pdfBuffer : Buffer.from(pdfBuffer);
   } catch (error) {
     if (browser) {
       try {
@@ -135,10 +153,14 @@ async function generateDailyReportPDF(reportData, userDetails) {
   }
 }
 
-function generateDailyHTMLTemplate(reportData, userDetails) {
+async function generateDailyHTMLTemplate(reportData, userDetails) {
   const coverImg = imageToDataUri("dailyfirstpage.jpg");
-  const contentImg = imageToDataUri("daily-report.jpg");
-  const lastImg = imageToDataUri("dailylastpage.jpg");
+  const closingAssets = {
+    logo: imageToDataUri("logo.png"),
+    qrCode: imageToDataUri("QR.png"),
+    googlePlayBadge: imageToDataUri("googleplay.png"),
+    appStoreBadge: imageToDataUri("appstore.png"),
+  };
 
   const { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth } = userDetails;
 
@@ -173,14 +195,52 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     { title: "6. Smart Time Windows", page: 7 }
   ];
 
-  // Smart time windows table rows
   const timeWindows = forecast.smartTimeWindows || [];
-  const timeWindowsRows = timeWindows.map(w => `
+  const timeWindowChunks = [];
+  for (let index = 0; index < timeWindows.length; index += 6) {
+    timeWindowChunks.push(timeWindows.slice(index, index + 6));
+  }
+  if (!timeWindowChunks.length) {
+    timeWindowChunks.push([]);
+  }
+
+  const renderTimeWindowsRows = (rows) => rows.map(w => `
     <tr>
       <td>${escapeHtml(w.timeWindow || w.time)}</td>
       <td>${escapeHtml(w.favourableActivities || w.activities || "N/A")}</td>
       <td>${escapeHtml(w.areasForCaution || w.caution || "None")}</td>
     </tr>
+  `).join("");
+
+  const smartWindowPages = timeWindowChunks.map((chunk, index) => `
+    <div class="page page-content smart-window-page">
+      <div class="section-header">
+        <div class="section-title">Smart Time Windows${timeWindowChunks.length > 1 ? ` - ${index + 1}` : ""}</div>
+        <div class="section-subtitle">Astrological hourly breakdown & activities timing recommendations</div>
+      </div>
+      
+      <table class="windows-table">
+        <thead>
+          <tr>
+            <th style="width: 24%;">Time Window</th>
+            <th style="width: 39%;">Favourable Activities</th>
+            <th style="width: 37%;">Areas for Caution</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${chunk.length ? renderTimeWindowsRows(chunk) : `
+            <tr>
+              <td colspan="3">No smart time windows available for this report.</td>
+            </tr>
+          `}
+        </tbody>
+      </table>
+      
+      <div class="pdf-footer">
+        <span>Daily Kundli & Forecast Report</span>
+        <span>Page ${7 + index}</span>
+      </div>
+    </div>
   `).join("");
 
   return `<!DOCTYPE html>
@@ -189,8 +249,6 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
   <meta charset="UTF-8">
   <title>Daily Kundli & Forecast Report</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
-    
     @page {
       size: A4 portrait;
       margin: 0;
@@ -203,7 +261,7 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     }
     
     body {
-      font-family: 'Roboto', sans-serif;
+      font-family: Arial, Helvetica, sans-serif;
       color: #000000;
       background: #ffffff;
       -webkit-print-color-adjust: exact;
@@ -227,77 +285,35 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     /* Cover Page Styles */
     .page-cover {
       background-image: url('${coverImg}');
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      align-items: center;
-      padding-bottom: 35mm;
-      text-align: center;
-    }
-    
-    .cover-container {
-      background: rgba(0, 0, 0, 0.75);
-      border: 1px solid rgba(255, 217, 0, 0.3);
-      padding: 8mm 12mm;
-      border-radius: 6px;
-      width: 80%;
-      max-width: 170mm;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-    }
-    
-    .cover-title {
-      font-size: 26pt;
-      font-weight: 700;
-      color: #ffd900;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      margin-bottom: 3mm;
-    }
-    
-    .cover-subtitle {
-      font-size: 13pt;
-      color: #ffffff;
-      font-weight: 400;
-      margin-bottom: 6mm;
-      border-bottom: 1px solid rgba(255, 217, 0, 0.5);
-      padding-bottom: 3mm;
-    }
-    
-    .cover-meta {
-      font-size: 11pt;
-      color: #e0e0e0;
-      line-height: 1.6;
-    }
-    
-    .cover-meta strong {
-      color: #ffd900;
+      background-size: cover;
+      background-position: center;
     }
     
     /* Content Page Styles */
     .page-content {
-      background-image: url('${contentImg}');
-      padding: 32mm 22mm 25mm 22mm; /* Consistent margins to not overlap border design */
+      background: #ffffff !important;
+      padding: 28mm 22mm 24mm 22mm;
       display: flex;
       flex-direction: column;
     }
     
     .section-header {
-      border-bottom: 2px solid #000000;
-      padding-bottom: 2mm;
+      border-bottom: 2px solid #d9911f;
+      padding-bottom: 2.5mm;
       margin-bottom: 6mm;
     }
     
     .section-title {
       font-size: 18pt;
       font-weight: 700;
-      color: #000000;
+      color: #7a3e12;
       text-transform: uppercase;
       letter-spacing: 1px;
     }
     
     .section-subtitle {
       font-size: 10pt;
-      color: #555555;
+      color: #0f766e;
       margin-top: 1mm;
       font-weight: 500;
     }
@@ -346,18 +362,18 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     }
     
     .toc-title {
-      color: #000000;
+      color: #334155;
     }
     
     .toc-dots {
       flex-grow: 1;
-      border-bottom: 2px dotted #888888;
+      border-bottom: 2px dotted #d9911f;
       margin: 0 4mm;
     }
     
     .toc-page {
       font-weight: 700;
-      color: #000000;
+      color: #c87914;
     }
     
     /* Basic Kundli Details (Page 4) */
@@ -369,19 +385,19 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     }
     
     .premium-card {
-      background: rgba(255, 255, 255, 0.85);
-      border: 1px solid #cccccc;
+      background: linear-gradient(180deg, #fffaf0, #ffffff);
+      border: 1px solid #f0c66f;
       border-radius: 6px;
       padding: 4.5mm;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      box-shadow: 0 6px 18px rgba(122, 62, 18, 0.08);
     }
     
     .premium-card h3 {
       font-size: 11pt;
       font-weight: 700;
       text-transform: uppercase;
-      color: #000000;
-      border-bottom: 1px solid #000000;
+      color: #0f766e;
+      border-bottom: 1px solid #f0c66f;
       padding-bottom: 1.5mm;
       margin-bottom: 3mm;
       letter-spacing: 0.5px;
@@ -397,12 +413,12 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     
     .card-label {
       font-weight: 500;
-      color: #555555;
+      color: #64748b;
     }
     
     .card-value {
       font-weight: 700;
-      color: #000000;
+      color: #7a3e12;
       text-align: right;
     }
     
@@ -414,7 +430,7 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     .forecast-title {
       font-size: 12pt;
       font-weight: 700;
-      color: #000000;
+      color: #0f766e;
       text-transform: uppercase;
       margin-bottom: 2mm;
       display: flex;
@@ -426,15 +442,18 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
       content: "";
       flex-grow: 1;
       height: 1px;
-      background: #dddddd;
+      background: #f0c66f;
     }
     
     .forecast-body {
       font-size: 10pt;
       line-height: 1.55;
-      color: #111111;
+      color: #1f2937;
       margin-bottom: 4mm;
       text-align: justify;
+      background: #fffaf0;
+      border-left: 3px solid #d9911f;
+      padding: 3mm 4mm;
     }
     
     .bullet-list {
@@ -446,7 +465,7 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
       font-size: 9.5pt;
       line-height: 1.5;
       margin-bottom: 2mm;
-      color: #111111;
+      color: #1f2937;
     }
     
     .lucky-grid {
@@ -457,8 +476,8 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     }
     
     .lucky-item-card {
-      background: #fdfaf0;
-      border: 1px solid #ffd900;
+      background: linear-gradient(180deg, #fff8db, #ffffff);
+      border: 1px solid #f0c66f;
       border-radius: 4px;
       padding: 3mm;
       text-align: center;
@@ -468,14 +487,14 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
       font-size: 8pt;
       font-weight: 700;
       text-transform: uppercase;
-      color: #777777;
+      color: #0f766e;
       margin-bottom: 1mm;
     }
     
     .lucky-item-value {
       font-size: 10.5pt;
       font-weight: 700;
-      color: #000000;
+      color: #7a3e12;
     }
     
     /* Table styling (Page 7) */
@@ -483,36 +502,38 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
       width: 100%;
       border-collapse: collapse;
       margin-top: 2mm;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.02);
+      box-shadow: 0 8px 22px rgba(122, 62, 18, 0.08);
     }
     
     .windows-table th {
-      background-color: #000000;
+      background-color: #0f766e;
       color: #ffffff;
       font-weight: 700;
-      font-size: 9.5pt;
+      font-size: 8.8pt;
       text-transform: uppercase;
-      padding: 3mm 4mm;
+      padding: 2.6mm 3mm;
       text-align: left;
-      border: 1px solid #000000;
+      border: 1px solid #0f766e;
     }
     
     .windows-table td {
-      padding: 3mm 4mm;
-      font-size: 9pt;
-      line-height: 1.4;
-      border: 1px solid #dddddd;
-      color: #000000;
+      padding: 2.7mm 3mm;
+      font-size: 8.5pt;
+      line-height: 1.32;
+      border: 1px solid #ead8b5;
+      color: #263238;
+      vertical-align: top;
     }
     
     .windows-table tr:nth-child(even) {
-      background-color: rgba(0, 0, 0, 0.03);
+      background-color: #fffaf0;
+    }
+
+    .windows-table tr:nth-child(odd) {
+      background-color: #ffffff;
     }
     
-    /* Last Page Styles */
-    .page-last {
-      background-image: url('${lastImg}');
-    }
+    ${buildSharedReportClosingStyles()}
     
     /* Header/Footer Overlay details */
     .pdf-footer {
@@ -534,15 +555,6 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
 
   <!-- PAGE 1: Cover Page -->
   <div class="page page-cover">
-    <div class="cover-container">
-      <div class="cover-title">Daily Kundli & Forecast</div>
-      <div class="cover-subtitle">${escapeHtml(formattedReportDate)}</div>
-      <div class="cover-meta">
-        <p>Prepared exclusively for: <strong>${escapeHtml(fullName)}</strong></p>
-        <p>Birth Details: ${escapeHtml(formattedBirthDate)} &middot; ${escapeHtml(timeOfbirth)} &middot; ${escapeHtml(placeOfBirth)}</p>
-        <p style="margin-top: 3mm; font-size: 9pt; color: #aaaaaa;">Powered by Graho Astrology Engine</p>
-      </div>
-    </div>
   </div>
 
   <!-- PAGE 2: Description (Disclaimer) -->
@@ -764,35 +776,9 @@ function generateDailyHTMLTemplate(reportData, userDetails) {
     </div>
   </div>
 
-  <!-- PAGE 7: Smart Time Windows -->
-  <div class="page page-content">
-    <div class="section-header">
-      <div class="section-title">Smart Time Windows</div>
-      <div class="section-subtitle">Astrological hourly breakdown & activities timing recommendations</div>
-    </div>
-    
-    <table class="windows-table">
-      <thead>
-        <tr>
-          <th style="width: 25%;">Time Window</th>
-          <th style="width: 38%;">Favourable Activities</th>
-          <th style="width: 37%;">Areas for Caution</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${timeWindowsRows}
-      </tbody>
-    </table>
-    
-    <div class="pdf-footer">
-      <span>Daily Kundli & Forecast Report</span>
-      <span>Page 7</span>
-    </div>
-  </div>
+  ${smartWindowPages}
 
-  <!-- PAGE 8: Closing Page -->
-  <div class="page page-last">
-  </div>
+  ${buildSharedReportClosingPage(closingAssets)}
 
 </body>
 </html>

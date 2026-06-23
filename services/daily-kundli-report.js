@@ -367,7 +367,7 @@ EXPECTED JSON SCHEMA:
  * 9. generateDailyReport()
  * Calls OpenAI GPT to generate the daily report JSON.
  */
-async function generateDailyReport(payload, userRequest) {
+async function generateDailyReport(payload, userRequest, options = {}) {
   const prompt = buildPrompt(payload);
 
   const response = await createChatCompletion(
@@ -394,8 +394,20 @@ async function generateDailyReport(payload, userRequest) {
   }
 
   try {
-    console.log("[DailyKundliReport] GPT response received:", JSON.parse(content));
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    console.log("[DailyKundliReport] GPT response received:", parsed);
+    if (options.includeMeta) {
+      return {
+        data: parsed,
+        tokenUsage: {
+          inputTokens: response?.usage?.prompt_tokens || 0,
+          outputTokens: response?.usage?.completion_tokens || 0,
+          totalTokens: response?.usage?.total_tokens || 0,
+          raw: response?.usage || {},
+        },
+      };
+    }
+    return parsed;
   } catch (error) {
     console.error("[DailyKundliReport] Failed to parse GPT response:", content);
     throw new Error("Invalid JSON structure returned by GPT model");

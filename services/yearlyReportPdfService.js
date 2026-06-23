@@ -1,6 +1,10 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
+const {
+  buildSharedReportClosingPage,
+  buildSharedReportClosingStyles,
+} = require("./reportClosingPageService");
 
 const IMAGES_DIR = path.resolve(__dirname, "../images");
 
@@ -277,7 +281,7 @@ const HOUSE_SIGNIFICATIONS = {
 /**
  * Generate HTML template matching the reference yellow/dark blue theme
  */
-function generateHTMLTemplate(reportData, userRequest) {
+async function generateHTMLTemplate(reportData, userRequest) {
   const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
   const year = reportData.year || new Date().getFullYear();
 
@@ -287,17 +291,38 @@ function generateHTMLTemplate(reportData, userRequest) {
   const charts = reportData.horoscopeCharts || {};
 
   // Base64 Images
-  const coverImg = imageToDataUri("Yearly Report first page.jpg");
-  const endImg = imageToDataUri("daily_end.jpg");
-  const cosmicImg = imageToDataUri("cosmic.jpg");
-  const transitsImg = imageToDataUri("transits.jpg");
-  const auspiciousImg = imageToDataUri("calandar.jpg");
-  const careerImg = imageToDataUri("career.jpg");
-  const wealthImg = imageToDataUri("wealth.jpg");
-  const healthImg = imageToDataUri("health.jpg");
-  const relationImg = imageToDataUri("relationship.jpg");
-  const remediesImg = imageToDataUri("remedies.jpg");
-  const summaryImg = imageToDataUri("summary.jpg");
+  const yearlyAsset = (fileName) => imageToDataUri(fileName);
+  const loadSharedClosingAssets = () => ({
+    logo: imageToDataUri("logo.png"),
+    qrCode: imageToDataUri("QR.png"),
+    googlePlayBadge: imageToDataUri("googleplay.png"),
+    appStoreBadge: imageToDataUri("appstore.png"),
+  });
+  const [
+    coverImg,
+    cosmicImg,
+    transitsImg,
+    auspiciousImg,
+    careerImg,
+    wealthImg,
+    healthImg,
+    relationImg,
+    remediesImg,
+    summaryImg,
+    closingAssets,
+  ] = [
+    yearlyAsset("Yearly Report first page.jpg"),
+    yearlyAsset("cosmic.jpg"),
+    yearlyAsset("transits.jpg"),
+    yearlyAsset("calandar.jpg"),
+    yearlyAsset("career.jpg"),
+    yearlyAsset("wealth.jpg"),
+    yearlyAsset("health.jpg"),
+    yearlyAsset("relationship.jpg"),
+    yearlyAsset("remedies.jpg"),
+    yearlyAsset("summary.jpg"),
+    loadSharedClosingAssets(),
+  ];
 
   const MONTHS = [
     "January", "February", "March", "April", "May", "June",
@@ -305,10 +330,10 @@ function generateHTMLTemplate(reportData, userRequest) {
   ];
 
   // Pre-calculate month covers CSS rules to write them only once in the template
-  const monthCoversCssRules = MONTHS.map(monthName => {
-    const uri = imageToDataUri(`${monthName}.jpg`);
+  const monthCoversCssRules = (await Promise.all(MONTHS.map(async monthName => {
+    const uri = await yearlyAsset(`${monthName}.jpg`);
     return `.bg-month-${monthName.toLowerCase()} { background-image: url('${uri}'); }`;
-  }).join("\n");
+  }))).join("\n");
 
   // Generate monthly prediction pages (19 pages per month)
   let monthsHtml = "";
@@ -742,7 +767,6 @@ function generateHTMLTemplate(reportData, userRequest) {
     }
 
     .bg-cover { background-image: url('${coverImg}'); }
-    .bg-end { background-image: url('${endImg}'); }
     .bg-cosmic { background-image: url('${cosmicImg}'); }
     .bg-transits { background-image: url('${transitsImg}'); }
     .bg-auspicious { background-image: url('${auspiciousImg}'); }
@@ -753,6 +777,8 @@ function generateHTMLTemplate(reportData, userRequest) {
     .bg-remedies { background-image: url('${remediesImg}'); }
     .bg-summary { background-image: url('${summaryImg}'); }
     ${monthCoversCssRules}
+
+    ${buildSharedReportClosingStyles()}
     
     .header {
       margin-bottom: 5mm;
@@ -1740,8 +1766,7 @@ function generateHTMLTemplate(reportData, userRequest) {
   <!-- PAGES 16 to 243: 12 MONTHS PREDICTIONS -->
   ${monthsHtml}
 
-  <!-- PAGE 244: CLOSING END COVER -->
-  <div class="img-page-bg bg-end" style="page-break-after: avoid;"></div>
+  ${buildSharedReportClosingPage({ ...closingAssets, extraClass: "yearly-shared-closing" })}
 
 </body>
 </html>
@@ -1756,10 +1781,11 @@ function generateHTMLTemplate(reportData, userRequest) {
  */
 async function generateYearlyReportPDF(reportData, userRequest) {
   let browser = null;
+  let htmlDumpPath = null;
   console.log("[Yearly PDF Service] Beginning PDF generation...");
   try {
     console.log("[Yearly PDF Service] Building HTML template...");
-    const htmlContent = generateHTMLTemplate(reportData, userRequest);
+    const htmlContent = await generateHTMLTemplate(reportData, userRequest);
 
     // Dump HTML for debugging and reference (matches temp folder behavior)
     try {
@@ -1768,7 +1794,8 @@ async function generateYearlyReportPDF(reportData, userRequest) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
       const htmlFileName = `yearly_report_${Date.now()}.html`;
-      fs.writeFileSync(path.join(tempDir, htmlFileName), htmlContent, "utf8");
+      htmlDumpPath = path.join(tempDir, htmlFileName);
+      fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
       console.log(`[Yearly PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
     } catch (dumpErr) {
       console.warn("[Yearly PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
@@ -1784,6 +1811,14 @@ async function generateYearlyReportPDF(reportData, userRequest) {
       waitUntil: "load",
       timeout: 120000
     });
+    if (htmlDumpPath) {
+      try {
+        fs.unlinkSync(htmlDumpPath);
+        console.log("[Yearly PDF Service] Deleted temp HTML dump after page load");
+      } catch (cleanupErr) {
+        console.warn("[Yearly PDF Service] Failed to delete temp HTML dump (safe to ignore):", cleanupErr.message);
+      }
+    }
 
     console.log("[Yearly PDF Service] Printing to PDF...");
     const pdfBuffer = await page.pdf({

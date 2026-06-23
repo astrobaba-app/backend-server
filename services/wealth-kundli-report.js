@@ -563,8 +563,14 @@ async function generateWealthReportContent(reportInput, userId) {
   
   console.log(`[WealthReportService] Requesting OpenAI analysis for client: ${reportInput.client.name}...`);
   console.log(`[WealthReportService] Prompt length: ${prompt.length} characters`);
+  const requestStartedAt = Date.now();
+  const timeoutMs = Number(
+    process.env.WEALTH_REPORT_OPENAI_TIMEOUT_MS ||
+      process.env.REPORT_OPENAI_TIMEOUT_MS ||
+      240000
+  );
 
-  const response = await createChatCompletion(
+  const openAiRequest = createChatCompletion(
     {
       model: CHAT_MODEL,
       messages: [
@@ -583,6 +589,21 @@ async function generateWealthReportContent(reportInput, userId) {
     },
     { feature: "wealth_report_generation", userId }
   );
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Wealth report OpenAI request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  const response = await Promise.race([openAiRequest, timeout]);
+  console.log("[WealthReportService] OpenAI analysis completed", {
+    userId,
+    durationMs: Date.now() - requestStartedAt,
+    promptTokens: response?.usage?.prompt_tokens || null,
+    completionTokens: response?.usage?.completion_tokens || null,
+    totalTokens: response?.usage?.total_tokens || null,
+  });
 
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {

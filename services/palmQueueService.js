@@ -4,16 +4,21 @@ const PalmFeature = require("../model/palm/palmFeature");
 const PalmReport = require("../model/palm/palmReport");
 const PalmUpload = require("../model/palm/palmUpload");
 const PalmOrder = require("../model/palm/palmOrder");
+const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
 const { analyzePalm } = require("./palmReadingService");
+const { enqueueReportPdfRequest } = require("./reportGenerationQueueService");
+const {
+  loadUserRequestForPalm,
+  ensureKundliForUserRequest,
+  buildPalmKundliContext,
+} = require("./palmKundliContextService");
 
 const PALM_QUEUE_KEY = "queue:palm_reading";
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
-const WORKER_INTERVAL_MS = parsePositiveInt(process.env.PALM_QUEUE_WORKER_INTERVAL_MS, 5000);
 const REDIS_LIMIT_BACKOFF_MS = parsePositiveInt(process.env.PALM_QUEUE_REDIS_LIMIT_BACKOFF_MS, 15 * 60 * 1000);
-let workerStarted = false;
 let processing = false;
 let reconcileRunning = false;
 let redisBackoffUntil = 0;
@@ -27,18 +32,8 @@ const queueInfo = (event, payload = {}) => {
   console.log(`[PalmQueue][${event}]`, payload);
 };
 const QUALITY_REJECT_ERROR_TAG = "QUALITY_REJECTED_TERMINAL";
-
-const isPalmQueueWorkerEnabled = () => {
-  return String(process.env.PALM_QUEUE_WORKER_ENABLED || "true").toLowerCase() !== "false";
-};
-
-const isPalmQueueIdlePollingEnabled = () => {
-  return String(process.env.PALM_QUEUE_IDLE_POLL_ENABLED || "false").toLowerCase() === "true";
-};
-
-const isPalmQueueReconcileEnabled = () => {
-  return String(process.env.PALM_QUEUE_RECONCILE_ENABLED || "false").toLowerCase() === "true";
-};
+const PALM_REPORT_TYPE = "palmistry";
+const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_GENERATION_PRICE || 0);
 
 const shouldProcessFailedPalmJobs = () => {
   return String(process.env.PALM_QUEUE_PROCESS_FAILED_JOBS || "false").toLowerCase() === "true";
@@ -157,9 +152,6 @@ const enqueuePalmJob = async (jobId) => {
   }
   queueLog("enqueue", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
   queueInfo("ENQUEUE", { jobId, palmUploadId: job.palmUploadId, userId: job.userId, status: job.status });
-  if (isPalmQueueWorkerEnabled()) {
-    void processNextPalmJob();
-  }
 };
 
 const clearPalmJobFromQueue = async (jobId) => {
@@ -208,11 +200,12 @@ const cleanupPalmQueueStaleJobs = async () => {
   }
 };
 
-const processNextPalmJob = async () => {
-  if (!isPalmQueueWorkerEnabled() || isRedisBackoffActive()) return;
+const processNextPalmJob = async ({ chain = false } = {}) => {
+  if (isRedisBackoffActive()) return;
   if (processing) return;
   processing = true;
   let activeJob = null;
+  let reportGenerationRequest = null;
   let shouldCheckNext = false;
   const startedAt = Date.now();
   try {
@@ -292,6 +285,21 @@ const processNextPalmJob = async () => {
       return;
     }
 
+    const userRequestId = upload.metadata?.userRequestId || upload.metadata?.kundliUserRequestId || null;
+    let userRequest = null;
+    let kundli = null;
+    let kundliContext = null;
+    if (userRequestId) {
+      await job.update({
+        stage: "kundli_generation",
+        progress: 30,
+        stageMessage: "Preparing kundli context for your palm report.",
+      });
+      userRequest = await loadUserRequestForPalm({ userId: job.userId, userRequestId });
+      kundli = await ensureKundliForUserRequest(userRequest);
+      kundliContext = buildPalmKundliContext(kundli, userRequest);
+    }
+
     await job.update({
       stage: "vision_feature_extraction",
       progress: 45,
@@ -300,7 +308,7 @@ const processNextPalmJob = async () => {
     queueLog("stage_vision_started", { jobId: job.id, palmUploadId: upload.id });
 
     // Dedupe optimization: reuse completed report for same image hash.
-    if (upload.imageHash) {
+    if (upload.imageHash && !userRequestId) {
       const cachedUpload = await PalmUpload.findOne({
         where: { imageHash: upload.imageHash },
         include: [
@@ -341,7 +349,7 @@ const processNextPalmJob = async () => {
       job_id: job.id,
     };
 
-    const result = await analyzePalm({ imageUrls: upload.imageUrls, metadata });
+    const result = await analyzePalm({ imageUrls: upload.imageUrls, metadata, kundliContext });
     queueLog("analyze_done", {
       jobId: job.id,
       palmUploadId: upload.id,
@@ -360,6 +368,7 @@ const processNextPalmJob = async () => {
       features: result.extracted_features || {},
       confidenceScores: result.confidence_scores || {},
     });
+    const featureRecord = await PalmFeature.findOne({ where: { palmUploadId: upload.id } });
 
     await job.update({
       stage: "rules_and_interpretation",
@@ -367,73 +376,100 @@ const processNextPalmJob = async () => {
       stageMessage: "Applying palmistry rules and generating structured insights.",
     });
 
+    const reportData = {
+      personalDetails: kundliContext?.personalDetails || upload.metadata || {},
+      palm: result.structured_insights || {},
+      kundliContext: kundliContext || null,
+    };
+    const tokenUsage = result.token_usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, calls: [] };
+
+    reportGenerationRequest = await ReportGenerationRequest.create({
+      userId: job.userId,
+      userRequestId: userRequestId || null,
+      kundliId: kundli?.id || null,
+      reportType: PALM_REPORT_TYPE,
+      sourceType: "palm_upload",
+      sourceId: upload.id,
+      status: "llm_completed",
+      price: PALM_REPORT_PRICE,
+      currency: "INR",
+      inputTokens: Number(tokenUsage.inputTokens || 0),
+      outputTokens: Number(tokenUsage.outputTokens || 0),
+      totalTokens: Number(tokenUsage.totalTokens || 0),
+      tokenUsage,
+      requestPayload: {
+        imageCount: Array.isArray(upload.imageUrls) ? upload.imageUrls.length : 0,
+        metadata,
+        focusedKundliContext: kundliContext,
+      },
+      llmResponse: {
+        extractedFeatures: result.extracted_features || {},
+        structuredInsights: result.structured_insights || {},
+        finalNarrative: result.final_narrative_report || "",
+      },
+      reportData,
+      startedAt: activeJob?.startedAt || new Date(),
+      metadata: {
+        jobId: job.id,
+        palmUploadId: upload.id,
+        orderId: activeOrder?.id || null,
+      },
+    });
+
+    console.log("[PalmQueue][ReportRequest] LLM response saved", {
+      reportRequestId: reportGenerationRequest.id,
+      userId: job.userId,
+      userRequestId: userRequestId || null,
+      kundliId: kundli?.id || null,
+      price: PALM_REPORT_PRICE,
+      inputTokens: reportGenerationRequest.inputTokens,
+      outputTokens: reportGenerationRequest.outputTokens,
+      totalTokens: reportGenerationRequest.totalTokens,
+    });
+
     await PalmReport.upsert({
       palmUploadId: upload.id,
+      userRequestId: userRequestId || null,
       structuredInsights: result.structured_insights || {},
       finalNarrative: result.final_narrative_report || "Report not generated",
       confidenceScores: result.confidence_scores || {},
+      reportData: {
+        ...reportData,
+        reportGenerationRequestId: reportGenerationRequest.id,
+      },
+    });
+    const reportRecord = await PalmReport.findOne({ where: { palmUploadId: upload.id } });
+
+    await reportGenerationRequest.update({
+      status: "llm_completed",
+      sourceId: upload.id,
+      metadata: {
+        ...(reportGenerationRequest.metadata || {}),
+        reportId: reportRecord?.id || null,
+        pdfGeneration: "pending",
+        processingStatus: "pending_pdf",
+      },
+    });
+    await enqueueReportPdfRequest({
+      reportRequest: reportGenerationRequest,
+      sourceId: upload.id,
     });
 
     await job.update({
-      status: "completed",
-      stage: "completed",
-      progress: 100,
-      stageMessage: "Your premium palm report is ready.",
-      completedAt: new Date(),
+      status: "processing",
+      stage: "pdf_queued",
+      progress: 88,
+      stageMessage: "Palm analysis is complete. Your PDF report is queued for generation.",
     });
-    const paidOrder = await PalmOrder.findOne({
-      where: { userId: job.userId, palmUploadId: job.palmUploadId, status: "paid" },
-    });
-    if (paidOrder) {
-      const retrySourceBeforeSuccess = paidOrder.retrySourceOrderId
-        ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId)
-        : paidOrder;
-      if (retrySourceBeforeSuccess && Number(retrySourceBeforeSuccess.maxRetries ?? 0) > 0) {
-        const total = Number(retrySourceBeforeSuccess.maxRetries ?? 3);
-        await retrySourceBeforeSuccess.update({
-          retriesUsed: total,
-          retryExhaustedAt: new Date(),
-          lastFailureReason: null,
-          status: "paid",
-        });
-      }
-      await paidOrder.update({
-        lastFailureReason: null,
-        retryExhaustedAt: null,
-        status: "paid",
-      });
-      if (paidOrder.retrySourceOrderId) {
-        const sourceOrder = await PalmOrder.findByPk(paidOrder.retrySourceOrderId);
-        if (sourceOrder) {
-          const sourceMax = Number(sourceOrder.maxRetries ?? 3);
-          await sourceOrder.update({
-            retriesUsed: sourceMax,
-            retryExhaustedAt: new Date(),
-            lastFailureReason: null,
-          });
-          queueInfo("RETRY_SOURCE_CONSUMED_ON_SUCCESS", {
-            sourceOrderId: sourceOrder.id,
-            jobId: job.id,
-            before: getRetrySnapshotForOrder(retrySourceBeforeSuccess),
-            after: getRetrySnapshotForOrder(sourceOrder),
-          });
-        }
-      }
-      queueInfo("RETRY_STATUS_AFTER_SUCCESS", {
-        jobId: job.id,
-        retry: getRetrySnapshotForOrder(
-          paidOrder.retrySourceOrderId ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId) : paidOrder
-        ),
-      });
-    }
-    queueLog("job_completed", {
+    queueLog("llm_completed_pdf_queued", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
       totalElapsedMs: Date.now() - startedAt,
     });
-    queueInfo("JOB_COMPLETED", {
+    queueInfo("LLM_COMPLETED_PDF_QUEUED", {
       jobId: job.id,
       palmUploadId: job.palmUploadId,
+      reportRequestId: reportGenerationRequest.id,
       totalElapsedMs: Date.now() - startedAt,
     });
   } catch (error) {
@@ -460,6 +496,13 @@ const processNextPalmJob = async () => {
         const friendlyReason = rejectReasons.length
           ? rejectReasons[0]
           : getFailureReasonFromMessage(message);
+        if (reportGenerationRequest) {
+          await reportGenerationRequest.update({
+            status: "failed",
+            error: friendlyReason || message,
+            completedAt: new Date(),
+          });
+        }
         await activeJob.update({
           status: "failed",
           stage: "failed",
@@ -471,7 +514,7 @@ const processNextPalmJob = async () => {
             : quota
             ? "AI quota exhausted temporarily. Please retry later."
             : unreachable
-            ? "Palm AI engine is temporarily unavailable. Please retry shortly."
+            ? "Palm analysis service is temporarily unavailable. Please retry shortly."
             : "Palm analysis failed. Please retry with clearer images.",
           error: qualityReject ? QUALITY_REJECT_ERROR_TAG : "Palm processing failed",
         });
@@ -509,40 +552,46 @@ const processNextPalmJob = async () => {
     }
   } finally {
     processing = false;
-    if (shouldCheckNext && isPalmQueueWorkerEnabled() && !isRedisBackoffActive()) {
+    if (chain && shouldCheckNext && !isRedisBackoffActive()) {
       setImmediate(() => {
-        void processNextPalmJob();
+        void processNextPalmJob({ chain });
       });
     }
   }
 };
 
-const startPalmQueueWorker = () => {
-  if (workerStarted) return;
-  if (!isPalmQueueWorkerEnabled()) {
-    console.log("[PalmQueue] Worker disabled by PALM_QUEUE_WORKER_ENABLED=false");
-    return;
+const processPalmQueueSnapshot = async ({ workerName = "PalmQueueWorker" } = {}) => {
+  if (isRedisBackoffActive()) {
+    console.log(`[${workerName}] Redis backoff active`);
+    return { initialLength: 0, processed: 0 };
   }
-  workerStarted = true;
-  if (isPalmQueueIdlePollingEnabled()) {
-    setInterval(() => {
-      void processNextPalmJob();
-    }, WORKER_INTERVAL_MS);
-  }
-  if (isPalmQueueReconcileEnabled()) {
-    setInterval(() => {
-      void reconcilePaidPalmOrders();
-    }, RECONCILE_INTERVAL_MS);
-  }
-  console.log("[PalmQueue] Worker started", {
-    mode: isPalmQueueIdlePollingEnabled() ? "polling" : "payment_triggered",
-    idlePollingEnabled: isPalmQueueIdlePollingEnabled(),
-    reconcileEnabled: isPalmQueueReconcileEnabled(),
+
+  const initialLength = Number(await redis.llen(PALM_QUEUE_KEY)) || 0;
+  const batchSize = parsePositiveInt(process.env.PALM_QUEUE_WORKER_BATCH_SIZE, 25);
+  console.log(`[${workerName}] Queue processing started`, {
+    queue: PALM_QUEUE_KEY,
+    initialLength,
+    batchSize,
+    processingLimit: initialLength,
   });
+
+  let processed = 0;
+  for (let index = 0; index < initialLength; index += 1) {
+    await processNextPalmJob({ chain: false });
+    processed += 1;
+  }
+
+  console.log(`[${workerName}] Queue processing completed`, {
+    queue: PALM_QUEUE_KEY,
+    initialLength,
+    processed,
+  });
+
+  return { initialLength, processed };
 };
 
 const reconcilePaidPalmOrders = async () => {
-  if (!isPalmQueueWorkerEnabled() || isRedisBackoffActive()) return;
+  if (isRedisBackoffActive()) return;
   if (reconcileRunning) return;
   reconcileRunning = true;
   try {
@@ -591,11 +640,78 @@ const reconcilePaidPalmOrders = async () => {
   }
 };
 
+const markPalmJobCompletedAfterPdf = async ({ jobId, userId }) => {
+  if (!jobId || !userId) return;
+
+  const job = await AIJob.findOne({ where: { id: jobId, userId } });
+  if (!job) return;
+
+  await job.update({
+    status: "completed",
+    stage: "completed",
+    progress: 100,
+    stageMessage: "Your premium palm report is ready.",
+    completedAt: new Date(),
+  });
+
+  const paidOrder = await PalmOrder.findOne({
+    where: { userId: job.userId, palmUploadId: job.palmUploadId, status: "paid" },
+  });
+  if (!paidOrder) return;
+
+  const retrySourceBeforeSuccess = paidOrder.retrySourceOrderId
+    ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId)
+    : paidOrder;
+
+  if (retrySourceBeforeSuccess && Number(retrySourceBeforeSuccess.maxRetries ?? 0) > 0) {
+    const total = Number(retrySourceBeforeSuccess.maxRetries ?? 3);
+    await retrySourceBeforeSuccess.update({
+      retriesUsed: total,
+      retryExhaustedAt: new Date(),
+      lastFailureReason: null,
+      status: "paid",
+    });
+  }
+
+  await paidOrder.update({
+    lastFailureReason: null,
+    retryExhaustedAt: null,
+    status: "paid",
+  });
+
+  if (paidOrder.retrySourceOrderId) {
+    const sourceOrder = await PalmOrder.findByPk(paidOrder.retrySourceOrderId);
+    if (sourceOrder) {
+      const sourceMax = Number(sourceOrder.maxRetries ?? 3);
+      await sourceOrder.update({
+        retriesUsed: sourceMax,
+        retryExhaustedAt: new Date(),
+        lastFailureReason: null,
+      });
+      queueInfo("RETRY_SOURCE_CONSUMED_ON_SUCCESS", {
+        sourceOrderId: sourceOrder.id,
+        jobId: job.id,
+        before: getRetrySnapshotForOrder(retrySourceBeforeSuccess),
+        after: getRetrySnapshotForOrder(sourceOrder),
+      });
+    }
+  }
+
+  queueInfo("RETRY_STATUS_AFTER_SUCCESS", {
+    jobId: job.id,
+    retry: getRetrySnapshotForOrder(
+      paidOrder.retrySourceOrderId ? await PalmOrder.findByPk(paidOrder.retrySourceOrderId) : paidOrder
+    ),
+  });
+};
+
 module.exports = {
   enqueuePalmJob,
   clearPalmJobFromQueue,
   cleanupPalmQueueStaleJobs,
-  startPalmQueueWorker,
+  processNextPalmJob,
+  processPalmQueueSnapshot,
+  markPalmJobCompletedAfterPdf,
   reconcilePaidPalmOrders,
   QUALITY_REJECT_ERROR_TAG,
 };

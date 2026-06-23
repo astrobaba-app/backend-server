@@ -19,6 +19,8 @@ const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
 const Review = require("../review/review");
+const ReportGenerationRequest = require("../report/reportGenerationRequest");
+const ReportPurchase = require("../report/reportPurchase");
 const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
 const ChatHistorySession = require("../chat/chatHistorySession");
@@ -304,6 +306,22 @@ const PalmOrder = require("../palm/palmOrder");
   WalletTransaction.belongsTo(Wallet, {
     foreignKey: "walletId",
     as: "wallet",
+  });
+
+  User.hasMany(ReportPurchase, {
+    foreignKey: "userId",
+    as: "reportPurchases",
+    onDelete: "CASCADE",
+  });
+
+  ReportPurchase.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  ReportPurchase.belongsTo(WalletTransaction, {
+    foreignKey: "walletTransactionId",
+    as: "walletTransaction",
   });
 
   // Blog associations
@@ -978,6 +996,14 @@ const PalmOrder = require("../palm/palmOrder");
   PalmFeature.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
   PalmUpload.hasOne(PalmReport, { foreignKey: "palmUploadId", as: "report", onDelete: "CASCADE" });
   PalmReport.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+  UserRequest.hasMany(PalmReport, { foreignKey: "userRequestId", as: "palmReports", onDelete: "SET NULL" });
+  PalmReport.belongsTo(UserRequest, { foreignKey: "userRequestId", as: "userRequest" });
+  User.hasMany(ReportGenerationRequest, { foreignKey: "userId", as: "reportGenerationRequests", onDelete: "CASCADE" });
+  ReportGenerationRequest.belongsTo(User, { foreignKey: "userId", as: "user" });
+  UserRequest.hasMany(ReportGenerationRequest, { foreignKey: "userRequestId", as: "reportGenerationRequests", onDelete: "SET NULL" });
+  ReportGenerationRequest.belongsTo(UserRequest, { foreignKey: "userRequestId", as: "userRequest" });
+  Kundli.hasMany(ReportGenerationRequest, { foreignKey: "kundliId", as: "reportGenerationRequests", onDelete: "SET NULL" });
+  ReportGenerationRequest.belongsTo(Kundli, { foreignKey: "kundliId", as: "kundli" });
   User.hasMany(AIJob, { foreignKey: "userId", as: "aiJobs", onDelete: "CASCADE" });
   AIJob.belongsTo(User, { foreignKey: "userId", as: "user" });
   PalmUpload.hasOne(AIJob, { foreignKey: "palmUploadId", as: "aiJob", onDelete: "CASCADE" });
