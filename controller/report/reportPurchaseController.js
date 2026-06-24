@@ -275,9 +275,107 @@ const verifyReportRazorpayPayment = async (req, res) => {
   }
 };
 
+const recoverReportRazorpayPayment = async (req, res) => {
+  const tx = await sequelize.transaction();
+  try {
+    const userId = req.user.id;
+    const { reportType, purchaseId, razorpayOrderId } = req.body;
+    const config = getReportPurchaseConfig(reportType);
+
+    const purchase = await ReportPurchase.findOne({
+      where: {
+        id: purchaseId,
+        userId,
+        reportType: normalizeReportType(reportType),
+        razorpayOrderId,
+      },
+      transaction: tx,
+    });
+
+    if (!purchase) {
+      await tx.rollback();
+      return res.status(404).json({ success: false, message: "Payment record not found" });
+    }
+
+    if (purchase.status === "paid") {
+      await tx.commit();
+      return res.status(200).json({
+        success: true,
+        recovered: true,
+        message: "Report payment already verified",
+        purchase: buildPurchaseResponse(purchase, config),
+      });
+    }
+
+    const paymentList = await razorpay.orders.fetchPayments(razorpayOrderId);
+    const paidPayment = (paymentList.items || []).find((payment) => {
+      const status = String(payment.status || "").toLowerCase();
+      return status === "captured" || status === "authorized";
+    });
+
+    if (!paidPayment) {
+      await tx.rollback();
+      return res.status(402).json({
+        success: false,
+        recovered: false,
+        message: "No successful payment found for this report order yet.",
+      });
+    }
+
+    const expectedAmountInPaise = Math.round(toAmount(purchase.amount) * 100);
+    if (Number(paidPayment.amount || 0) !== expectedAmountInPaise) {
+      await tx.rollback();
+      return res.status(400).json({
+        success: false,
+        recovered: false,
+        message: "Payment amount does not match this report order.",
+      });
+    }
+
+    await purchase.update(
+      {
+        status: "paid",
+        razorpayPaymentId: paidPayment.id,
+        metadata: {
+          ...(purchase.metadata || {}),
+          recoveredAt: new Date().toISOString(),
+          recoveredPaymentStatus: paidPayment.status,
+        },
+      },
+      { transaction: tx }
+    );
+
+    await tx.commit();
+
+    console.log("[ReportPurchase][RazorpayRecover] paid", {
+      userId,
+      reportType: config.reportType,
+      purchaseId: purchase.id,
+      razorpayOrderId,
+      razorpayPaymentId: paidPayment.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      recovered: true,
+      message: "Report payment recovered successfully",
+      purchase: buildPurchaseResponse(purchase, config),
+    });
+  } catch (error) {
+    await tx.rollback();
+    console.error("[ReportPurchase][RazorpayRecover] error", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      recovered: false,
+      message: error.message || "Failed to recover report payment",
+    });
+  }
+};
+
 module.exports = {
   getReportAccess,
   payReportWithWallet,
   createReportRazorpayOrder,
   verifyReportRazorpayPayment,
+  recoverReportRazorpayPayment,
 };
