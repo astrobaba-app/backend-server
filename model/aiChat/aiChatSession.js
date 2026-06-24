@@ -34,6 +34,71 @@ const AIChatSession = sequelize.define(
       defaultValue: true,
       comment: "Whether this chat session is active",
     },
+    status: {
+      type: DataTypes.STRING(30),
+      allowNull: false,
+      defaultValue: "active",
+      comment: "active, completed, cancelled",
+    },
+    startTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When billable AI chat started",
+    },
+    endTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When billable AI chat ended",
+    },
+    totalMinutes: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Total billable AI chat minutes",
+    },
+    totalCost: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Total AI chat cost before available-balance cap",
+    },
+    billedAmount: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Amount debited from wallet for this AI chat",
+    },
+    pricePerMinute: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: false,
+      defaultValue: 10,
+      comment: "AI chat price per minute captured at session start",
+    },
+    maxDurationSeconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "Maximum duration allowed by wallet balance at start",
+    },
+    maxEndTime: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "Auto-end time calculated from wallet balance at start",
+    },
+    walletBalanceAtStart: {
+      type: DataTypes.DECIMAL(10, 2),
+      allowNull: true,
+      comment: "AI-usable wallet balance captured at session start",
+    },
+    endReason: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+      comment: "Reason why AI chat ended",
+    },
+    lastMessagePreview: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      comment: "Short preview of the last message",
+    },
     lastMessageAt: {
       type: DataTypes.DATE,
       allowNull: true,

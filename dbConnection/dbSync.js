@@ -432,6 +432,29 @@ async function ensureAIChatSessionColumns() {
       );
     }
 
+    const columnDefinitions = [
+      ["status", { type: DataTypes.STRING(30), allowNull: false, defaultValue: "active" }],
+      ["startTime", { type: DataTypes.DATE, allowNull: true }],
+      ["endTime", { type: DataTypes.DATE, allowNull: true }],
+      ["totalMinutes", { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }],
+      ["totalCost", { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 }],
+      ["billedAmount", { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 }],
+      ["pricePerMinute", { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 10 }],
+      ["maxDurationSeconds", { type: DataTypes.INTEGER, allowNull: true }],
+      ["maxEndTime", { type: DataTypes.DATE, allowNull: true }],
+      ["walletBalanceAtStart", { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+      ["endReason", { type: DataTypes.STRING(80), allowNull: true }],
+      ["lastMessagePreview", { type: DataTypes.STRING(255), allowNull: true }],
+    ];
+
+    columnDefinitions.forEach(([columnName, definition]) => {
+      if (!table[columnName]) {
+        operations.push(
+          queryInterface.addColumn("ai_chat_sessions", columnName, definition)
+        );
+      }
+    });
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured AI chat session columns exist");

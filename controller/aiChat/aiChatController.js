@@ -4,7 +4,14 @@ const AIChatMessage = require("../../model/aiChat/aiChatMessage");
 const User = require("../../model/user/userAuth");
 const UserRequest = require("../../model/user/userRequest");
 const Kundli = require("../../model/horoscope/kundli");
+const Wallet = require("../../model/wallet/wallet");
+const WalletTransaction = require("../../model/wallet/walletTransaction");
+const { sequelize } = require("../../dbConnection/dbConfig");
 const { Op } = require("sequelize");
+const {
+  getWalletBalanceBreakdown,
+  buildWalletDebitPlan,
+} = require("../../services/walletService");
 const { buildInsightPayload } = require("../../services/astroInsightEngineService");
 const { createChatCompletion } = require("../../services/openaiClient");
 const {
@@ -18,6 +25,251 @@ const {
 } = require("../../services/aiChatInterestService");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const AI_CHAT_PRICE_PER_MINUTE = (() => {
+  const parsed = parseFloat(process.env.AI_CHAT_PRICE_PER_MINUTE);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+})();
+
+const toAmount = (value) => {
+  const parsed = parseFloat(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const roundCurrency = (value) =>
+  Math.round((toAmount(value) + Number.EPSILON) * 100) / 100;
+
+const formatAiChatMessage = (message) => ({
+  id: message.id,
+  sessionId: message.sessionId,
+  role: message.role,
+  content: message.content,
+  tokens: message.tokens,
+  createdAt: message.createdAt,
+  updatedAt: message.updatedAt,
+});
+
+const formatAiSession = (session) => ({
+  id: session.id,
+  userId: session.userId,
+  astrologerId: session.astrologerId,
+  title: session.title,
+  isActive: session.isActive,
+  status: session.status || "active",
+  startTime: session.startTime,
+  endTime: session.endTime,
+  totalMinutes: session.totalMinutes || 0,
+  totalCost: session.totalCost || 0,
+  billedAmount: session.billedAmount || 0,
+  pricePerMinute: session.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE,
+  maxDurationSeconds: session.maxDurationSeconds,
+  maxEndTime: session.maxEndTime,
+  walletBalanceAtStart: session.walletBalanceAtStart,
+  endReason: session.endReason,
+  lastMessagePreview: session.lastMessagePreview,
+  lastMessageAt: session.lastMessageAt,
+  kundliUserRequestId: session.kundliUserRequestId,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+});
+
+const getAiWalletBreakdown = async (userId, transaction) => {
+  let wallet = await Wallet.findOne({
+    where: { userId },
+    transaction,
+    lock: transaction ? transaction.LOCK.UPDATE : undefined,
+  });
+
+  if (!wallet && transaction) {
+    wallet = await Wallet.create({ userId }, { transaction });
+  } else if (!wallet) {
+    wallet = await Wallet.create({ userId });
+  }
+
+  return { wallet, breakdown: getWalletBalanceBreakdown(wallet || {}) };
+};
+
+const calculateAiWalletLimit = (balance, pricePerMinute) => {
+  if (!pricePerMinute || pricePerMinute <= 0) {
+    return {
+      maxDurationSeconds: null,
+      maxEndTime: null,
+      walletBalanceAtStart: roundCurrency(balance),
+    };
+  }
+
+  const maxDurationSeconds = Math.max(
+    0,
+    Math.floor((roundCurrency(balance) / pricePerMinute) * 60)
+  );
+
+  return {
+    maxDurationSeconds,
+    maxEndTime: new Date(Date.now() + maxDurationSeconds * 1000),
+    walletBalanceAtStart: roundCurrency(balance),
+  };
+};
+
+const completeAiChatSessionWithBilling = async (
+  session,
+  reason = "user_ended_ai_chat"
+) => {
+  const dbTransaction = await sequelize.transaction();
+  let committed = false;
+
+  try {
+    const lockedSession = await AIChatSession.findByPk(session.id, {
+      transaction: dbTransaction,
+      lock: dbTransaction.LOCK.UPDATE,
+    });
+
+    if (!lockedSession) {
+      throw new Error("AI chat session not found while finalizing billing");
+    }
+
+    if ((lockedSession.status || "active") !== "active") {
+      await dbTransaction.commit();
+      committed = true;
+      return {
+        session: lockedSession,
+        billing: {
+          currentMinutes: 0,
+          currentCost: 0,
+          billedAmount: toAmount(lockedSession.billedAmount),
+          totalMinutes: lockedSession.totalMinutes || 0,
+          totalCost: toAmount(lockedSession.totalCost),
+        },
+      };
+    }
+
+    const endTime = new Date();
+    const startTime = lockedSession.startTime
+      ? new Date(lockedSession.startTime)
+      : new Date(lockedSession.createdAt);
+    const durationMs = Math.max(0, endTime - startTime);
+    const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
+    const pricePerMinute = toAmount(
+      lockedSession.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE
+    );
+    const currentCost = roundCurrency(currentMinutes * pricePerMinute);
+    let billedAmount = 0;
+    let updatedWalletBalance = null;
+
+    const wallet = await Wallet.findOne({
+      where: { userId: lockedSession.userId },
+      transaction: dbTransaction,
+      lock: dbTransaction.LOCK.UPDATE,
+    });
+
+    if (wallet && currentCost > 0) {
+      const walletBreakdown = getWalletBalanceBreakdown(wallet);
+      billedAmount = Math.min(walletBreakdown.balance, currentCost);
+      billedAmount = roundCurrency(billedAmount);
+
+      if (billedAmount > 0) {
+        const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
+          allowSignupBonusUsage: true,
+        });
+        updatedWalletBalance = debitPlan.nextBalance;
+
+        await wallet.update(
+          {
+            balance: debitPlan.nextBalance,
+            signupBonusBalance: debitPlan.nextSignupBonusBalance,
+            totalSpent: roundCurrency(toAmount(wallet.totalSpent) + billedAmount),
+          },
+          { transaction: dbTransaction }
+        );
+
+        await WalletTransaction.create(
+          {
+            userId: lockedSession.userId,
+            walletId: wallet.id,
+            amount: billedAmount,
+            type: "debit",
+            status: "completed",
+            paymentMethod: "manual",
+            description: `AI chat usage - ${currentMinutes} minutes`,
+            balanceBefore: debitPlan.previousBalance,
+            balanceAfter: debitPlan.nextBalance,
+            metadata: {
+              usageType: "ai_chat",
+              aiChatSessionId: lockedSession.id,
+              astrologerId: lockedSession.astrologerId,
+              durationMinutes: currentMinutes,
+              pricePerMinute,
+              rechargeConsumed: debitPlan.rechargeConsumed,
+              signupBonusConsumed: debitPlan.signupBonusConsumed,
+              endReason: reason,
+            },
+          },
+          { transaction: dbTransaction }
+        );
+      }
+    }
+
+    await lockedSession.update(
+      {
+        status: reason === "cancelled" ? "cancelled" : "completed",
+        endTime,
+        totalMinutes: currentMinutes,
+        totalCost: currentCost,
+        billedAmount,
+        endReason: reason,
+      },
+      { transaction: dbTransaction }
+    );
+
+    await dbTransaction.commit();
+    committed = true;
+
+    return {
+      session: lockedSession,
+      walletBalance: updatedWalletBalance,
+      billing: {
+        currentMinutes,
+        currentCost,
+        billedAmount,
+        totalMinutes: currentMinutes,
+        totalCost: currentCost,
+      },
+    };
+  } catch (error) {
+    if (!committed) {
+      await dbTransaction.rollback();
+    }
+    throw error;
+  }
+};
+
+const enforceActiveAiSession = async (session) => {
+  if ((session.status || "active") !== "active") {
+    return {
+      ended: true,
+      reason: session.endReason || "ai_chat_ended",
+      billing: {
+        totalMinutes: session.totalMinutes || 0,
+        totalCost: toAmount(session.totalCost),
+        billedAmount: toAmount(session.billedAmount),
+      },
+      session,
+    };
+  }
+
+  if (session.maxEndTime && new Date(session.maxEndTime).getTime() <= Date.now()) {
+    const finalized = await completeAiChatSessionWithBilling(
+      session,
+      "wallet_time_limit"
+    );
+    return {
+      ended: true,
+      reason: "wallet_time_limit",
+      billing: finalized.billing,
+      session: finalized.session,
+    };
+  }
+
+  return { ended: false };
+};
 const MAX_AI_INTEREST_SIGNALS_PER_SESSION = 20;
 
 const appendAiInterestSignal = (existingSignals, classification, userMessageId) => {
@@ -1202,6 +1454,135 @@ const createChatSession = async (req, res) => {
   }
 };
 
+const AI_ASTROLOGER_PUBLIC_DETAILS = {
+  "ai-astrologer-devansh": {
+    subtitle: "Timing predictions, career, education, family",
+    rating: 4.9,
+    experienceLabel: "AI Expert",
+    languages: ["Hindi", "English", "Hinglish"],
+    availability: "Available now",
+    responseTime: "Replies instantly",
+    bio: "A structured AI astrologer for timing-based guidance around career, education, family matters and long-term direction.",
+  },
+  "ai-astrologer-ritika": {
+    subtitle: "Love, marriage, relationship and emotional clarity",
+    rating: 4.8,
+    experienceLabel: "AI Expert",
+    languages: ["Hindi", "English", "Hinglish"],
+    availability: "Available now",
+    responseTime: "Replies instantly",
+    bio: "A warm AI guide for relationship questions, emotional clarity, marriage concerns and intuitive reflection.",
+  },
+  "ai-astrologer-arjun": {
+    subtitle: "Wealth, health indicators and energy alignment",
+    rating: 4.8,
+    experienceLabel: "AI Expert",
+    languages: ["Hindi", "English", "Hinglish"],
+    availability: "Available now",
+    responseTime: "Replies instantly",
+    bio: "A practical AI astrologer focused on wealth patterns, numerology, vastu, palmistry and everyday remedies.",
+  },
+};
+
+const buildPublicAiAstrologerProfile = (astrologerId) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
+  const publicDetails =
+    AI_ASTROLOGER_PUBLIC_DETAILS[astrologerId] ||
+    AI_ASTROLOGER_PUBLIC_DETAILS["ai-astrologer-devansh"];
+
+  return {
+    id: astrologerId || "ai-astrologer-devansh",
+    name: profile.name,
+    gender: profile.gender,
+    expertise: profile.skills.join(", "),
+    skills: profile.skills,
+    pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+    ...publicDetails,
+  };
+};
+
+/**
+ * Create a billable v2 AI chat session.
+ */
+const createChatSessionV2 = async (req, res) => {
+  const dbTransaction = await sequelize.transaction();
+
+  try {
+    const userId = req.user.id;
+    const { astrologerId } = req.body;
+    const pricePerMinute = AI_CHAT_PRICE_PER_MINUTE;
+    const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
+
+    if (breakdown.balance < pricePerMinute) {
+      await dbTransaction.rollback();
+      return res.status(402).json({
+        success: false,
+        code: "INSUFFICIENT_AI_BALANCE",
+        message: "Out of balance. Recharge more to chat with AI astrologer.",
+        wallet: {
+          balance: breakdown.balance,
+          aiUsableBalance: breakdown.balance,
+          required: pricePerMinute,
+        },
+      });
+    }
+
+    const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
+    const now = new Date();
+    const session = await AIChatSession.create(
+      {
+        userId,
+        astrologerId: astrologerId || null,
+        title: "New Chat",
+        isActive: true,
+        status: "active",
+        startTime: now,
+        lastMessageAt: now,
+        pricePerMinute,
+        maxDurationSeconds: walletLimit.maxDurationSeconds,
+        maxEndTime: walletLimit.maxEndTime,
+        walletBalanceAtStart: walletLimit.walletBalanceAtStart,
+      },
+      { transaction: dbTransaction }
+    );
+
+    await dbTransaction.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "AI chat session created successfully",
+      session: formatAiSession(session),
+      astrologer: buildPublicAiAstrologerProfile(session.astrologerId),
+    });
+  } catch (error) {
+    await dbTransaction.rollback();
+    console.error("Create AI chat session v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create AI chat session",
+      error: error.message,
+    });
+  }
+};
+
+const getAiAstrologersV2 = async (req, res) => {
+  try {
+    return res.status(200).json({
+      success: true,
+      astrologers: Object.keys(ASTROLOGER_PROFILES).map((astrologerId) =>
+        buildPublicAiAstrologerProfile(astrologerId)
+      ),
+    });
+  } catch (error) {
+    console.error("Get AI astrologers v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI astrologers",
+      error: error.message,
+    });
+  }
+};
+
 /**
  * Send a message and get AI response
  */
@@ -1239,6 +1620,23 @@ const sendMessage = async (req, res) => {
         success: false,
         message: "Chat session not found",
       });
+    }
+
+    if (req.aiChatV2) {
+      const sessionState = await enforceActiveAiSession(session);
+      if (sessionState.ended) {
+        return res.status(402).json({
+          success: false,
+          code: "AI_CHAT_ENDED",
+          reason: sessionState.reason,
+          message:
+            sessionState.reason === "wallet_time_limit"
+              ? "Out of balance. Recharge more to continue chatting."
+              : "This AI chat has ended.",
+          session: formatAiSession(sessionState.session),
+          billing: sessionState.billing,
+        });
+      }
     }
 
     // Save user message
@@ -1279,9 +1677,13 @@ const sendMessage = async (req, res) => {
         await session.update({
           title,
           lastMessageAt: new Date(),
+          lastMessagePreview: pauseReply.substring(0, 250),
         });
       } else {
-        await session.update({ lastMessageAt: new Date() });
+        await session.update({
+          lastMessageAt: new Date(),
+          lastMessagePreview: pauseReply.substring(0, 250),
+        });
       }
 
       return res.status(200).json({
@@ -1493,9 +1895,13 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         ...sessionUpdates,
         title,
         lastMessageAt: new Date(),
+        lastMessagePreview: aiResponse.substring(0, 250),
       });
     } else {
-      await session.update({ ...sessionUpdates, lastMessageAt: new Date() });
+      await session.update({ ...sessionUpdates,
+        lastMessageAt: new Date(),
+        lastMessagePreview: aiResponse.substring(0, 250),
+      });
     }
 
     res.status(200).json({
@@ -1845,6 +2251,199 @@ const getChatMessages = async (req, res) => {
   }
 };
 
+const getAiChatHistoryV2 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { page = 1, limit = 30 } = req.query;
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageSize = Math.max(parseInt(limit, 10) || 30, 1);
+    const offset = (pageNumber - 1) * pageSize;
+
+    const { rows: sessions, count } = await AIChatSession.findAndCountAll({
+      where: {
+        userId,
+        isActive: true,
+        status: { [Op.ne]: "active" },
+      },
+      order: [["endTime", "DESC"], ["lastMessageAt", "DESC"], ["createdAt", "DESC"]],
+      limit: pageSize,
+      offset,
+    });
+
+    return res.status(200).json({
+      success: true,
+      sessions: sessions.map(formatAiSession),
+      pagination: {
+        total: count,
+        page: pageNumber,
+        limit: pageSize,
+        totalPages: Math.ceil(count / pageSize),
+      },
+    });
+  } catch (error) {
+    console.error("Get AI chat history v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI chat history",
+      error: error.message,
+    });
+  }
+};
+
+// const getAiChatHistorySessionV2 = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { sessionId } = req.params;
+
+//     const session = await AIChatSession.findOne({
+//       where: { id: sessionId, userId },
+//     });
+
+//     if (!session) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "AI chat history session not found",
+//       });
+//     }
+
+//     const messages = await AIChatMessage.findAll({
+//       where: { sessionId },
+//       order: [["createdAt", "ASC"]],
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       session: formatAiSession(session),
+//       messages: messages.map(formatAiChatMessage),
+//     });
+//   } catch (error) {
+//     console.error("Get AI chat history session v2 error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch AI chat history session",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// const endChatSessionV2 = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { sessionId } = req.params;
+//     const { reason = "user_ended_ai_chat" } = req.body || {};
+
+//     const session = await AIChatSession.findOne({
+//       where: { id: sessionId, userId },
+//     });
+
+//     if (!session) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "AI chat session not found",
+//       });
+//     }
+
+//     const finalized = await completeAiChatSessionWithBilling(session, reason);
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "AI chat ended successfully",
+//       session: formatAiSession(finalized.session),
+//       billing: finalized.billing,
+//       walletBalance: finalized.walletBalance,
+//     });
+//   } catch (error) {
+//     console.error("End AI chat session v2 error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to end AI chat",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// const sendMessageV2 = (req, res) => {
+//   req.aiChatV2 = true;
+//   return sendMessage(req, res);
+// };
+
+const getAiChatHistorySessionV2 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat history session not found",
+      });
+    }
+
+    const messages = await AIChatMessage.findAll({
+      where: { sessionId },
+      order: [["createdAt", "ASC"]],
+    });
+
+    return res.status(200).json({
+      success: true,
+      session: formatAiSession(session),
+      messages: messages.map(formatAiChatMessage),
+    });
+  } catch (error) {
+    console.error("Get AI chat history session v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI chat history session",
+      error: error.message,
+    });
+  }
+};
+
+const endChatSessionV2 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const { reason = "user_ended_ai_chat" } = req.body || {};
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    const finalized = await completeAiChatSessionWithBilling(session, reason);
+
+    return res.status(200).json({
+      success: true,
+      message: "AI chat ended successfully",
+      session: formatAiSession(finalized.session),
+      billing: finalized.billing,
+      walletBalance: finalized.walletBalance,
+    });
+  } catch (error) {
+    console.error("End AI chat session v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to end AI chat",
+      error: error.message,
+    });
+  }
+};
+
+const sendMessageV2 = (req, res) => {
+  req.aiChatV2 = true;
+  return sendMessage(req, res);
+};
+
 /**
  * Delete a chat session
  */
@@ -2091,10 +2690,16 @@ const greetSession = async (req, res) => {
 
 module.exports = {
   createChatSession,
+  createChatSessionV2,
+  getAiAstrologersV2,
   sendMessage,
+  sendMessageV2,
   getMyChatSessions,
   getChatMessages,
   endChatSession,
+  getAiChatHistoryV2,
+  getAiChatHistorySessionV2,
+  endChatSessionV2,
   deleteChatSession,
   clearChatSession,
   attachKundliToSession,
