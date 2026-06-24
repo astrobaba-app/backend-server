@@ -1,5 +1,6 @@
 const MatchingProfile = require("../../model/horoscope/matchingProfile");
 const axios = require("axios");
+const crypto = require("crypto");
 const { enhanceAshtakootWithAI,enhanceManglikWithAI } = require("../../services/matchingAiService");
 const {
   queueAstroProductCohortRefresh,
@@ -39,6 +40,21 @@ const getBirthDataPayload = (name, dob, tob, lat, lon) => {
   };
 };
 
+const buildKutaDescriptionSnapshot = (kutas = {}) => ({
+  varna: {
+    points: kutas?.varna?.points ?? null,
+    max_points: kutas?.varna?.max_points ?? null,
+    area_of_life: kutas?.varna?.area_of_life ?? null,
+    description: kutas?.varna?.description ?? null,
+  },
+  vashya: {
+    points: kutas?.vashya?.points ?? null,
+    max_points: kutas?.vashya?.max_points ?? null,
+    area_of_life: kutas?.vashya?.area_of_life ?? null,
+    description: kutas?.vashya?.description ?? null,
+  },
+});
+
 const createMatching = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -56,8 +72,37 @@ const createMatching = async (req, res) => {
       girlLatitude,
       girlLongitude,
     } = req.body;
+    const requestFingerprint = crypto
+      .createHash("sha1")
+      .update(
+        JSON.stringify({
+          boyName,
+          boyDateOfBirth,
+          boyTimeOfBirth,
+          boyPlaceOfBirth,
+          boyLatitude,
+          boyLongitude,
+          girlName,
+          girlDateOfBirth,
+          girlTimeOfBirth,
+          girlPlaceOfBirth,
+          girlLatitude,
+          girlLongitude,
+        }),
+      )
+      .digest("hex")
+      .slice(0, 12);
 
-    console.log("Creating kundli matching for user:", req.body);
+    console.log("[KundliMatching][backend][create] Incoming request:", {
+      requestFingerprint,
+      userId,
+      boyName,
+      girlName,
+      boyDateOfBirth,
+      boyTimeOfBirth,
+      girlDateOfBirth,
+      girlTimeOfBirth,
+    });
 
     // Validate required fields
     const requiredFields = { boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude, girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude };
@@ -74,7 +119,9 @@ const createMatching = async (req, res) => {
     const maleData = getBirthDataPayload(boyName, boyDateOfBirth, boyTimeOfBirth, boyLatitude, boyLongitude);
     const femaleData = getBirthDataPayload(girlName, girlDateOfBirth, girlTimeOfBirth, girlLatitude, girlLongitude);
 
-    console.log("Fetching matching data from Astro Engine...");
+    console.log("[KundliMatching][backend][create] Fetching matching data from Astro Engine...", {
+      requestFingerprint,
+    });
 
     // Call Astro Engine matching API
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/matching/ashtakoot`, {
@@ -96,7 +143,33 @@ const createMatching = async (req, res) => {
     const boyAscendant = matchingData.male_ascendant || null;
     const girlAscendant = matchingData.female_ascendant || null;
 
-    console.log("[MatchingAI] Firing AI enhancements in parallel...");
+    console.log("[KundliMatching][backend][astro-response] Raw kuta description snapshot:", {
+      requestFingerprint,
+      total_points: ashtakootData?.total_points ?? null,
+      max_points: ashtakootData?.max_points ?? null,
+      descriptions: buildKutaDescriptionSnapshot(ashtakootData?.kutas),
+    });
+
+    console.log("[KundliMatching][lagna-chart] Astro engine payload summary:", {
+      boyName,
+      girlName,
+      hasBoyLagnaChart: Boolean(boyLagnaChart),
+      hasGirlLagnaChart: Boolean(girlLagnaChart),
+      boyLagnaChartDivision: boyLagnaChart?.division || null,
+      girlLagnaChartDivision: girlLagnaChart?.division || null,
+      boyLagnaPlanets: boyLagnaChart?.planets
+        ? Object.keys(boyLagnaChart.planets)
+        : [],
+      girlLagnaPlanets: girlLagnaChart?.planets
+        ? Object.keys(girlLagnaChart.planets)
+        : [],
+      boyAscendant,
+      girlAscendant,
+    });
+
+    console.log("[MatchingAI] Firing AI enhancements in parallel...", {
+      requestFingerprint,
+    });
 
     // 🚀 FIRE BOTH AI CALLS IN PARALLEL
     const ashtakootPromise = enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }).catch(err => {
@@ -127,6 +200,14 @@ const createMatching = async (req, res) => {
         aiConclusion = enhancedKutas.conclusion;
       }
     }
+
+    console.log("[KundliMatching][backend][ai-enhanced] Final kuta description snapshot:", {
+      requestFingerprint,
+      descriptions: buildKutaDescriptionSnapshot(ashtakootData?.kutas),
+      conclusionPreview: aiConclusion
+        ? aiConclusion.slice(0, 200)
+        : null,
+    });
 
     // --- Process Manglik AI Result ---
     if (enhancedManglik) {
@@ -176,6 +257,12 @@ const createMatching = async (req, res) => {
       ashtakootDetails: ashtakootData,
       dashakootDetails: dashakootData,
       manglikDetails: manglikData,
+      boyPlanetDetails: malePlanetDetails,
+      girlPlanetDetails: femalePlanetDetails,
+      boyLagnaChart,
+      girlLagnaChart,
+      boyAscendant,
+      girlAscendant,
       conclusion,
     });
     queueAstroProductCohortRefresh(userId, "matching_created");
@@ -188,6 +275,14 @@ const createMatching = async (req, res) => {
     matchingJson.girlLagnaChart = girlLagnaChart;
     matchingJson.boyAscendant = boyAscendant;
     matchingJson.girlAscendant = girlAscendant;
+
+    console.log("[KundliMatching][backend][saved] Matching profile persisted:", {
+      requestFingerprint,
+      matchingId: matchingJson.id,
+      descriptions: buildKutaDescriptionSnapshot(
+        matchingJson?.ashtakootDetails?.kutas,
+      ),
+    });
 
   //  console.log("Kundli matching " + JSON.stringify(matchingJson));
 
