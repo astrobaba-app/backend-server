@@ -581,6 +581,13 @@ async function generateSadeSatiReport(kundli, userRequest) {
         currentPhase: sadesati.current_phase || null,
         periods: sadesati.periods || []
       }
+    },
+    horoscopeCharts: {
+      rasiChart: kundli.charts?.D1 || null,
+      horaChart: kundli.charts?.D2 || null,
+      navamsaChart: kundli.charts?.D9 || null,
+      dasamsaChart: kundli.charts?.D10 || null,
+      ...(kundli.charts || {})
     }
   };
 }

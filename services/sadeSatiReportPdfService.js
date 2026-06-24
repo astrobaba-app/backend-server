@@ -75,10 +75,183 @@ const formatDate = (dateStr) => {
   }
 };
 
+const SIGN_NAME_TO_NUM = {
+  Aries: 1,
+  Taurus: 2,
+  Gemini: 3,
+  Cancer: 4,
+  Leo: 5,
+  Virgo: 6,
+  Libra: 7,
+  Scorpio: 8,
+  Sagittarius: 9,
+  Capricorn: 10,
+  Aquarius: 11,
+  Pisces: 12,
+};
+
+const PLANET_ABBREVIATIONS = {
+  Sun: "Su",
+  Moon: "Mo",
+  Mars: "Ma",
+  Mercury: "Me",
+  Jupiter: "Ju",
+  Venus: "Ve",
+  Saturn: "Sa",
+  Rahu: "Ra",
+  Ketu: "Ke",
+  Uranus: "Ur",
+  Neptune: "Ne",
+  Pluto: "Pl",
+  Ascendant: "Asc",
+  ascendant: "Asc",
+  Lagna: "Asc"
+};
+
+const PLANET_COLORS = {
+  Su: "#FFA500",
+  Mo: "#9370DB",
+  Ma: "#DC143C",
+  Me: "#32CD32",
+  Ju: "#DAA520",
+  Ve: "#FF1493",
+  Sa: "#4169E1",
+  Ra: "#8B4513",
+  Ke: "#A0522D",
+  Ur: "#4682B4",
+  Ne: "#20B2AA",
+  Pl: "#DA70D6",
+  Asc: "#9932CC",
+};
+
+const NORTH_INDIAN_HOUSE_POSITIONS = [
+  { house: 1, x: 0.5, y: 0.25, numX: 0.5, numY: 0.42 },
+  { house: 2, x: 0.25, y: 0.1, numX: 0.25, numY: 0.2 },
+  { house: 3, x: 0.12, y: 0.25, numX: 0.2, numY: 0.25 },
+  { house: 4, x: 0.25, y: 0.5, numX: 0.42, numY: 0.5 },
+  { house: 5, x: 0.12, y: 0.75, numX: 0.2, numY: 0.75 },
+  { house: 6, x: 0.25, y: 0.9, numX: 0.25, numY: 0.79 },
+  { house: 7, x: 0.5, y: 0.75, numX: 0.5, numY: 0.57 },
+  { house: 8, x: 0.75, y: 0.9, numX: 0.75, numY: 0.8 },
+  { house: 9, x: 0.9, y: 0.75, numX: 0.8, numY: 0.75 },
+  { house: 10, x: 0.75, y: 0.5, numX: 0.58, numY: 0.5 },
+  { house: 11, x: 0.9, y: 0.25, numX: 0.8, numY: 0.25 },
+  { house: 12, x: 0.75, y: 0.1, numX: 0.75, numY: 0.2 },
+];
+
+const formatDegree = (decimalDegree) => {
+  const n = typeof decimalDegree === "number" ? decimalDegree : Number(decimalDegree);
+  const safe = !Number.isFinite(n) ? 0 : ((n % 30) + 30) % 30;
+  const degrees = Math.floor(safe);
+  const minutes = Math.floor((safe - degrees) * 60);
+  return `${degrees}\u00b0${String(minutes).padStart(2, "0")}'`;
+};
+
+const renderChartSvg = (chartData, fallbackAscSignName, chartTitle) => {
+  if (!chartData || !chartData.planets) {
+    return `
+        <div class="chart-box">
+          <div style="font-size:11pt; font-weight:700; color:var(--navy); margin-bottom:3mm; text-align:center;">${chartTitle}</div>
+          <div style="width:280px; height:280px; display:flex; align-items:center; justify-content:center; background:#FFFFFF; border:1.5px solid #0B192C; color:#ff0000; font-size:10pt;">
+            Missing ${chartTitle} Data
+          </div>
+        </div>`;
+  }
+
+  const anchorSignNum = chartData.planets.Ascendant?.sign_num || chartData.planets.ascendant?.sign_num || SIGN_NAME_TO_NUM[fallbackAscSignName] || 1;
+  const house1Sign = ((anchorSignNum - 1 + 12) % 12) + 1;
+
+  // Group planets by house
+  const housePlanetsMap = new Map();
+  for (let i = 1; i <= 12; i++) {
+    housePlanetsMap.set(i, []);
+  }
+
+  Object.entries(chartData.planets).forEach(([planetName, planetData]) => {
+    const longitude = planetData.original_longitude ?? planetData.longitude ?? 0;
+    const signNum = planetData.sign_num || (Math.floor(longitude / 30) % 12) + 1;
+    const degree = planetData.degree ?? (longitude % 30);
+    const name = PLANET_ABBREVIATIONS[planetName] || planetName.substring(0, 2);
+
+    let houseNum = planetData.house;
+    if (typeof houseNum !== "number" || isNaN(houseNum)) {
+      houseNum = ((signNum - house1Sign + 12) % 12) + 1;
+    }
+
+    const hPlanets = housePlanetsMap.get(houseNum) || [];
+    hPlanets.push({ name, degree });
+    housePlanetsMap.set(houseNum, hPlanets);
+  });
+
+  // Check if Asc is mapped
+  const hasAsc = Array.from(housePlanetsMap.values()).some(arr => arr.some(p => p.name === "Asc"));
+  if (!hasAsc) {
+    const ascHouse = 1; // Always in house 1
+    const ascDeg = chartData.planets.Ascendant?.degree || chartData.planets.ascendant?.degree || 0;
+    const existing = housePlanetsMap.get(ascHouse) || [];
+    existing.unshift({ name: "Asc", degree: ascDeg });
+    housePlanetsMap.set(ascHouse, existing);
+  }
+
+  // Sort by degree
+  housePlanetsMap.forEach((planets) => planets.sort((a, b) => a.degree - b.degree));
+
+  // House to sign mapping for labeling
+  const houseToSignMap = {};
+  for (let house = 1; house <= 12; house++) {
+    houseToSignMap[house] = ((house1Sign - 1 + (house - 1)) % 12) + 1;
+  }
+
+  // Coordinates mapping
+  const svgWidth = 393;
+  const svgHeight = 393;
+
+  let elementsMarkup = "";
+
+  NORTH_INDIAN_HOUSE_POSITIONS.forEach(({ house, x, y, numX, numY }) => {
+    const signNum = houseToSignMap[house];
+    const planets = housePlanetsMap.get(house) || [];
+
+    // Sign number text element
+    const sX = numX * svgWidth;
+    const sY = numY * svgHeight;
+    elementsMarkup += `<text x="${sX.toFixed(1)}" y="${sY.toFixed(1)}" fill="#999999" font-size="11" font-family="Arial" text-anchor="middle" dominant-baseline="middle">${signNum}</text>
+`;
+
+    // Planets text elements
+    if (planets.length > 0) {
+      let offsetY = -(planets.length - 1) * 7.5;
+      planets.forEach((planet) => {
+        const color = PLANET_COLORS[planet.name] || "#333333";
+        const pX = x * svgWidth;
+        const pY = y * svgHeight + offsetY;
+        const degreeStr = formatDegree(planet.degree);
+        elementsMarkup += `<text x="${pX.toFixed(1)}" y="${pY.toFixed(1)}" fill="${color}" font-size="12" font-family="Arial" font-weight="bold" text-anchor="middle" dominant-baseline="middle">${planet.name} ${degreeStr}</text>
+`;
+        offsetY += 15;
+      });
+    }
+  });
+
+  return `
+    <div class="chart-box">
+      <div style="font-size:11pt; font-weight:700; color:var(--navy); margin-bottom:3mm; text-align:center;">${chartTitle}</div>
+      <svg viewBox="0 0 393 393" style="width:280px; height:280px; background-color:#FCF8E3; box-shadow:0px 4px 12px rgba(0, 0, 0, 0.15);">
+        <rect x="0" y="0" width="393" height="393" fill="#FCF8E3" stroke="#4C4C4C" stroke-width="2" />
+        <line x1="0" y1="0" x2="393" y2="393" stroke="#4C4C4C" stroke-width="2" />
+        <line x1="393" y1="0" x2="0" y2="393" stroke="#4C4C4C" stroke-width="2" />
+        <polygon points="196.5,0 393,196.5 196.5,393 0,196.5" fill="none" stroke="#4C4C4C" stroke-width="2" />
+        ${elementsMarkup}
+      </svg>
+    </div>
+    `;
+};
+
 function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   const { fullName, dateOfbirth, timeOfbirth, placeOfBirth, gender } = userRequest;
   const pred = reportData.predictions || {};
   const astro = reportData.astrologyBasics || {};
+  const charts = reportData.horoscopeCharts || {};
 
   // Load Cover & Dividers Base64 Data URIs
   const coverUri = imageToDataUri("sadhesatistartingpage.jpg");
@@ -181,24 +354,24 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
   <style>
     :root {
-      --navy: #0F2A4A;      /* Rich dark blue primary */
-      --navy-light: #F0F5FA;/* Light ice blue background */
-      --navy-deep: #0B192C; /* Deep navy */
+      --navy: #0B192C;
+      --navy-light: #F0F4F8;
+      --navy-deep: #050C16;
       --indigo: #4F46E5;
       --indigo-dark: #3730A3;
       --indigo-deep: #1E1B4B;
       --indigo-light: #EEF2F6;
-      --dark-blue: #0A1E3F; /* Premium dark blue instead of near-black slate-900 */
-      --dark-blue-light: #162E5C; /* Slate-800 replacement */
+      --dark-blue: #0F172A;
+      --dark-blue-light: #1E293B;
       --white: #FFFFFF;
       --card-bg: #FFFFFF;
-      --text-main: #1E293B; /* Slate-800 for better contrast on white backgrounds */
-      --text-muted: #475569;/* Slate-600 */
-      --gold: #2563EB;      /* Vibrant blue accent */
-      --gold-dark: #1D4ED8; /* Darker blue accent */
-      --gold-deep: #1E3A8A; /* Deep blue accent */
-      --gold-light: #EFF6FF;/* Soft blue accent light */
-      --border-color: rgba(15, 42, 74, 0.15); /* Based on new --navy */
+      --text-main: #334155;
+      --text-muted: #64748B;
+      --gold: #2563EB;      /* Vibrant blue accent replacing gold */
+      --gold-dark: #1D4ED8; /* Darker blue accent replacing gold-dark */
+      --gold-deep: #1E3A8A; /* Deep blue accent replacing gold-deep */
+      --gold-light: #EFF6FF;/* Soft blue accent light replacing gold-light */
+      --border-color: rgba(11, 25, 44, 0.12);
     }
     
     @page {
@@ -230,7 +403,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       flex-direction: column;
       background-color: var(--white);
       overflow: hidden;
-      border: 1.5px solid var(--border-color);
+      border: 1.5px solid rgba(11, 25, 44, 0.15);
     }
     
     .img-page-bg {
@@ -259,7 +432,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       bottom: 25mm;
       left: 15mm;
       right: 15mm;
-      background: rgba(15, 42, 74, 0.92);
+      background: rgba(11, 25, 44, 0.92);
       border: 2px solid var(--gold);
       border-radius: 12px;
       padding: 6mm 8mm;
@@ -330,7 +503,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     
     .eyebrow-text {
-      font-size: 10pt;
+      font-size: 9pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 2px;
@@ -338,7 +511,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     
     .header-title {
-      font-size: 24pt;
+      font-size: 22pt;
       font-weight: 800;
       color: var(--navy);
       letter-spacing: -0.3px;
@@ -346,25 +519,25 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     
     .header-subtitle {
-      font-size: 12.5pt;
+      font-size: 11.5pt;
       color: #475569;
       font-weight: 400;
     }
     
     .header-gradient {
       height: 2.5px;
-      background: linear-gradient(90deg, var(--navy) 0%, rgba(15, 42, 74, 0.2) 60%, transparent 100%);
+      background: linear-gradient(90deg, var(--navy) 0%, rgba(11, 25, 44, 0.2) 60%, transparent 100%);
       margin-top: 1.5mm;
     }
 
     .footer {
       margin-top: auto;
       padding-top: 2.5mm;
-      border-top: 1.5px solid var(--border-color);
+      border-top: 1.5px solid rgba(11, 25, 44, 0.15);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 8.5pt;
+      font-size: 8pt;
       color: var(--text-muted);
     }
     
@@ -383,18 +556,18 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     
     .narrative-label {
-      font-size: 11.5pt;
+      font-size: 10.5pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1.5px;
       color: var(--navy);
       margin-bottom: 2mm;
       padding-bottom: 0.5mm;
-      border-bottom: 1.5px solid var(--border-color);
+      border-bottom: 1.5px solid rgba(11, 25, 44, 0.15);
     }
     
     .narrative-text {
-      font-size: 12.5pt;
+      font-size: 11.5pt;
       color: var(--text-main);
       line-height: 1.55;
       text-align: justify;
@@ -410,29 +583,21 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
 
     .info-card {
       background: var(--white);
-      border: 1.5px solid var(--border-color) !important; /* Forces normal card borders and removes side tabs */
+      border: 1.5px solid rgba(11, 25, 44, 0.15);
       border-radius: 8px;
-      padding: 3.5mm 4.5mm;
+      padding: 3mm 4mm;
       margin-bottom: 3mm;
-    }
-    
-    .info-card p,
-    .info-card li,
-    .info-card td,
-    .info-card span:not(.scale-label):not(.eyebrow-text) {
-      font-size: 11.2pt !important; /* Increases the font size of box text and overrides inline smaller declarations */
-      line-height: 1.5 !important;
     }
 
     .info-card-title {
-      font-size: 11.5pt;
+      font-size: 10.5pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1.5px;
       color: var(--navy);
       margin-bottom: 2mm;
       padding-bottom: 0.5mm;
-      border-bottom: 1px solid rgba(15, 42, 74, 0.10);
+      border-bottom: 1px solid rgba(11, 25, 44, 0.10);
     }
     
     .info-card-row {
@@ -449,15 +614,15 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     
     .info-card-label {
-      font-size: 11pt;
+      font-size: 10.5pt;
       color: var(--text-muted);
       font-weight: 500;
     }
     
     .info-card-value {
-      font-size: 11pt;
+      font-size: 10.5pt;
       font-weight: 700;
-      color: var(--dark-blue);
+      color: #0F172A;
       text-align: right;
     }
 
@@ -493,7 +658,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     .toc-page {
       font-size: 11.5pt;
       font-weight: 700;
-      color: var(--dark-blue);
+      color: #0F172A;
       width: 15mm;
       text-align: right;
     }
@@ -515,7 +680,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     .premium-table th {
       background: var(--navy);
       color: var(--white);
-      font-size: 11pt;
+      font-size: 10pt;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 1.2px;
@@ -526,10 +691,10 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     
     .premium-table td {
       padding: 1.8mm 3mm;
-      font-size: 11pt;
+      font-size: 10.5pt;
       border-bottom: 1px solid #F1F5F9;
       vertical-align: middle;
-      line-height: 1.45;
+      line-height: 1.4;
       color: #334155;
     }
     
@@ -548,7 +713,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
 
     .bullet-list li {
       margin-bottom: 1.5mm;
-      font-size: 11pt;
+      font-size: 10.2pt;
       line-height: 1.45;
       color: var(--text-main);
       list-style-type: square;
@@ -561,14 +726,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     /* Widgets styling */
     .disclaimer-box {
       border: 2.5px dashed var(--navy);
-      background: rgba(15, 42, 74, 0.03);
+      background: rgba(11, 25, 44, 0.03);
       padding: 5mm;
       border-radius: 8px;
       text-align: center;
       font-weight: 600;
       color: var(--navy);
       margin-top: 8mm;
-      font-size: 12pt;
+      font-size: 11pt;
     }
 
     .timeline-widget {
@@ -607,14 +772,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       align-items: center;
       justify-content: center;
       font-weight: 700;
-      font-size: 9.5pt;
+      font-size: 9pt;
       color: #64748B;
     }
     .timeline-node.active .timeline-dot {
       border-color: var(--navy);
       background: var(--navy);
       color: var(--white);
-      box-shadow: 0 0 10px rgba(15, 42, 74, 0.3);
+      box-shadow: 0 0 10px rgba(11, 25, 44, 0.3);
     }
     .timeline-node.completed .timeline-dot {
       border-color: var(--navy);
@@ -623,7 +788,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     .timeline-label {
       margin-top: 2mm;
-      font-size: 9.5pt;
+      font-size: 8pt;
       font-weight: 700;
       text-align: center;
       text-transform: uppercase;
@@ -633,7 +798,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       color: var(--navy);
     }
     .timeline-date {
-      font-size: 9pt;
+      font-size: 7.5pt;
       color: #94A3B8;
       margin-top: 0.5mm;
       text-align: center;
@@ -650,16 +815,18 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       border-radius: 6px;
     }
     .contrast-illusion {
-      background: rgba(225, 29, 72, 0.05);
-      border-left: 4px solid #E11D48;
+      background: rgba(225, 29, 72, 0.02);
+      border: 1.5px solid rgba(225, 29, 72, 0.15);
+      border-radius: 6px;
     }
     .contrast-reality {
-      background: rgba(5, 150, 105, 0.05);
-      border-left: 4px solid #059669;
+      background: rgba(5, 150, 105, 0.02);
+      border: 1.5px solid rgba(5, 150, 105, 0.15);
+      border-radius: 6px;
     }
     .contrast-title {
       font-weight: 700;
-      font-size: 11pt;
+      font-size: 9pt;
       text-transform: uppercase;
       margin-bottom: 1.5mm;
       display: flex;
@@ -669,13 +836,13 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     .contrast-illusion .contrast-title { color: #E11D48; }
     .contrast-reality .contrast-title { color: #059669; }
     .contrast-text {
-      font-size: 11pt;
+      font-size: 9.8pt;
       line-height: 1.45;
     }
 
     .mistake-box {
-      background: rgba(245, 158, 11, 0.05);
-      border-left: 4px solid #F59E0B;
+      background: rgba(245, 158, 11, 0.02);
+      border: 1.5px solid rgba(245, 158, 11, 0.15);
       padding: 3mm 4mm;
       border-radius: 6px;
       margin-bottom: 3mm;
@@ -683,12 +850,12 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     .mistake-title {
       font-weight: 700;
       color: #D97706;
-      font-size: 11pt;
+      font-size: 9pt;
       text-transform: uppercase;
       margin-bottom: 1mm;
     }
     .mistake-text {
-      font-size: 11pt;
+      font-size: 9.8pt;
       line-height: 1.45;
       color: #451A03;
     }
@@ -702,10 +869,10 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       flex: 1;
       padding: 3.5mm;
       border-radius: 8px;
-      border: 1.5px solid var(--border-color);
+      border: 1.5px solid rgba(11, 25, 44, 0.15);
     }
     .stability-card.test {
-      background: rgba(15, 42, 74, 0.02);
+      background: rgba(11, 25, 44, 0.02);
     }
     .stability-card.protect {
       background: rgba(79, 70, 229, 0.02);
@@ -713,15 +880,15 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     }
     .stability-header {
       font-weight: 700;
-      font-size: 11pt;
+      font-size: 9pt;
       text-transform: uppercase;
       color: var(--navy);
       margin-bottom: 2mm;
-      border-bottom: 1px solid rgba(15, 42, 74, 0.10);
+      border-bottom: 1px solid rgba(11, 25, 44, 0.10);
       padding-bottom: 1mm;
     }
     .stability-item {
-      font-size: 11pt;
+      font-size: 9.5pt;
       line-height: 1.45;
       margin-bottom: 2mm;
     }
@@ -739,16 +906,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       margin-top: 1mm;
     }
     .scale-label {
-      font-size: 8pt;
+      font-size: 8.5pt;
       font-weight: 700;
       text-transform: uppercase;
-      padding: 0.5mm 2mm;
-      border-radius: 4px;
     }
-    .scale-low { background: #E2E8F0; color: #64748B; }
-    .scale-moderate { background: #FEF3C7; color: #D97706; }
-    .scale-strong { background: #DBEAFE; color: #2563EB; }
-    .scale-very-strong { background: #F3E8FF; color: #7C3AED; }
+    .scale-low { color: #64748B; }
+    .scale-moderate { color: #D97706; }
+    .scale-strong { color: #2563EB; }
+    .scale-very-strong { color: #7C3AED; }
 
     .checklist-item {
       display: flex;
@@ -765,7 +930,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       flex-shrink: 0;
     }
     .checklist-text {
-      font-size: 11pt;
+      font-size: 9.8pt;
       line-height: 1.4;
       color: var(--text-main);
     }
@@ -828,95 +993,104 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         <span class="toc-num">01</span>
         <span class="toc-title">Personal Astrological Profile &amp; Chart Snapshot</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Page 4</span>
+        <span class="toc-page">Pages 4-5</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">02</span>
         <span class="toc-title">Current Saturn Timeline Overview</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Page 5</span>
+        <span class="toc-page">Pages 6-7</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">03</span>
         <span class="toc-title">Current Sade Sati Cycle Status</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Page 6</span>
+        <span class="toc-page">Page 8</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">04</span>
-        <span class="toc-title">Vedic Foundations: Cosmic Blueprint &amp; Philosophy</span>
+        <span class="toc-title">Vedic Foundations: Cosmic Blueprint, Philosophy &amp; Wisdom</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 8-11</span>
+        <span class="toc-page">Pages 10-14</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">05</span>
         <span class="toc-title">Detailed Analysis of the Three Phases</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 13-19</span>
+        <span class="toc-page">Pages 16-25</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">06</span>
         <span class="toc-title">Impact on Key Life Areas &amp; Minor Cycles</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 21-23</span>
+        <span class="toc-page">Pages 26-28</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">07</span>
         <span class="toc-title">Personalized House &amp; Domain Interpretation Layers</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 24-27</span>
+        <span class="toc-page">Pages 29-33</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">08</span>
         <span class="toc-title">The Remedial Path &amp; Daily Action Plan</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 29-32</span>
+        <span class="toc-page">Pages 35-39</span>
       </div>
       <div class="toc-row">
         <span class="toc-num">09</span>
         <span class="toc-title">Forecast Dashboard, Affirmations &amp; Appendix</span>
         <span class="toc-dots"></span>
-        <span class="toc-page">Pages 33-39</span>
+        <span class="toc-page">Pages 40-47</span>
       </div>
     </div>
   `)}
 
   <!-- PAGE 4: PERSONAL DETAILS & SNAPSHOT -->
-  ${createStandardPage(4, "Native Profile & Chart Snapshot", "Personal Snapshot", `
-    <div class="grid-2" style="margin-top: 3mm;">
-      <div class="info-card">
-        <div class="info-card-title">Birth Details</div>
-        <div class="info-card-row"><span class="info-card-label">Full Name</span><span class="info-card-value">${escapeHtml(fullName)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Date of Birth</span><span class="info-card-value">${escapeHtml(formattedDob)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Time of Birth</span><span class="info-card-value">${escapeHtml(timeOfbirth)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Place of Birth</span><span class="info-card-value" style="font-size: 8.5pt;">${escapeHtml(placeOfBirth)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Gender / Age</span><span class="info-card-value">${escapeHtml(gender)} / ${escapeHtml(age)}</span></div>
+  ${createStandardPage(4, "Native Profile & Lagna Chart", "Personal Snapshot", `
+    <div class="grid-2" style="margin-top: 3mm; align-items: stretch;">
+      <div style="display: flex; flex-direction: column; gap: 3mm;">
+        <div class="info-card" style="margin-bottom: 0;">
+          <div class="info-card-title">Birth Details</div>
+          <div class="info-card-row"><span class="info-card-label">Full Name</span><span class="info-card-value">${escapeHtml(fullName)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Date of Birth</span><span class="info-card-value">${escapeHtml(formattedDob)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Time of Birth</span><span class="info-card-value">${escapeHtml(timeOfbirth)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Place of Birth</span><span class="info-card-value" style="font-size: 8.5pt;">${escapeHtml(placeOfBirth)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Gender / Age</span><span class="info-card-value">${escapeHtml(gender)} / ${escapeHtml(age)}</span></div>
+        </div>
+        <div class="info-card" style="margin-bottom: 0;">
+          <div class="info-card-title">Astrological Placements</div>
+          <div class="info-card-row"><span class="info-card-label">Lagna (Ascendant)</span><span class="info-card-value">${escapeHtml(astro.ascendant)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Moon Sign (Rashi)</span><span class="info-card-value">${escapeHtml(astro.moonSign)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Nakshatra</span><span class="info-card-value">${escapeHtml(astro.nakshatra)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Saturn Sign / House</span><span class="info-card-value" style="font-size: 8pt;">${escapeHtml(astro.saturnPlacement)}</span></div>
+          <div class="info-card-row"><span class="info-card-label">Sade Sati Status</span><span class="info-card-value" style="color: ${astro.sadesati?.isCurrentlyActive ? '#E11D48' : '#059669'}; font-weight: bold;">${astro.sadesati?.isCurrentlyActive ? "ACTIVE" : "INACTIVE"}</span></div>
+        </div>
       </div>
-      <div class="info-card">
-        <div class="info-card-title">Astrological Placements</div>
-        <div class="info-card-row"><span class="info-card-label">Lagna (Ascendant)</span><span class="info-card-value">${escapeHtml(astro.ascendant)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Moon Sign (Rashi)</span><span class="info-card-value">${escapeHtml(astro.moonSign)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Nakshatra</span><span class="info-card-value">${escapeHtml(astro.nakshatra)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Saturn Sign / House</span><span class="info-card-value" style="font-size: 8pt;">${escapeHtml(astro.saturnPlacement)}</span></div>
-        <div class="info-card-row"><span class="info-card-label">Sade Sati Status</span><span class="info-card-value" style="color: ${astro.sadesati?.isCurrentlyActive ? '#E11D48' : '#059669'}; font-weight: bold;">${astro.sadesati?.isCurrentlyActive ? "ACTIVE" : "INACTIVE"}</span></div>
+      <div style="display: flex; justify-content: center; align-items: center;">
+        ${renderChartSvg(charts.rasiChart, astro.ascendant, "Lagna Chart (D1)")}
       </div>
     </div>
-    <div class="info-card">
+  `)}
+
+  <!-- PAGE 5: PERSONAL SNAPSHOT INTERPRETATION -->
+  ${createStandardPage(5, "Personal Snapshot Interpretation", "Snapshot Interpretation", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">Snapshot Interpretation</div>
-      <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main);">
+      <p style="font-size: 11pt; line-height: 1.6; color: var(--text-main);">
         ${escapeHtml(getVal("personalAstrologySnapshot.snapshotInterpretation", `Your birth chart reveals that the Moon is placed in the constellation of ${astro.nakshatra} within the sign of ${astro.moonSign}. This creates a specific psychological makeup where emotional responses are guided by the lord of this Nakshatra. Saturn's current transit will test this foundational blueprint, bringing structured learning, psychological consolidation, and a restructuring of emotional and material security patterns.`))}
       </p>
     </div>
     <div class="info-card">
       <div class="info-card-title">Key Placements &amp; Moon Sign Significance</div>
-      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-muted);">
+      <p style="font-size: 10.8pt; line-height: 1.55; color: var(--text-muted);">
         <strong>Why Moon sign matters:</strong> ${escapeHtml(getVal("personalAstrologySnapshot.moonSignNakshatraExplanation", "In Vedic astrology, the Moon represents the mind, emotional balance, perception, and subjective experience. Sade Sati is calculated as the transit of Saturn through the 12th, 1st, and 2nd houses from your natal Moon sign. Because the Moon governs the subconscious, this transit primarily impacts your inner life first, restructuring how you experience pressure, security, and relationship ties."))}
       </p>
     </div>
   `)}
 
-  <!-- PAGE 5: CURRENT SATURN TIMELINE OVERVIEW -->
-  ${createStandardPage(5, "The Saturn Transit Timeline", "Transit Timeline", `
+  <!-- PAGE 6: THE SATURN TRANSIT TIMELINE -->
+  ${createStandardPage(6, "The Saturn Transit Timeline", "Transit Timeline", `
     <div class="info-card" style="margin-top: 3mm;">
       <div class="info-card-title">Visual Transit Path</div>
       <div class="timeline-widget">
@@ -942,7 +1116,20 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
     
     <div class="info-card">
-      <div class="info-card-title">Calculated Sade Sati Windows</div>
+      <div class="info-card-title">Timeline Notes &amp; Dynamic Triggers</div>
+      <p style="font-size: 11pt; line-height: 1.6; color: var(--text-main);">
+        The Sade Sati path represents a series of energetic triggers. It shifts your focus through three main arenas of consciousness. In the 12th transit, Saturn creates restless transitions. In the 1st transit, it targets your inner stability and emotional focus. Finally, in the 2nd transit, it restructures family and material dynamics. Fulfilling your obligations calmly will smooth out the transit friction.
+      </p>
+      <p style="font-size: 10.5pt; line-height: 1.55; color: var(--text-muted); margin-top: 3mm;">
+        The windows listed on the following page indicate when Saturn directly transits these sectors. Retrograde cycles will cause brief shifts, where Saturn temporarily retreats into the previous sign, offering a short window to review and adjust your efforts before the transit resumes.
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 7: CALCULATED SADE SATI WINDOWS -->
+  ${createStandardPage(7, "Calculated Sade Sati Windows", "Transit Windows", `
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Sade Sati Transit Periods</div>
       <div class="table-wrap">
         <table class="premium-table">
           <thead>
@@ -973,15 +1160,15 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="info-card">
-      <div class="info-card-title">Timeline Notes</div>
-      <p style="font-size: 9.5pt; line-height: 1.45; color: var(--text-muted);">
-        The periods listed above show the exact dates when transit Saturn enters and leaves the signs adjacent to your natal Moon. Retrograde periods during these dates can shift Saturn temporarily back and forth between signs, which is why transition zones might feel particularly volatile or intense.
+      <div class="info-card-title">Understanding Transit Windows</div>
+      <p style="font-size: 10.2pt; line-height: 1.5; color: var(--text-muted);">
+        The periods listed above show the exact dates when transit Saturn enters and leaves the signs adjacent to your natal Moon. Retrograde periods during these dates can shift Saturn temporarily back and forth between signs, which is why transition zones might feel particularly volatile or intense. Keep this table as a reference to track active periods.
       </p>
     </div>
   `)}
 
-  <!-- PAGE 6: CURRENT CYCLE SUMMARY -->
-  ${createStandardPage(6, "Where You Stand Right Now", "Cycle Status", `
+  <!-- PAGE 8: WHERE YOU STAND RIGHT NOW -->
+  ${createStandardPage(8, "Where You Stand Right Now", "Cycle Status", `
     <div class="narrative-block" style="margin-top: 3mm;">
       <div class="narrative-label">What This Means for You</div>
       <p class="narrative-text">
@@ -990,14 +1177,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
     
     <div class="grid-2">
-      <div class="info-card" style="border-left: 4px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title" style="color: var(--navy);">Main Lesson of This Cycle</div>
         <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
           ${escapeHtml(getVal("sadeSatiStatusOverview.mainLesson", "The central theme of this period is developing emotional accountability and practical discipline. Saturn demands that you take complete ownership of your internal stability, rather than relying on external validation, false structures, or habitual patterns. Delay is not denial, but a tool for refinement."))}
         </p>
       </div>
       
-      <div class="info-card" style="border-left: 4px solid #E11D48;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #E11D48;">Main Caution &amp; Warning</div>
         <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
           ${escapeHtml(getVal("sadeSatiStatusOverview.mainCaution", "Avoid impulsive relocations, reactive relationship decisions, or taking on high-risk financial debt. Saturn tests your impulsiveness; hasty choices made to escape temporary pressure will result in long-term delays and lessons. Ground your actions in patience and quiet introspection."))}
@@ -1016,8 +1203,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   <!-- DIVIDER 1: UNDERSTANDING SADE SATI -->
   <div class="img-page-bg bg-div-overview"></div>
 
-  <!-- PAGE 8: COSMIC BLUEPRINT -->
-  ${createStandardPage(8, "Understanding the Cosmic Blueprint", "Vedic Astro Logic", `
+  <!-- PAGE 10: COSMIC BLUEPRINT -->
+  ${createStandardPage(10, "Understanding the Cosmic Blueprint", "Vedic Astro Logic", `
     <div class="narrative-block">
       <div class="narrative-label">Moon Sign as the Emotional Center</div>
       <p class="narrative-text">
@@ -1049,8 +1236,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 9: PHILOSOPHY OF THE TRANSIT -->
-  ${createStandardPage(9, "Philosophy of the Saturnian Transit", "Astrology Philosophy", `
+  <!-- PAGE 11: PHILOSOPHY OF THE TRANSIT -->
+  ${createStandardPage(11, "Philosophy of the Saturnian Transit", "Astrology Philosophy", `
     <div class="narrative-block">
       <div class="narrative-label">The Diamond Process: Refinement &amp; Growth</div>
       <p class="narrative-text">
@@ -1065,9 +1252,9 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">Core Message of the Transit</div>
-      <p style="font-size: 10pt; line-height: 1.45; font-weight: 500; color: var(--navy-light); background: var(--navy); padding: 3mm 4mm; border-radius: 4px;">
+      <p style="font-size: 10pt; line-height: 1.45; font-weight: 500; color: var(--navy); border: 1.5px solid rgba(11, 25, 44, 0.12); padding: 3mm 4mm; border-radius: 4px; background: var(--navy-light);">
         ${escapeHtml(getVal("philosophyOfTransit.coreMessage", "Saturn asks you to stop seeking short-term escapes. True peace comes from quiet discipline, steady effort, and aligning your actions with cosmic order."))}
       </p>
     </div>
@@ -1084,8 +1271,42 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 10: SATURN'S TEACHING STYLE -->
-  ${createStandardPage(10, "Saturn's Pedagogical Methods", "Teaching Style", `
+  <!-- PAGE 12: THE DIVINE PURPOSE - SHLOKA & WISDOM -->
+  ${createStandardPage(12, "Sade Sati: The Forge of Destiny", "Cosmic Wisdom", `
+    <div class="info-card" style="margin-top: 4mm; text-align: center; padding: 6mm 5mm; border: 1.5px solid rgba(11, 25, 44, 0.15);">
+      <div style="font-size: 14pt; font-weight: 700; color: var(--navy); line-height: 1.8; margin-bottom: 4mm; font-family: 'Georgia', serif;">
+        कर्मण्येवाधिकारस्ते मा फलेषु कदाचन ।<br>
+        मा कर्मफलहेतुर्भूर्मा ते सङ्गोऽस्त्वकर्मणि ॥
+      </div>
+      <div style="font-size: 10pt; font-style: italic; color: var(--text-muted); margin-bottom: 4mm; line-height: 1.5;">
+        "karmaṇy-evādhikāras te mā phaleṣu kadācana |<br>
+        mā karma-phala-hetur bhūr mā te saṅgo ’stv-akarmaṇi"
+      </div>
+      <div style="font-size: 11.5pt; font-weight: 700; color: var(--navy); border-top: 1px solid rgba(11,25,44,0.1); padding-top: 4mm;">
+        Bhagavad Gita · Chapter 2, Verse 47
+      </div>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">The Translation</div>
+      <p style="font-size: 11pt; line-height: 1.55; color: var(--text-main); text-align: justify; font-style: italic;">
+        "You have a designated right to perform your duty, but you are never entitled to the fruits of your actions. Never consider yourself to be the cause of the results of your activities, and never be attached to inaction."
+      </p>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Vedic Reflection &amp; Sade Sati's True Nature</div>
+      <p style="font-size: 10.5pt; line-height: 1.6; color: var(--text-main); text-align: justify; margin-bottom: 3mm;">
+        In popular culture, Shani Sade Sati is often misunderstood as a curse or a period of continuous misfortune. However, Vedic philosophy reveals that Saturn (Shani Dev) is the <strong>Karma-Adhikari</strong> — the divine administrator of justice. Saturn's 7.5-year transit is not a punitive phase, but a cosmic testing period designed to dismantle false pride, test endurance, and refine the soul's character.
+      </p>
+      <p style="font-size: 10.5pt; line-height: 1.6; color: var(--text-main); text-align: justify;">
+        By focusing purely on self-effort, discipline, and honest work (Karma), and letting go of anxiety regarding immediate rewards (Phala), you align directly with Saturn's highest energy. This transit ultimately rewards those who step up their accountability, work with humility, and recognize that delays are merely opportunities for consolidation. Sade Sati is the forge that crystallizes your inner strength.
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 13: SATURN'S TEACHING STYLE -->
+  ${createStandardPage(13, "Saturn's Pedagogical Methods", "Teaching Style", `
     <div class="narrative-block">
       <div class="narrative-label">Discipline, Delays, and Long-Term Rewards</div>
       <p class="narrative-text">
@@ -1107,7 +1328,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--gold);">
+    <div class="info-card">
       <div class="info-card-title" style="color: var(--navy);">The Best Response Strategy</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("saturnTeachingStyle.bestResponse", "Adopt a posture of silent service, steady contribution, and physical discipline. Maintain absolute ethical standards, accept delay with mental poise, and focus on building high-quality skills that will serve you for decades."))}
@@ -1115,8 +1336,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 11: MAJOR THEMES SUMMARY -->
-  ${createStandardPage(11, "Key Themes & Areas of Evolution", "Transit Themes", `
+  <!-- PAGE 14: KEY THEMES & AREAS OF EVOLUTION -->
+  ${createStandardPage(14, "Key Themes & Areas of Evolution", "Transit Themes", `
     <div class="narrative-block">
       <div class="narrative-label">The Blueprint of Evolutionary Change</div>
       <p class="narrative-text">
@@ -1165,8 +1386,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   <!-- DIVIDER 2: THE THREE PHASES -->
   <div class="img-page-bg bg-div-phases"></div>
 
-  <!-- PAGE 13: PHASE 1 INTRODUCTION -->
-  ${createStandardPage(13, "Phase 1: The Rising Phase (12th Transit)", "The Three Phases", `
+  <!-- PAGE 16: PHASE 1 INTRODUCTION -->
+  ${createStandardPage(16, "Phase 1: The Rising Phase (12th Transit)", "The Three Phases", `
     <div class="narrative-block">
       <div class="narrative-label">Why This Phase Begins</div>
       <p class="narrative-text">
@@ -1182,14 +1403,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title">Phase Intent</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase1Intro.phaseIntent", "The spiritual intent is to detach you from superficial material pursuits and force you to look at your subconscious blocks. It demands quiet solitude and spiritual realignment."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid var(--gold);">
+      <div class="info-card">
         <div class="info-card-title">Likely Experience</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase1Intro.likelyExperience", "Expect increased expenditures, minor disturbances in sleep patterns, feelings of isolation, and sudden changes in your daily professional landscape."))}
@@ -1198,8 +1419,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 14: PHASE 1 DETAILED MEANING -->
-  ${createStandardPage(14, "Restlessness, Movement & Body Symbolism", "Phase 1 detailed", `
+  <!-- PAGE 17: PHASE 1 DETAILED MEANING -->
+  ${createStandardPage(17, "Restlessness, Movement & Body Symbolism", "Phase 1 detailed", `
     <div class="narrative-block">
       <div class="narrative-label">Movement, Restlessness, and Change</div>
       <p class="narrative-text">
@@ -1216,14 +1437,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid #E11D48;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #E11D48;">What to Avoid</div>
         <p style="font-size: 9.6pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase1Detail.whatToAvoid", "Avoid impulsive resignations, speculative investments, taking on loans for luxury, and blaming others for your feelings of isolation."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid #059669;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #059669;">What to Do Instead</div>
         <p style="font-size: 9.6pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase1Detail.whatToDoInstead", "Engage in systematic planning, physical grounding (yoga, walks), charity, sleep hygiene, and voluntary solitude for introspection."))}
@@ -1239,8 +1460,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 15: PHASE 1 PRACTICAL GUIDANCE -->
-  ${createStandardPage(15, "Discipline and Guidance for Phase 1", "Phase 1 Guidance", `
+  <!-- PAGE 18: PHASE 1 PRACTICAL GUIDANCE -->
+  ${createStandardPage(18, "Discipline and Guidance for Phase 1", "Phase 1 Guidance", `
     <div class="narrative-block">
       <div class="narrative-label">Grounding Habits &amp; Career Patience</div>
       <p class="narrative-text">
@@ -1249,7 +1470,17 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card">
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Weekly Routine Suggestion</div>
+      <p style="font-size: 10.5pt; line-height: 1.6; color: var(--text-main);">
+        ${escapeHtml(getVal("phase1Guidance.routineSuggestion", "Dedicate Saturday mornings to volunteering or helping the elderly. Before sleep, practice 10 minutes of silent daily breathing. Review your financial budget weekly to eliminate unnecessary expenditures."))}
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 19: PHASE 1 RISK MITIGATION STRATEGY -->
+  ${createStandardPage(19, "Phase 1 Risk Mitigation Strategy", "Risk Mitigation", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">Risk Mitigation Strategy</div>
       <div class="table-wrap">
         <table class="premium-table">
@@ -1281,16 +1512,16 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </div>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--gold);">
-      <div class="info-card-title">Weekly Routine Suggestion</div>
-      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
-        ${escapeHtml(getVal("phase1Guidance.routineSuggestion", "Dedicate Saturday mornings to volunteering or helping the elderly. Before sleep, practice 10 minutes of silent deep breathing. Review your financial budget weekly to eliminate unnecessary expenditures."))}
+    <div class="info-card">
+      <div class="info-card-title">Saturnian Correction Principles</div>
+      <p style="font-size: 10.2pt; line-height: 1.55; color: var(--text-muted);">
+        Saturn requires that you do not run away from pressure. Address career stagnation by mastering details, secure your financial safety net before spending, and prioritize rhythmic rest for your body. Grounding yourself is the direct remedy for this transit.
       </p>
     </div>
   `)}
 
-  <!-- PAGE 16: PHASE 2 INTRODUCTION -->
-  ${createStandardPage(16, "Phase 2: The Peak Phase (1st Transit)", "The Peak Transit", `
+  <!-- PAGE 20: PHASE 2 INTRODUCTION -->
+  ${createStandardPage(20, "Phase 2: The Peak Phase (1st Transit)", "The Peak Transit", `
     <div class="narrative-block">
       <div class="narrative-label">Saturn Over the Natal Moon</div>
       <p class="narrative-text">
@@ -1306,14 +1537,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title">What is Being Tested</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase2Intro.whatIsBeingTested", "Your emotional resilience, self-reliance, capacity to face delays without frustration, and your willingness to act with integrity despite obstacles."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid #E11D48;">
+      <div class="info-card">
         <div class="info-card-title">Emotional Warning</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase2Intro.emotionalHeavinessWarning", "Do not mistake temporary mental fatigue for permanent failure. Avoid falling into self-pity or isolation; seek support through structure and routine."))}
@@ -1322,8 +1553,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 17: MIND, EMOTION & PHYSICAL VITALITY -->
-  ${createStandardPage(17, "Mind, Emotion & Physical Vitality", "Phase 2 Detailed", `
+  <!-- PAGE 21: MIND, EMOTION & PHYSICAL VITALITY -->
+  ${createStandardPage(21, "Mind, Emotion & Physical Vitality", "Phase 2 Detailed", `
     <div class="narrative-block">
       <div class="narrative-label">Anxiety, Hesitation, and Mental Blankness</div>
       <p class="narrative-text">
@@ -1345,8 +1576,11 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         <strong>Support Routine:</strong> ${escapeHtml(getVal("phase2Detail.supportRoutine", "Maintain a simple, warm vegetarian diet. Practice 15 minutes of gentle physical stretching daily. Establish a fixed sleep schedule, going to bed before 10 PM. View physical rest as a vital component of your transit management strategy, not a sign of failure."))}
       </p>
     </div>
+  `)}
 
-    <div class="info-card">
+  <!-- PAGE 22: VITALITY BALANCE INDICATOR -->
+  ${createStandardPage(22, "Vitality Balance Indicator", "Phase 2 Support", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">Vitality Balance Indicator</div>
       <div class="table-wrap">
         <table class="premium-table">
@@ -1379,8 +1613,25 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 18: PHASE 3 INTRODUCTION -->
-  ${createStandardPage(18, "Phase 3: The Setting Phase (2nd Transit)", "The Final Phase", `
+  <!-- PAGE 23: SATURNIAN HEALTH ADVICE -->
+  ${createStandardPage(23, "Saturnian Health Advice", "Phase 2 Support", `
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Saturnian Health Advice</div>
+      <p style="font-size: 10.8pt; line-height: 1.6; color: var(--text-main);">
+        Saturn transiting over the natal Moon causes emotional and physical fatigue. The key is structural regularity: eat at fixed hours, sleep at fixed hours, and avoid pushing yourself to exhaustion. Fulfilling your routines silently builds deep physical and mental stamina that protects you throughout the transit.
+      </p>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Mind-Body Harmonization</div>
+      <p style="font-size: 10.2pt; line-height: 1.55; color: var(--text-muted);">
+        Physical routines act as the foundation for psychological strength under this transit. When your daily life possesses a predictable structure, the nervous system registers stability, reducing general anxiety and emotional volatility.
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 24: PHASE 3 INTRODUCTION -->
+  ${createStandardPage(24, "Phase 3: The Setting Phase (2nd Transit)", "The Final Phase", `
     <div class="narrative-block">
       <div class="narrative-label">Restoration of Clarity &amp; Wisdom</div>
       <p class="narrative-text">
@@ -1396,14 +1647,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid #059669;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #059669;">Maturity Indicator</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase3Intro.maturityIndicator", "The ability to look back at past challenges with gratitude, recognizing how they forced you to grow, and acting with quiet self-reliance."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title">Shift: Confusion to Clarity</div>
         <p style="font-size: 9.8pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("phase3Intro.shiftFromConfusionToClarity", "Transitioning from constant fire-fighting and emotional reactivity to strategic planning, solid financial boundaries, and balanced communication."))}
@@ -1412,8 +1663,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 19: WEALTH, FAMILY, SPEECH & IMAGE -->
-  ${createStandardPage(19, "Wealth, Family, Speech & Image", "Phase 3 Detailed", `
+  <!-- PAGE 25: WEALTH, FAMILY, SPEECH & IMAGE -->
+  ${createStandardPage(25, "Wealth, Family, Speech & Image", "Phase 3 Detailed", `
     <div class="narrative-block">
       <div class="narrative-label">Financial Discipline &amp; Wealth Reconstruction</div>
       <p class="narrative-text">
@@ -1429,14 +1680,17 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">Practical Guidance: Speak Less, Observe More</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("phase3LifeEffects.observeAndSpeakLess", "Fulfill family duties without expecting appreciation. Keep financial transactions clear and documented. When conflict arises, take a breath, observe, and respond only after careful reflection."))}
       </p>
     </div>
+  `)}
 
-    <div class="info-card">
+  <!-- PAGE 26: FAMILY & FINANCE STRATEGY -->
+  ${createStandardPage(26, "Family & Finance Strategy", "Phase 3 Support", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">Family &amp; Finance Strategy</div>
       <div class="table-wrap">
         <table class="premium-table">
@@ -1469,11 +1723,28 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
+  <!-- PAGE 27: SATURNIAN MATERIAL WISDOM -->
+  ${createStandardPage(27, "Saturnian Material Wisdom", "Phase 3 Support", `
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Saturnian Material Wisdom</div>
+      <p style="font-size: 10.8pt; line-height: 1.6; color: var(--text-main);">
+        The setting phase of Sade Sati tests your stability when outer restrictions begin to lift. Focus on rebuilding savings, maintaining soft speech under domestic stress, and serving your family members without expectation of praise. This is the foundation of long-term security.
+      </p>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Integration Layer</div>
+      <p style="font-size: 10.2pt; line-height: 1.55; color: var(--text-muted);">
+        Use this final transit phase to secure your structures. Rebuild what was dismantled, set solid boundaries for wealth and communication, and appreciate the stable foundations you have constructed under Saturn's rigorous guidance.
+      </p>
+    </div>
+  `)}
+
   <!-- DIVIDER 3: MINOR CYCLES & IMPACT -->
   <div class="img-page-bg bg-div-impact"></div>
 
-  <!-- PAGE 21: IMPACT ON KEY LIFE AREAS -->
-  ${createStandardPage(21, "Career & Relationship Analysis", "Key Life Sectors", `
+  <!-- PAGE 29: IMPACT ON KEY LIFE AREAS -->
+  ${createStandardPage(29, "Career & Relationship Analysis", "Key Life Sectors", `
     <div class="narrative-block">
       <div class="narrative-label">Saturn's Influence Across Crucial Domains</div>
       <p class="narrative-text">
@@ -1511,8 +1782,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 22: MINOR CYCLES OVERVIEW -->
-  ${createStandardPage(22, "Understanding Dhaiya & Panoti Cycles", "Saturn Minor Cycles", `
+  <!-- PAGE 30: MINOR CYCLES OVERVIEW -->
+  ${createStandardPage(30, "Understanding Dhaiya & Panoti Cycles", "Saturn Minor Cycles", `
     <div class="narrative-block">
       <div class="narrative-label">What are Dhaiya and Panoti?</div>
       <p class="narrative-text">
@@ -1569,7 +1840,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </div>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--gold);">
+    <div class="info-card">
       <div class="info-card-title">Severity Scale Explanation</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("minorCycles.severityScaleExplanation", "Severity is qualitative. 'Very Strong' cycles demand total life restructuring. 'Strong' cycles focus on specific corrections in target areas, while 'Moderate' periods test your daily habits and routine structure."))}
@@ -1577,8 +1848,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 23: HOUSE-WISE IMPACT -->
-  ${createStandardPage(23, "Saturn's Transit Position & Aspects", "House Placements", `
+  <!-- PAGE 31: HOUSE-WISE IMPACT -->
+  ${createStandardPage(31, "Saturn's Transit Position & Aspects", "House Placements", `
     <div class="narrative-block">
       <div class="narrative-label">Zodiac House Position Interpretation</div>
       <p class="narrative-text">
@@ -1614,7 +1885,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         </div>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title">Most Affected Houses</div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("houseWiseImpact.mostAffectedHousesExplanation", "The house Saturn transits and the house receiving its 10th aspect are key areas of activity. Focus on maintaining routines and ethical behavior in these sectors to minimize friction."))}
@@ -1623,8 +1894,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 24: CAREER & STUDY IMPACT -->
-  ${createStandardPage(24, "Career Restructuring & Study Rhythms", "Work & Study", `
+  <!-- PAGE 32: CAREER & STUDY IMPACT -->
+  ${createStandardPage(32, "Career Restructuring & Study Rhythms", "Work & Study", `
     <div class="narrative-block">
       <div class="narrative-label">Professional Restructuring and Delays</div>
       <p class="narrative-text">
@@ -1640,14 +1911,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid #E11D48;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #E11D48;">Avoid These Mistakes</div>
         <p style="font-size: 9.6pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("careerStudyImpact.avoidTheseMistakes", "Do not argue with superiors, neglect your academic or professional duties, switch fields impulsively, or cut corners to meet deadlines."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid #059669;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #059669;">Work/Study rhythm suggestion</div>
         <p style="font-size: 9.6pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("careerStudyImpact.workStudyRhythmSuggestion", "Establish a fixed 2-hour study or skill-building window daily. Keep a detailed task checklist. Focus on one major project at a time with absolute concentration."))}
@@ -1656,8 +1927,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 25: RELATIONSHIP & FAMILY IMPACT -->
-  ${createStandardPage(25, "Relationship Boundaries & Family Duty", "Relationship & Family", `
+  <!-- PAGE 33: RELATIONSHIP & FAMILY IMPACT -->
+  ${createStandardPage(33, "Relationship Boundaries & Family Duty", "Relationship & Family", `
     <div class="narrative-block">
       <div class="narrative-label">Emotional Ties, Boundaries, and Truth</div>
       <p class="narrative-text">
@@ -1672,14 +1943,17 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">Communication Style Under Stress</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("relationshipFamilyImpact.communicationStyleUnderStress", "When emotional pressure rises, practice active listening and delay your responses. Avoid harsh arguments. Fulfill your domestic obligations patiently, keeping communication clear and simple."))}
       </p>
     </div>
+  `)}
 
-    <div class="info-card">
+  <!-- PAGE 34: RELATIONSHIP GUIDANCE RULES -->
+  ${createStandardPage(34, "Relationship Guidance Rules", "Relationship & Family", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">Relationship Guidance rules</div>
       <div class="table-wrap">
         <table class="premium-table">
@@ -1712,8 +1986,25 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 26: HEALTH & ENERGY GUIDANCE -->
-  ${createStandardPage(26, "Physical Support & Vitality Management", "Health & Energy", `
+  <!-- PAGE 35: NAVIGATING RELATIONSHIP TESTS -->
+  ${createStandardPage(35, "Navigating Relationship Tests", "Relationship & Family", `
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Navigating Relationship Tests</div>
+      <p style="font-size: 10.8pt; line-height: 1.6; color: var(--text-main);">
+        Saturn filters out superficial connections and strengthens authentic bonds. View relationship tension not as a crisis, but as an auditor's check. Clear communication, fulfillment of commitments, and set healthy boundaries are your keys to relationship harmony.
+      </p>
+    </div>
+
+    <div class="info-card">
+      <div class="info-card-title">Karmic Relationship Contracts</div>
+      <p style="font-size: 10.2pt; line-height: 1.55; color: var(--text-muted);">
+        Every significant relationship contains lessons. Saturn demands that you stop blaming other people for domestic friction, and instead look at your own patterns of expectation, reaction, and commitment. Maturity transforms relationship demands into support.
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 36: HEALTH & ENERGY GUIDANCE -->
+  ${createStandardPage(36, "Physical Support & Vitality Management", "Health & Energy", `
     <div class="narrative-block">
       <div class="narrative-label">Physical Support During Saturnian Pressure</div>
       <p class="narrative-text">
@@ -1747,7 +2038,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </div>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">When to Slow Down</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("healthEnergyGuidance.whenToSlowDown", "If you experience chronic fatigue, joint stiffness, or persistent digestive problems, treat these as direct instructions to slow down. Simplify your schedule, seek medical advice, and prioritize rest over effort."))}
@@ -1755,8 +2046,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 27: FINANCE & MATERIAL STABILITY -->
-  ${createStandardPage(27, "Wealth Habits & Material Discipline", "Finance & Stability", `
+  <!-- PAGE 37: FINANCE & MATERIAL STABILITY -->
+  ${createStandardPage(37, "Wealth Habits & Material Discipline", "Finance & Stability", `
     <div class="narrative-block">
       <div class="narrative-label">Money Habits Under Saturn's Transit</div>
       <p class="narrative-text">
@@ -1770,7 +2061,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         <span class="scale-label scale-low">Loose</span>
         <span class="scale-label scale-moderate">Cautious</span>
         <span class="scale-label scale-strong">Stable</span>
-        <span class="scale-label scale-very-strong" style="border: 2px solid var(--gold);">Very Disciplined</span>
+        <span class="scale-label scale-very-strong" style="color: var(--gold); border: 2.5px solid var(--gold); padding: 0.5mm 2mm; border-radius: 4px; font-weight: 900;">Very Disciplined</span>
       </div>
       <p style="font-size: 9.5pt; color: var(--text-muted); margin-top: 2.5mm;">
         Your Current Astrological Recommendation: <strong>Very Disciplined</strong>. Saturn's current transit requires you to adopt a conservative approach to asset preservation, avoiding high-risk ventures or speculative investments.
@@ -1778,14 +2069,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
 
     <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid #E11D48;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #E11D48;">Money Mistakes to Avoid</div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("financeMaterialStability.debtCautionAndMistakes", "Do not co-sign loans for others, take on consumer debt for luxuries, invest in speculative assets (crypto/day-trading), or make large purchases without 30 days of reflection."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 3px solid #059669;">
+      <div class="info-card">
         <div class="info-card-title" style="color: #059669;">Saving &amp; Spending Plan</div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main);">
           ${escapeHtml(getVal("financeMaterialStability.savingVsSpendingPlan", "Build a liquid emergency fund covering 6 months of expenses. Invest in secure, low-yield long-term assets. Automate your savings daily or monthly."))}
@@ -1797,8 +2088,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   <!-- DIVIDER 4: GUIDANCE & CONCLUSION -->
   <div class="img-page-bg bg-div-remedies"></div>
 
-  <!-- PAGE 29: REMEDIAL PATH OVERVIEW -->
-  ${createStandardPage(29, "Constructive Response to Saturn's Energy", "Remedial Path", `
+  <!-- PAGE 39: REMEDIAL PATH OVERVIEW -->
+  ${createStandardPage(39, "Constructive Response to Saturn's Energy", "Remedial Path", `
     <div class="narrative-block">
       <div class="narrative-label">Aligning with Saturn through Remedies</div>
       <p class="narrative-text">
@@ -1834,8 +2125,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 30: SPIRITUAL REMEDIES -->
-  ${createStandardPage(30, "Spiritual Support & Devotional Routine", "Spiritual Remedies", `
+  <!-- PAGE 40: SPIRITUAL REMEDIES -->
+  ${createStandardPage(40, "Spiritual Support & Devotional Routine", "Spiritual Remedies", `
     <div class="narrative-block">
       <div class="narrative-label">Hanuman Worship as a Stabilizing Force</div>
       <p class="narrative-text">
@@ -1850,14 +2141,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--gold);">
+    <div class="info-card">
       <div class="info-card-title">Daily Prayer Rhythm</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("spiritualRemedies.dailyPrayerRhythm", "Perform your spiritual practice at dawn or dusk. Light a simple lamp, sit in a quiet space, and chant. Regularity is the key; Saturn rewards consistency over elaborate, irregular rituals."))}
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy); background: var(--gold-light);">
+    <div class="info-card">
       <div class="info-card-title">How to Practice Simply</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("spiritualRemedies.howToDoItSimply", "Begin with 11 chants of the Hanuman Chalisa or the simple Ram Naam mantra. Sit facing East, maintain a calm posture, and focus on steady inhalation and exhalation without overcomplicating the spiritual process."))}
@@ -1865,12 +2156,12 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 31: PHYSICAL & LIFESTYLE REMEDIES -->
-  ${createStandardPage(31, "Body Correction & Service (Seva)", "Lifestyle Remedies", `
+  <!-- PAGE 41: PHYSICAL & LIFESTYLE REMEDIES -->
+  ${createStandardPage(41, "Body Correction & Service (Seva)", "Lifestyle Remedies", `
     <div class="narrative-block">
       <div class="narrative-label">Reducing Inertia Through Physical Movement</div>
       <p class="narrative-text">
-        ${escapeHtml(getVal("physicalLifestyleRemedies.sweatingAndRoutineService", "Saturn governs inertia (Tamas). Under transit pressure, one can easily fall into lethargy, procrastination, or physical stiffness. To counteract this, engage in daily physical movement that induces mild sweating. Regular physical effort increases blood circulation, reduces joints stiffness, and breaks psychological stagnation, helping you maintain a positive energy balance."))}
+        ${escapeHtml(getVal("physicalLifestyleRemedies.sweatingAndRoutineService", "Saturn governs inertia (Tamas). Under transit pressure, one can easily fall into lethargy, procrastination, or physical stagnation. To counteract this, engage in daily physical movement that induces mild sweating. Regular physical effort increases blood circulation, reduces joints stiffness, and breaks psychological stagnation, helping you maintain a positive energy balance."))}
       </p>
     </div>
     
@@ -1881,7 +2172,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">Weekly Service Tasks (Saturday Seva)</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("physicalLifestyleRemedies.weeklyServiceTasks", "Feed stray dogs or crows with grain or bread on Saturdays. Donate dark blankets or warm clothing to the needy. Assist an elderly neighbor or relative with their chores patiently."))}
@@ -1889,8 +2180,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 32: PRACTICAL DAILY ACTION PLAN -->
-  ${createStandardPage(32, "The 30-Day Saturn Routine Blueprint", "Daily Action Plan", `
+  <!-- PAGE 42: THE 30-DAY SATURN ROUTINE BLUEPRINT -->
+  ${createStandardPage(42, "The 30-Day Saturn Routine Blueprint", "Daily Action Plan", `
     <div class="narrative-block">
       <div class="narrative-label">Immediate Daily Steps</div>
       <p class="narrative-text">
@@ -1898,7 +2189,17 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card">
+    <div class="info-card" style="margin-top: 4mm;">
+      <div class="info-card-title">Daily Seva and Help</div>
+      <p style="font-size: 10.2pt; line-height: 1.55; color: var(--text-main);">
+        Voluntary help and daily service constitute a powerful energetic remedy. Dedicate time to assist the elderly, support clean working environments, and complete chores with diligence and positive posture.
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 43: 30-DAY ALIGNMENT ROUTINE -->
+  ${createStandardPage(43, "30-Day Alignment Routine", "Daily Action Plan", `
+    <div class="info-card" style="margin-top: 4mm;">
       <div class="info-card-title">30-Day Alignment Routine</div>
       <div class="table-wrap">
         <table class="premium-table">
@@ -1934,11 +2235,21 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
     </div>
+  `)}
 
-    <div class="grid-2">
-      <div class="info-card" style="border-left: 3px solid var(--navy);">
+  <!-- PAGE 39: CRISIS MANAGEMENT & HABIT STRUCTURE -->
+  ${createStandardPage(39, "Crisis Management & Habit Structure", "Daily Action Plan", `
+    <div class="narrative-block">
+      <div class="narrative-label">Sustaining Habit Consistency</div>
+      <p class="narrative-text">
+        Under Saturn's transit, the key to reducing anxiety is predictability. When you do the same constructive actions at the same time every day, your nervous system registers safety, preventing the mental fatigue or overthinking typical of this period. Do not seek perfection; focus on quiet, unbroken consistency.
+      </p>
+    </div>
+
+    <div class="grid-2" style="margin-top: 4mm;">
+      <div class="info-card">
         <div class="info-card-title">Stress Strategy</div>
-        <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main);">
+        <p style="font-size: 9.6pt; line-height: 1.45; color: var(--text-main);">
           ${escapeHtml(getVal("practicalDailyActionPlan.stressAndUncertaintyStrategy", "When anxiety spikes, pause all actions. Drink warm water, practice 5 minutes of box breathing, and focus on physical duties, avoiding mental loops."))}
         </p>
       </div>
@@ -1955,15 +2266,15 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 33: LIFE AREA SUMMARY DASHBOARD -->
-  ${createStandardPage(33, "Overall Impact At a Glance", "Summary Dashboard", `
-    <div style="display:flex; flex-direction:column; gap:2mm; margin-top: 2mm;">
+  <!-- PAGE 40: LIFE AREA SUMMARY DASHBOARD PART 1 -->
+  ${createStandardPage(40, "Overall Impact At a Glance - Part 1", "Summary Dashboard", `
+    <div style="display:flex; flex-direction:column; gap:3mm; margin-top: 3mm;">
       <div class="info-card">
         <div class="info-card-title">Career &amp; Study</div>
         <div class="scale-container">
           <span class="scale-label scale-strong">Strong Influence</span>
         </div>
-        <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main); margin-top: 1.5mm;">
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
           ${escapeHtml(getVal("lifeAreaSummary.careerReasoning", "Career requires disciplined effort and structured restructuring. Expect minor delays; maintain skill focus."))}
         </p>
       </div>
@@ -1973,51 +2284,60 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         <div class="scale-container">
           <span class="scale-label scale-moderate">Moderate Influence</span>
         </div>
-        <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main); margin-top: 1.5mm;">
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
           ${escapeHtml(getVal("lifeAreaSummary.relationshipsReasoning", "Relationships demand clarity and patience. Fulfill domestic duties without expecting gratitude."))}
         </p>
       </div>
 
-      <div class="grid-2">
-        <div class="info-card">
-          <div class="info-card-title">Health &amp; Vitality</div>
-          <div class="scale-container"><span class="scale-label scale-moderate">Moderate</span></div>
-          <p style="font-size: 9.3pt; line-height: 1.35; color: var(--text-main); margin-top: 1mm;">
-            ${escapeHtml(getVal("lifeAreaSummary.healthReasoning", "Prioritize sleep hygiene, joint stretching, and slow digestion support."))}
-          </p>
+      <div class="info-card">
+        <div class="info-card-title">Finance &amp; Wealth</div>
+        <div class="scale-container">
+          <span class="scale-label scale-strong">Strong Influence</span>
         </div>
-
-        <div class="info-card">
-          <div class="info-card-title">Finance &amp; Wealth</div>
-          <div class="scale-container"><span class="scale-label scale-strong">Strong</span></div>
-          <p style="font-size: 9.3pt; line-height: 1.35; color: var(--text-main); margin-top: 1mm;">
-            ${escapeHtml(getVal("lifeAreaSummary.financeReasoning", "Enforce strict savings; avoid consumer debt and speculative markets."))}
-          </p>
-        </div>
-      </div>
-
-      <div class="grid-2">
-        <div class="info-card">
-          <div class="info-card-title">Mind &amp; Peace</div>
-          <div class="scale-container"><span class="scale-label scale-very-strong">Very Strong</span></div>
-          <p style="font-size: 9.3pt; line-height: 1.35; color: var(--text-main); margin-top: 1mm;">
-            ${escapeHtml(getVal("lifeAreaSummary.mindReasoning", "Confront anxiety through structured routines, meditation, and quiet self-talk."))}
-          </p>
-        </div>
-
-        <div class="info-card">
-          <div class="info-card-title">Family Environment</div>
-          <div class="scale-container"><span class="scale-label scale-moderate">Moderate</span></div>
-          <p style="font-size: 9.3pt; line-height: 1.35; color: var(--text-main); margin-top: 1mm;">
-            ${escapeHtml(getVal("lifeAreaSummary.familyReasoning", "Fulfill family obligations silently. Practice detachment during verbal disputes."))}
-          </p>
-        </div>
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
+          ${escapeHtml(getVal("lifeAreaSummary.financeReasoning", "Enforce strict savings; avoid consumer debt and speculative markets."))}
+        </p>
       </div>
     </div>
   `)}
 
-  <!-- PAGE 34: THE STABILITY MAP -->
-  ${createStandardPage(34, "The Stability Map", "Stability Map", `
+  <!-- PAGE 41: LIFE AREA SUMMARY DASHBOARD PART 2 -->
+  ${createStandardPage(41, "Overall Impact At a Glance - Part 2", "Summary Dashboard", `
+    <div style="display:flex; flex-direction:column; gap:3mm; margin-top: 3mm;">
+      <div class="info-card">
+        <div class="info-card-title">Health &amp; Vitality</div>
+        <div class="scale-container">
+          <span class="scale-label scale-moderate">Moderate Influence</span>
+        </div>
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
+          ${escapeHtml(getVal("lifeAreaSummary.healthReasoning", "Prioritize sleep hygiene, joint stretching, and slow digestion support."))}
+        </p>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-title">Mind &amp; Peace</div>
+        <div class="scale-container">
+          <span class="scale-label scale-very-strong">Very Strong Influence</span>
+        </div>
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
+          ${escapeHtml(getVal("lifeAreaSummary.mindReasoning", "Confront anxiety through structured routines, meditation, and quiet self-talk."))}
+        </p>
+      </div>
+
+      <div class="info-card">
+        <div class="info-card-title">Family Environment</div>
+        <div class="scale-container">
+          <span class="scale-label scale-moderate">Moderate Influence</span>
+        </div>
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); margin-top: 1.5mm;">
+          ${escapeHtml(getVal("lifeAreaSummary.familyReasoning", "Fulfill family obligations silently. Practice detachment during verbal disputes."))}
+        </p>
+      </div>
+    </div>
+  `)}
+
+  <!-- PAGE 42: THE STABILITY MAP -->
+  ${createStandardPage(42, "The Stability Map", "Stability Map", `
     <div class="narrative-block">
       <div class="narrative-label">Vedic Blueprint: Change vs Protection</div>
       <p class="narrative-text">
@@ -2048,33 +2368,33 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 35: YEAR-WISE OR PHASE-WISE FORECAST -->
-  ${createStandardPage(35, "Year-wise & Phase-wise Forecast", "Transit Forecast", `
+  <!-- PAGE 43: YEAR-WISE OR PHASE-WISE FORECAST -->
+  ${createStandardPage(43, "Year-wise & Phase-wise Forecast", "Transit Forecast", `
     <div style="display:flex; flex-direction:column; gap:2.5mm; margin-top: 2mm;">
-      <div class="info-card" style="border-left: 4px solid #F59E0B;">
+      <div class="info-card">
         <div class="info-card-title">Near-Term Transit (Next 12 Months)</div>
         <div class="scale-container">
-          <span class="scale-label scale-moderate" style="background:#FEF3C7; color:#D97706;">Testing Period</span>
+          <span class="scale-label scale-moderate" style="color:#D97706;">Testing Period</span>
         </div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main); margin-top: 1.5mm;">
           ${escapeHtml(getVal("forecast.nearTermForecast", "The next 12 months require strict adherence to routines. Focus on stabilizing your health, building financial reserves, and avoiding impulsive career decisions."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 4px solid var(--navy);">
+      <div class="info-card">
         <div class="info-card-title">Mid-Term Transit (Months 13-36)</div>
         <div class="scale-container">
-          <span class="scale-label scale-strong" style="background:#DBEAFE; color:#2563EB;">Consolidation Period</span>
+          <span class="scale-label scale-strong" style="color:#2563EB;">Consolidation Period</span>
         </div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main); margin-top: 1.5mm;">
           ${escapeHtml(getVal("forecast.midTermForecast", "The mid-term transit focuses on consolidating your career direction and relationship commitments. Rewards begin to flow slowly as structural adjustments are finalized."))}
         </p>
       </div>
 
-      <div class="info-card" style="border-left: 4px solid #059669;">
+      <div class="info-card">
         <div class="info-card-title">Later-Term Transit (Final Phases)</div>
         <div class="scale-container">
-          <span class="scale-label scale-low" style="background:#E2E8F0; color:#64748B;">Easier Period</span>
+          <span class="scale-label scale-low" style="color:#64748B;">Easier Period</span>
         </div>
         <p style="font-size: 9.5pt; line-height: 1.4; color: var(--text-main); margin-top: 1.5mm;">
           ${escapeHtml(getVal("forecast.laterTermForecast", "The final phase brings restoration of ease and wealth consolidation. Psychological pressure decreases, leaving you with stable assets and deep emotional maturity."))}
@@ -2090,8 +2410,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 36: FINAL INSIGHT PAGE -->
-  ${createStandardPage(36, "Final Astrological Insight", "Core Insight", `
+  <!-- PAGE 44: FINAL INSIGHT PAGE -->
+  ${createStandardPage(44, "Final Astrological Insight", "Core Insight", `
     <div class="narrative-block" style="margin-top: 4mm;">
       <div class="narrative-label">Saturn's Message for Your Journey</div>
       <p class="narrative-text">
@@ -2099,14 +2419,14 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border: 2px solid var(--gold); background: rgba(15, 42, 74, 0.02); text-align: center; padding: 6mm 4mm; margin-top: 5mm; margin-bottom: 5mm;">
+    <div class="info-card" style="border: 2px solid var(--gold); background: rgba(11, 25, 44, 0.02); text-align: center; padding: 6mm 4mm; margin-top: 5mm; margin-bottom: 5mm;">
       <div style="font-size: 8pt; font-weight: 700; text-transform: uppercase; color: var(--navy); letter-spacing: 2px; margin-bottom: 2.5mm;">The One Sentence Truth</div>
       <p style="font-size: 11.5pt; font-weight: 700; color: var(--navy); line-height: 1.5; font-style: italic;">
         "${escapeHtml(getVal("finalInsight.oneSentenceTruth", "Silence and steady discipline dismantle the heaviest transits; maturity is forged in patience."))}"
       </p>
     </div>
 
-    <div class="info-card" style="border-left: 4px solid var(--navy);">
+    <div class="info-card">
       <div class="info-card-title">What to Remember Most</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main);">
         ${escapeHtml(getVal("finalInsight.whatToRememberMost", "Saturn does not delay your achievements permanently; it merely checks if you are ready to manage them. Maintain your routines, prioritize service, speak with care, and remember that this period will pass, leaving you structurally sturdier, wiser, and deeply grounded."))}
@@ -2114,8 +2434,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 37: AFFIRMATIONS -->
-  ${createStandardPage(37, "Mental Reinforcements & Affirmations", "Affirmations", `
+  <!-- PAGE 45: AFFIRMATIONS -->
+  ${createStandardPage(45, "Mental Reinforcements & Affirmations", "Affirmations", `
     <div class="narrative-block">
       <div class="narrative-label">Developing Cognitive Resilience</div>
       <p class="narrative-text">
@@ -2125,7 +2445,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
 
     <div style="display:flex; flex-direction:column; gap:3mm; margin-top: 4mm;">
       ${affirmations.slice(0, 7).map((aff, i) => `
-        <div class="info-card" style="display:flex; align-items:center; gap:4mm; margin-bottom:0; padding: 3mm 4mm; border-left: 4px solid var(--navy);">
+        <div class="info-card" style="display:flex; align-items:center; gap:4mm; margin-bottom:0; padding: 3mm 4mm;">
           <div style="font-size: 11pt; font-weight: 900; color: var(--navy); width: 8mm; flex-shrink:0;">0${i + 1}</div>
           <div style="font-size: 10pt; font-weight: 500; color: var(--text-main); line-height: 1.45;">${escapeHtml(aff)}</div>
         </div>
@@ -2133,8 +2453,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 38: FINAL CONCLUSION -->
-  ${createStandardPage(38, "Closing Summary & Outlook", "Report Conclusion", `
+  <!-- PAGE 46: FINAL CONCLUSION -->
+  ${createStandardPage(46, "Closing Summary & Outlook", "Report Conclusion", `
     <div class="narrative-block" style="margin-top: 3mm;">
       <div class="narrative-label">The Character Forge</div>
       <p class="narrative-text">
@@ -2149,7 +2469,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </p>
     </div>
 
-    <div class="info-card" style="border: 1.5px solid var(--border-color); background: rgba(15, 42, 74, 0.02); margin-top: 4mm;">
+    <div class="info-card" style="border: 1.5px solid rgba(11, 25, 44, 0.15); background: rgba(11, 25, 44, 0.02); margin-top: 4mm;">
       <div class="info-card-title">Saturn's Definition of Maturity</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--navy); font-weight: 500; font-style: italic; text-align: center;">
         "${escapeHtml(getVal("finalConclusion.maturityDefinition", "Maturity is the capacity to perform one's duty silently without demanding recognition, to face delay with peace, and to rely completely on internal stability."))}"
@@ -2157,8 +2477,8 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 39: BONUS APPENDIX -->
-  ${createStandardPage(39, "Glossary of Vedic Astrological Terms", "Report Appendix", `
+  <!-- PAGE 47: BONUS APPENDIX -->
+  ${createStandardPage(47, "Glossary of Vedic Astrological Terms", "Report Appendix", `
     <div class="info-card" style="margin-top: 3mm;">
       <div class="info-card-title">Astrological Glossary</div>
       <div style="display:flex; flex-direction:column; gap:2.5mm;">
@@ -2201,6 +2521,40 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
 async function generateSadeSatiReportPDF(reportData, userRequest) {
   let browser = null;
   try {
+    // If the report was cached prior to chart inclusion, load charts from DB or userRequest
+    if (!reportData.horoscopeCharts || !reportData.horoscopeCharts.rasiChart) {
+      let rawChartData = null;
+      if (userRequest && userRequest.kundli && userRequest.kundli.charts) {
+        rawChartData = userRequest.kundli.charts;
+      } else if (userRequest && userRequest.id) {
+        try {
+          const Kundli = require("../model/horoscope/kundli");
+          const kundliRecord = await Kundli.findOne({ where: { requestId: userRequest.id } });
+          if (kundliRecord && kundliRecord.charts) {
+            rawChartData = kundliRecord.charts;
+          }
+        } catch (dbErr) {
+          console.warn("[Sade Sati PDF Service] Failed to load charts dynamically from DB:", dbErr.message);
+        }
+      }
+      if (rawChartData) {
+        // Normalize: kundli.charts stores divisional charts as D1, D2, D9, D10 etc.
+        // The PDF template expects rasiChart, horaChart, navamsaChart, dasamsaChart keys.
+        const normalizedCharts = {
+          rasiChart: rawChartData.D1 || rawChartData.rasiChart || null,
+          horaChart: rawChartData.D2 || rawChartData.horaChart || null,
+          navamsaChart: rawChartData.D9 || rawChartData.navamsaChart || null,
+          dasamsaChart: rawChartData.D10 || rawChartData.dasamsaChart || null,
+          ...rawChartData
+        };
+        try {
+          reportData.horoscopeCharts = normalizedCharts;
+        } catch (e) {
+          reportData = { ...reportData, horoscopeCharts: normalizedCharts };
+        }
+      }
+    }
+
     console.log("[Sade Sati PDF Service] Compiling HTML template...");
     const htmlContent = generateSadeSatiHtmlTemplate(reportData, userRequest);
 
