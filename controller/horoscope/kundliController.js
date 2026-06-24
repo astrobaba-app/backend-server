@@ -33,6 +33,9 @@ const {
   getCompleteHoroscope,
   getTransitChart,
 } = require("../../services/astroEngineService");
+const {
+  queueAstroProductCohortRefresh,
+} = require("../../services/astroProductCohortService");
 
 /**
  * Shared helper — converts raw Ashtakavarga API response into the compact
@@ -595,6 +598,7 @@ const createKundli = async (req, res) => {
       yogas,
       horoscope: finalHoroscope,
     });
+    queueAstroProductCohortRefresh(userId, "kundli_created");
 
    // console.log("planetary result from kundli controller:", kundli);
     // Generate AI-enhanced Free Report narratives in the background (non-blocking)
@@ -1151,6 +1155,10 @@ const getKundli = async (req, res) => {
         message: "Kundli not found. Please generate it first.",
       });
     }
+
+    await kundli.increment("viewCount", { by: 1 });
+    await kundli.update({ lastViewedAt: new Date() });
+    queueAstroProductCohortRefresh(userId, "kundli_viewed");
 
     // Simply return the kundli data with whatever AI report exists (or null)
     // The frontend polling will handle getting AI content when it's ready

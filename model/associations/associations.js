@@ -46,6 +46,9 @@ const AstrologerEarning = require("../astrologer/astrologerEarning");
 const AstrologerPayoutRequest = require("../astrologer/astrologerPayoutRequest");
 const AIChatSession = require("../aiChat/aiChatSession");
 const AIChatMessage = require("../aiChat/aiChatMessage");
+const InterestIntentResult = require("../interest/interestIntentResult");
+const UserInterestScore = require("../interest/userInterestScore");
+const UserInterestCohort = require("../interest/userInterestCohort");
 const CachedHoroscope = require("../horoscope/cachedHoroscope");
 const ForumPost = require("../forum/forumPost");
 const ForumComment = require("../forum/forumComment");
@@ -988,6 +991,44 @@ const PalmOrder = require("../palm/palmOrder");
   AIChatMessage.belongsTo(AIChatSession, {
     foreignKey: "sessionId",
     as: "session",
+  });
+
+  User.hasMany(InterestIntentResult, {
+    foreignKey: "userId",
+    as: "interestIntentResults",
+    onDelete: "CASCADE",
+  });
+
+  InterestIntentResult.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  User.hasMany(UserInterestScore, {
+    foreignKey: "userId",
+    as: "interestScores",
+    onDelete: "CASCADE",
+  });
+
+  UserInterestScore.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  UserInterestScore.belongsTo(InterestIntentResult, {
+    foreignKey: "lastIntentResultId",
+    as: "lastIntentResult",
+  });
+
+  User.hasMany(UserInterestCohort, {
+    foreignKey: "userId",
+    as: "interestCohorts",
+    onDelete: "CASCADE",
+  });
+
+  UserInterestCohort.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
   });
 
   User.hasMany(PalmUpload, { foreignKey: "userId", as: "palmUploads", onDelete: "CASCADE" });

@@ -1,6 +1,9 @@
 const MatchingProfile = require("../../model/horoscope/matchingProfile");
 const axios = require("axios");
 const { enhanceAshtakootWithAI,enhanceManglikWithAI } = require("../../services/matchingAiService");
+const {
+  queueAstroProductCohortRefresh,
+} = require("../../services/astroProductCohortService");
 
 // Astro Engine configuration
 const ASTRO_ENGINE_BASE_URL =
@@ -175,6 +178,7 @@ const createMatching = async (req, res) => {
       manglikDetails: manglikData,
       conclusion,
     });
+    queueAstroProductCohortRefresh(userId, "matching_created");
 
     // Attach non-persisted details for UI rendering
     const matchingJson = matchingProfile.toJSON();
@@ -250,6 +254,10 @@ const getMatchingById = async (req, res) => {
         message: "Matching profile not found",
       });
     }
+
+    await matching.increment("viewCount", { by: 1 });
+    await matching.update({ lastViewedAt: new Date() });
+    queueAstroProductCohortRefresh(userId, "matching_viewed");
 
     res.status(200).json({
       success: true,

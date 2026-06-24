@@ -7,6 +7,9 @@ const {
   getWalletBalanceBreakdown,
   buildWalletDebitPlan,
 } = require("./walletService");
+const {
+  enqueueHumanConsultationInterestClassification,
+} = require("./interestQueueService");
 
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
 
@@ -168,6 +171,14 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
 
     await dbTransaction.commit();
     committed = true;
+
+    enqueueHumanConsultationInterestClassification({
+      userId: lockedSession.userId,
+      sessionId: lockedSession.id,
+      endedAt: endTime.toISOString(),
+    }).catch((queueError) => {
+      console.error("Failed to enqueue human chat interest classification:", queueError);
+    });
 
     if (io && billedAmount > 0 && updatedWalletBalance !== null) {
       io.to(`user:${lockedSession.userId}`).emit("wallet:updated", {

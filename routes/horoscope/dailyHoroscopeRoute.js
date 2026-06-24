@@ -6,10 +6,11 @@ const {
   getMonthlyHoroscope,
   getYearlyHoroscope,
 } = require("../../controller/horoscope/dailyHoroscopeController");
+const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
-router.get("/daily/:zodiacSign", getDailyHoroscope);
-router.get("/weekly/:zodiacSign", getWeeklyHoroscope);
-router.get("/monthly/:zodiacSign", getMonthlyHoroscope);
-router.get("/yearly/:zodiacSign", getYearlyHoroscope);
+router.get("/daily/:zodiacSign", checkForAuthenticationCookie.optional(), getDailyHoroscope);
+router.get("/weekly/:zodiacSign", checkForAuthenticationCookie.optional(), getWeeklyHoroscope);
+router.get("/monthly/:zodiacSign", checkForAuthenticationCookie.optional(), getMonthlyHoroscope);
+router.get("/yearly/:zodiacSign", checkForAuthenticationCookie.optional(), getYearlyHoroscope);
 
 module.exports = router;

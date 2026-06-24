@@ -84,6 +84,15 @@ const Kundli = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    viewCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    lastViewedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "kundlis",
