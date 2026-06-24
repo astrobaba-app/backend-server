@@ -10,6 +10,12 @@ const {
   getWalletBalanceBreakdown,
   buildWalletDebitPlan,
 } = require("../../services/walletService");
+const {
+  queueAiChatInterestFinalization,
+} = require("../../services/aiChatInterestService");
+const {
+  queueWalletCohortRefresh,
+} = require("../../services/walletCohortService");
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -69,6 +75,7 @@ const getWalletBalance = async (req, res) => {
     if (!wallet) {
       wallet = await Wallet.create({ userId });
     }
+    queueWalletCohortRefresh(userId, "wallet_balance_checked");
 
     res.status(200).json({
       success: true,
@@ -347,6 +354,7 @@ const verifyRecharge = async (req, res) => {
     // Idempotency check - if already completed, return success with existing data
     if (transaction.status === "completed") {
       const wallet = await Wallet.findOne({ where: { id: transaction.walletId } });
+      queueWalletCohortRefresh(userId, "recharge_verify_idempotent");
       return res.status(200).json({
         success: true,
         message: "Transaction already completed",
@@ -430,6 +438,7 @@ const verifyRecharge = async (req, res) => {
         amount: transaction.amount,
         newBalance,
       });
+      queueWalletCohortRefresh(userId, "recharge_verified");
 
       res.status(200).json({
         success: true,
@@ -553,7 +562,7 @@ const deductFromWallet = async (userId, amount, description = "Payment") => {
 const deductForAIUsage = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { amount, type, minutes } = req.body;
+    const { amount, type, minutes, sessionId } = req.body;
     const parsedAmount = toAmount(amount);
     const parsedMinutes = toAmount(minutes);
 
@@ -564,6 +573,7 @@ const deductForAIUsage = async (req, res) => {
     console.log('[PRODUCTION DEBUG] Amount:', amount, 'Type:', typeof amount);
     console.log('[PRODUCTION DEBUG] Type:', type);
     console.log('[PRODUCTION DEBUG] Minutes:', minutes);
+    console.log('[PRODUCTION DEBUG] AI Session ID:', sessionId || null);
     console.log('[PRODUCTION DEBUG] Request body:', JSON.stringify(req.body));
     console.log('[PRODUCTION DEBUG] Request headers:', JSON.stringify(req.headers));
 
@@ -712,6 +722,15 @@ const deductForAIUsage = async (req, res) => {
         newBalance: debitPlan.nextBalance,
         transactionId: transaction.id
       });
+
+      if (type === "chat") {
+        queueAiChatInterestFinalization({
+          userId,
+          sessionId: sessionId || null,
+          markInactive: false,
+        });
+      }
+      queueWalletCohortRefresh(userId, "ai_wallet_deducted");
 
       const responseData = {
         success: true,

@@ -18,7 +18,14 @@ const getSystemChromePath = () => {
 const getPuppeteerLaunchOptions = () => {
   const options = {
     headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-features=Crashpad",
+      "--disable-crash-reporter"
+    ],
   };
 
   const chromePath = getSystemChromePath();
@@ -294,13 +301,21 @@ async function generateKundliReportPDF(reportData, kundliData, userDetails) {
       }
     });
     
-    await browser.close();
+    try {
+      await browser.close();
+    } catch (closeError) {
+      console.warn("[Kundli PDF Service] Browser close warning (safe to ignore):", closeError.message);
+    }
     
-    return pdfBuffer;
+    return Buffer.from(pdfBuffer);
     
   } catch (error) {
     if (browser) {
-      await browser.close();
+      try {
+        await browser.close();
+      } catch (closeError) {
+        console.warn("[Kundli PDF Service] Browser close warning in catch (safe to ignore):", closeError.message);
+      }
     }
     console.error("[PDF Service] Error generating PDF:", error);
 

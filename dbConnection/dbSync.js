@@ -12,6 +12,9 @@ const ScheduledNotificationItem = require("../model/admin/scheduledNotificationI
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
 const AiChatSession = require("../model/aiChat/aiChatSession");
 const OpenAIRequestLog = require("../model/ai/openAiRequestLog");
+const InterestIntentResult = require("../model/interest/interestIntentResult");
+const UserInterestScore = require("../model/interest/userInterestScore");
+const UserInterestCohort = require("../model/interest/userInterestCohort");
 
 // Assistant models
 const AssistantChat = require("../model/assistant/assistantChat");
@@ -53,6 +56,9 @@ const Horoscope = require("../model/horoscope/horoscope");
 const CachedHoroscope = require("../model/horoscope/cachedHoroscope");
 const Kundli = require("../model/horoscope/kundli");
 const KundliReport = require("../model/horoscope/kundliReport");
+const YearlyReport = require("../model/horoscope/yearlyReport");
+const WealthReport = require("../model/horoscope/wealthReport");
+const SadeSatiReport = require("../model/horoscope/sadeSatiReport");
 const DailyInsightPayload = require("../model/horoscope/dailyInsightPayload");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
@@ -67,6 +73,10 @@ const Notification = require("../model/notification/notification");
 
 // Review models
 const Review = require("../model/review/review");
+
+// Report generation models
+const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
+const ReportPurchase = require("../model/report/reportPurchase");
 
 // Store models
 const Cart = require("../model/store/cart");
@@ -411,6 +421,17 @@ async function ensureAIChatSessionColumns() {
       );
     }
 
+    if (!table.interestSignals && !table.interest_signals) {
+      operations.push(
+        queryInterface.addColumn("ai_chat_sessions", "interestSignals", {
+          type: DataTypes.JSONB,
+          allowNull: true,
+          defaultValue: [],
+          comment: "Internal per-turn interest signals captured during AI chat for final cohort scoring",
+        })
+      );
+    }
+
     const columnDefinitions = [
       ["status", { type: DataTypes.STRING(30), allowNull: false, defaultValue: "active" }],
       ["startTime", { type: DataTypes.DATE, allowNull: true }],
@@ -436,13 +457,170 @@ async function ensureAIChatSessionColumns() {
 
     if (operations.length) {
       await Promise.all(operations);
-      console.log("✓ Ensured ai_chat_sessions lifecycle columns exist");
+      console.log("✓ Ensured AI chat session columns exist");
     } else {
       console.log("✓ ai_chat_sessions table is up to date");
     }
   } catch (error) {
     // Table doesn't exist yet — will be created by sync
     console.log("ai_chat_sessions table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureCohortStorageColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  if (sequelize.getDialect() === "postgres") {
+    await sequelize.query(`
+      DO $$
+      DECLARE
+        score_enum_name text;
+        cohort_enum_name text;
+      BEGIN
+        SELECT typname
+        INTO score_enum_name
+        FROM pg_type
+        WHERE lower(typname) = lower('enum_user_interest_scores_cohortType')
+        LIMIT 1;
+
+        IF score_enum_name IS NOT NULL THEN
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''astro''', score_enum_name);
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''activity''', score_enum_name);
+        END IF;
+
+        SELECT typname
+        INTO cohort_enum_name
+        FROM pg_type
+        WHERE lower(typname) = lower('enum_user_interest_cohorts_cohortType')
+        LIMIT 1;
+
+        IF cohort_enum_name IS NOT NULL THEN
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''astro''', cohort_enum_name);
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''activity''', cohort_enum_name);
+        END IF;
+      END
+      $$;
+    `);
+  }
+
+  const cohortTables = [
+    {
+      table: "user_interest_scores",
+    },
+    {
+      table: "user_interest_cohorts",
+    },
+  ];
+
+  for (const cohortTable of cohortTables) {
+    try {
+      const table = await queryInterface.describeTable(cohortTable.table);
+      const operations = [];
+
+      if (!table.cohortType && !table.cohort_type) {
+        operations.push(
+          queryInterface.addColumn(cohortTable.table, "cohortType", {
+            type: DataTypes.ENUM("interest", "wallet", "astro", "activity"),
+            allowNull: false,
+            defaultValue: "interest",
+          })
+        );
+      }
+
+      if (!table.metadata) {
+        operations.push(
+          queryInterface.addColumn(cohortTable.table, "metadata", {
+            type: DataTypes.JSONB,
+            allowNull: true,
+          })
+        );
+      }
+
+      if (operations.length) {
+        await Promise.all(operations);
+      }
+
+      if (sequelize.getDialect() === "postgres" && table.category) {
+        await sequelize.query(
+          `ALTER TABLE "${cohortTable.table}" ALTER COLUMN "category" TYPE VARCHAR(64) USING "category"::text`
+        );
+      }
+    } catch (error) {
+      console.log(`${cohortTable.table} will be created by sequelize.sync()`);
+    }
+  }
+}
+
+async function ensureInterestIndexes() {
+  const queryInterface = sequelize.getQueryInterface();
+  if (sequelize.getDialect() === "postgres") {
+    await sequelize.query(`
+      DO $$
+      DECLARE
+        source_enum_name text;
+      BEGIN
+        SELECT typname
+        INTO source_enum_name
+        FROM pg_type
+        WHERE lower(typname) = lower('enum_interest_intent_results_source')
+        LIMIT 1;
+
+        IF source_enum_name IS NOT NULL THEN
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''ai_chat_session_end''', source_enum_name);
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''ai_chat_backfill''', source_enum_name);
+          EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''human_chat_backfill''', source_enum_name);
+        END IF;
+      END
+      $$;
+    `);
+  }
+
+  await ensureCohortStorageColumns();
+
+  const indexChecks = [
+    {
+      table: "interest_intent_results",
+      name: "interest_intent_results_session_unique",
+      fields: ["sessionId", "sessionType"],
+    },
+    {
+      table: "user_interest_scores",
+      name: "user_interest_scores_user_type_category_unique",
+      fields: ["userId", "cohortType", "category"],
+    },
+    {
+      table: "user_interest_cohorts",
+      name: "user_interest_cohorts_user_type_category_unique",
+      fields: ["userId", "cohortType", "category"],
+    },
+  ];
+
+  for (const indexConfig of indexChecks) {
+    try {
+      const indexes = await queryInterface.showIndex(indexConfig.table);
+      for (const index of indexes) {
+        const fields = (index.fields || []).map((field) => field.attribute || field.name);
+        const isLegacyUserCategoryUnique =
+          index.unique &&
+          fields.length === 2 &&
+          fields.includes("userId") &&
+          fields.includes("category");
+
+        if (isLegacyUserCategoryUnique && index.name !== indexConfig.name) {
+          await queryInterface.removeIndex(indexConfig.table, index.name);
+        }
+      }
+
+      const updatedIndexes = await queryInterface.showIndex(indexConfig.table);
+      const exists = updatedIndexes.some((index) => index.name === indexConfig.name);
+      if (!exists) {
+        await queryInterface.addIndex(indexConfig.table, indexConfig.fields, {
+          name: indexConfig.name,
+          unique: true,
+        });
+      }
+    } catch (error) {
+      console.log(`${indexConfig.table} will be created by sequelize.sync()`);
+    }
   }
 }
 
@@ -469,6 +647,53 @@ async function ensureWalletColumns() {
     }
   } catch (error) {
     console.log("wallets table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureAstroProductTrackingColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  const trackedTables = [
+    {
+      table: "kundlis",
+      label: "kundlis",
+    },
+    {
+      table: "matching_profiles",
+      label: "matching_profiles",
+    },
+  ];
+
+  for (const trackedTable of trackedTables) {
+    try {
+      const table = await queryInterface.describeTable(trackedTable.table);
+      const operations = [];
+
+      if (!table.viewCount && !table.view_count) {
+        operations.push(
+          queryInterface.addColumn(trackedTable.table, "viewCount", {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 0,
+          })
+        );
+      }
+
+      if (!table.lastViewedAt && !table.last_viewed_at) {
+        operations.push(
+          queryInterface.addColumn(trackedTable.table, "lastViewedAt", {
+            type: DataTypes.DATE,
+            allowNull: true,
+          })
+        );
+      }
+
+      if (operations.length) {
+        await Promise.all(operations);
+        console.log(`Ensured ${trackedTable.label} astro tracking columns exist`);
+      }
+    } catch (error) {
+      console.log(`${trackedTable.label} table will be created by sequelize.sync()`);
+    }
   }
 }
 
@@ -528,6 +753,27 @@ async function ensureKundliShareColumns() {
 async function ensureUserPreferenceColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
+    if (sequelize.getDialect() === "postgres") {
+      await sequelize.query(`
+        DO $$
+        DECLARE
+          login_method_enum_name text;
+        BEGIN
+          SELECT typname
+          INTO login_method_enum_name
+          FROM pg_type
+          WHERE lower(typname) = lower('enum_users_lastLoginMethod')
+          LIMIT 1;
+
+          IF login_method_enum_name IS NOT NULL THEN
+            EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''google''', login_method_enum_name);
+            EXECUTE format('ALTER TYPE %I ADD VALUE IF NOT EXISTS ''apple''', login_method_enum_name);
+          END IF;
+        END
+        $$;
+      `);
+    }
+
     const table = await queryInterface.describeTable("users");
     const operations = [];
 
@@ -630,6 +876,25 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.loginCount && !table.login_count) {
+      operations.push(
+        queryInterface.addColumn("users", "loginCount", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (!table.firstLoginAt && !table.first_login_at) {
+      operations.push(
+        queryInterface.addColumn("users", "firstLoginAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
     if (!table.lastLoginAt && !table.last_login_at) {
       operations.push(
         queryInterface.addColumn("users", "lastLoginAt", {
@@ -642,7 +907,16 @@ async function ensureUserPreferenceColumns() {
     if (!table.lastLoginMethod && !table.last_login_method) {
       operations.push(
         queryInterface.addColumn("users", "lastLoginMethod", {
-          type: DataTypes.ENUM("phone", "email"),
+          type: DataTypes.ENUM("phone", "google", "apple"),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.lastLogoutAt && !table.last_logout_at) {
+      operations.push(
+        queryInterface.addColumn("users", "lastLogoutAt", {
+          type: DataTypes.DATE,
           allowNull: true,
         })
       );
@@ -1391,6 +1665,53 @@ async function ensurePalmUploadColumns() {
   }
 }
 
+async function ensurePalmReportColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("palm_reports");
+    const operations = [];
+
+    const addColumnIfMissing = (camelName, snakeName, definition) => {
+      if (!table[camelName] && !table[snakeName]) {
+        operations.push(queryInterface.addColumn("palm_reports", camelName, definition));
+      }
+    };
+
+    addColumnIfMissing("userRequestId", "user_request_id", {
+      type: DataTypes.UUID,
+      allowNull: true,
+    });
+    addColumnIfMissing("reportData", "report_data", {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: {},
+    });
+    addColumnIfMissing("pdfUrl", "pdf_url", {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfPublicId", "pdf_public_id", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfFileName", "pdf_file_name", {
+      type: DataTypes.STRING,
+      allowNull: true,
+    });
+    addColumnIfMissing("pdfUploadedAt", "pdf_uploaded_at", {
+      type: DataTypes.DATE,
+      allowNull: true,
+    });
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured palm_reports PDF and kundli columns exist");
+    }
+  } catch (error) {
+    console.log("palm_reports table will be created by sequelize.sync()");
+  }
+}
+
 async function ensurePalmOrderColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -1506,6 +1827,10 @@ const initDB = (callback) => {
     .then(() => {
       console.log("Connected to PostgreSQL");
       require("../model/associations/associations");
+      return ensureCohortStorageColumns();
+    })
+    .then(() => ensureAstroProductTrackingColumns())
+    .then(() => {
       // Basic sync (no alter) to avoid complex ALTER TABLE for all models
       return sequelize.sync();
     })
@@ -1515,7 +1840,9 @@ const initDB = (callback) => {
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
+    .then(() => ensureInterestIndexes())
     .then(() => ensureWalletColumns())
+    .then(() => ensureAstroProductTrackingColumns())
     .then(() => ensureCouponAssignmentColumns())
     .then(() => ensureKundliShareColumns())
     .then(() => ensureUserPreferenceColumns())
@@ -1531,6 +1858,7 @@ const initDB = (callback) => {
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())
     .then(() => ensurePalmUploadColumns())
+    .then(() => ensurePalmReportColumns())
     .then(() => ensurePalmOrderColumns())
     .then(() => ensureSupportTicketActorColumns())
     .then(() => {

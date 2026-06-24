@@ -1,6 +1,7 @@
 const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
 const { sequelize } = require("../dbConnection/dbConfig");
+const { queueWalletCohortRefresh } = require("./walletCohortService");
 
 const toAmount = (value) => {
   const parsed = parseFloat(value ?? 0);
@@ -128,6 +129,7 @@ const creditWallet = async (userId, amount, description, paymentMethod = "manual
     );
 
     await t.commit();
+    queueWalletCohortRefresh(userId, "wallet_credit");
 
     return {
       success: true,
@@ -215,6 +217,7 @@ const debitWallet = async (
     );
 
     await t.commit();
+    queueWalletCohortRefresh(userId, "wallet_debit");
 
     return {
       success: true,

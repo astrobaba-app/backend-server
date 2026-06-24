@@ -3,11 +3,13 @@ const multer = require("multer");
 const path = require("path");
 const { Readable } = require("stream");
 const cloudinary = require("cloudinary").v2;
+const supabase = require("../../supabaseConfig/supabase");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
+  timeout: 600000, // 10 minutes timeout
 });
 
 const DEFAULT_PDF_FOLDER = "graho/job-resumes";
@@ -55,7 +57,7 @@ const sanitizePdfFileName = (fileName) => {
 };
 
 const uploadToCloudinary = (file, options = {}) => {
-  const { folder = DEFAULT_PDF_FOLDER } = options;
+  const { folder = DEFAULT_PDF_FOLDER, resource_type = "image" } = options;
 
   return new Promise((resolve, reject) => {
     if (!isCloudinaryConfigured()) {
@@ -63,13 +65,26 @@ const uploadToCloudinary = (file, options = {}) => {
       return;
     }
 
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: "raw",
-        use_filename: true,
-        unique_filename: true,
-      },
+    // Use chunked upload for files larger than 10MB to prevent timeouts
+    const isLarge = file.buffer && file.buffer.length > 10 * 1024 * 1024;
+    const uploadMethod = isLarge
+      ? cloudinary.uploader.upload_chunked_stream
+      : cloudinary.uploader.upload_stream;
+
+    const uploadOptions = {
+      folder,
+      resource_type: isLarge ? "raw" : resource_type,
+      use_filename: true,
+      unique_filename: true,
+      timeout: 600000, // 10 minutes timeout for uploads
+    };
+
+    if (isLarge) {
+      uploadOptions.chunk_size = 6 * 1024 * 1024; // 6MB chunks
+    }
+
+    const uploadStream = uploadMethod(
+      uploadOptions,
       (error, result) => {
         if (error) {
           reject(error);
@@ -91,13 +106,41 @@ const uploadPdfBuffer = async ({ buffer, fileName, folder = DEFAULT_KUNDLI_REPOR
 
   const normalizedName = sanitizePdfFileName(fileName || `kundli_report_${Date.now()}.pdf`);
 
+  // Fallback to Supabase Storage for large files (> 10MB) to bypass Cloudinary's strict 10MB limit
+  if (buffer.length > 10 * 1024 * 1024) {
+    console.log(`[Upload Service] File size (${(buffer.length / (1024 * 1024)).toFixed(2)}MB) exceeds Cloudinary 10MB limit. Using Supabase Storage fallback...`);
+    const bucket = process.env.SUPABASE_BUCKET || "astrobaba";
+    const filePath = `reports/${Date.now()}_${normalizedName}`;
+
+    const { error } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, buffer, {
+        contentType: 'application/pdf',
+        upsert: true
+      });
+
+    if (error) {
+      console.error("[Upload Service] Supabase upload failed:", error);
+      throw error;
+    }
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    console.log("[Upload Service] Supabase upload completed successfully:", data.publicUrl);
+
+    return {
+      secure_url: data.publicUrl,
+      public_id: filePath,
+    };
+  }
+
+  // Standard Cloudinary upload for smaller files
   return uploadToCloudinary(
     {
       originalname: normalizedName,
       mimetype: "application/pdf",
       buffer,
     },
-    { folder }
+    { folder, resource_type: "image" }
   );
 };
 

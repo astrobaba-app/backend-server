@@ -1,6 +1,6 @@
-const User = require("../model/user/userAuth");
 const redis = require("../config/redis/redis");
 const { invalidateUsersListCache } = require("./adminUsersCacheService");
+const { recordUserLogin } = require("./userActivityCohortService");
 
 const TOTAL_USERS_CACHE_KEY = "admin:dashboard:total-users:v1";
 const TODAY_LOGINS_CACHE_PREFIX = "admin:dashboard:today-logins:";
@@ -31,20 +31,14 @@ const trackUserLogin = async (
   loginMethod,
   { invalidateTotalUsers = false } = {}
 ) => {
-  if (!userId || !["phone", "email"].includes(loginMethod)) {
+  if (!userId || !["phone", "google", "apple"].includes(loginMethod)) {
     return;
   }
 
   try {
-    await User.update(
-      {
-        lastLoginAt: new Date(),
-        lastLoginMethod: loginMethod,
-      },
-      {
-        where: { id: userId },
-      }
-    );
+    await recordUserLogin(userId, loginMethod, {
+      isNewUser: invalidateTotalUsers,
+    });
   } catch (error) {
     console.error("Failed to persist user login metadata:", error.message || error);
   }

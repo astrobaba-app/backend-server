@@ -220,7 +220,7 @@ const appleCallback = async (req, res) => {
     const refreshToken = createRefreshToken(user);
     setTokenCookie(res, token, middlewareToken, refreshToken);
 
-    await trackUserLogin(user.id, "email", {
+    await trackUserLogin(user.id, "apple", {
       invalidateTotalUsers: isNewUser,
     });
 

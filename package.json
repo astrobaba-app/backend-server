@@ -6,7 +6,10 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "verify:chat-schema": "node scripts/verifyChatSchema.js",
-    "install:chrome": "npx puppeteer browsers install chrome"
+    "install:chrome": "npx puppeteer browsers install chrome",
+    "report:llm-worker": "node scripts/runReportLlmWorker.js",
+    "report:pdf-worker": "node scripts/runReportPdfWorker.js",
+    "report:worker-scheduler": "node scripts/scheduleReportWorkers.js"
   },
   "keywords": [],
   "author": "",
@@ -44,6 +47,7 @@
     "socket.io": "^4.8.1",
     "speakeasy": "^2.0.0",
     "twilio": "^5.10.6",
+    "undici": "^7.28.0",
     "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "xlsx": "^0.18.5"
