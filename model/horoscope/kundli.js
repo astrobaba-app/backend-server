@@ -84,14 +84,22 @@ const Kundli = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
-    viewCount: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
-    },
-    lastViewedAt: {
-      type: DataTypes.DATE,
+    sessionId: {
+      type: DataTypes.UUID,
       allowNull: true,
+      references: {
+        model: "chat_sessions",
+        key: "id",
+      },
+      onUpdate: "CASCADE",
+      onDelete: "SET NULL",
+      comment: "Chat session id when this kundli was created by an astrologer during chat",
+    },
+    createdBy: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "user",
+      comment: "Creator marker: user for normal user-created kundlis, astrologer id for chat-created kundlis",
     },
   },
   {

@@ -2,7 +2,10 @@ const Wallet = require("../model/wallet/wallet");
 const WalletTransaction = require("../model/wallet/walletTransaction");
 const AstrologerEarning = require("../model/astrologer/astrologerEarning");
 const ChatSession = require("../model/chat/chatSession");
+const Kundli = require("../model/horoscope/kundli");
+const UserRequest = require("../model/user/userRequest");
 const { sequelize } = require("../dbConnection/dbConfig");
+const { Op } = require("sequelize");
 const {
   getWalletBalanceBreakdown,
   buildWalletDebitPlan,
@@ -12,6 +15,46 @@ const {
 } = require("./interestQueueService");
 
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
+
+async function deleteSessionCreatedKundlis(session, transaction) {
+  if (!session?.id || !session?.astrologerId) {
+    return;
+  }
+
+  const sessionKundlis = await Kundli.findAll({
+    where: {
+      sessionId: session.id,
+      createdBy: session.astrologerId,
+    },
+    attributes: ["requestId"],
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+
+  const requestIds = sessionKundlis
+    .map((kundli) => kundli.requestId)
+    .filter(Boolean);
+
+  if (requestIds.length === 0) {
+    return;
+  }
+
+  await Kundli.destroy({
+    where: {
+      sessionId: session.id,
+      createdBy: session.astrologerId,
+    },
+    transaction,
+  });
+
+  await UserRequest.destroy({
+    where: {
+      id: { [Op.in]: requestIds },
+      userId: session.userId,
+    },
+    transaction,
+  });
+}
 
 async function completeChatSessionWithBilling(session, io, options = {}) {
   const dbTransaction = await sequelize.transaction();
@@ -28,6 +71,7 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
     }
 
     if (lockedSession.status !== "active") {
+      await deleteSessionCreatedKundlis(lockedSession, dbTransaction);
       await dbTransaction.commit();
       committed = true;
       return {
@@ -51,6 +95,8 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
         },
         { transaction: dbTransaction }
       );
+
+      await deleteSessionCreatedKundlis(lockedSession, dbTransaction);
 
       await dbTransaction.commit();
       committed = true;
@@ -90,6 +136,8 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
       },
       { transaction: dbTransaction }
     );
+
+    await deleteSessionCreatedKundlis(lockedSession, dbTransaction);
 
     let billedAmount = 0;
     let updatedWalletBalance = null;
