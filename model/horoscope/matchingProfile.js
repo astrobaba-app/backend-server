@@ -92,6 +92,36 @@ const MatchingProfile = sequelize.define(
       allowNull: true,
       comment: "Manglik dosha analysis for both",
     },
+    boyPlanetDetails: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted boy planet details for matching report parity",
+    },
+    girlPlanetDetails: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted girl planet details for matching report parity",
+    },
+    boyLagnaChart: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted boy lagna chart for matching report parity",
+    },
+    girlLagnaChart: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted girl lagna chart for matching report parity",
+    },
+    boyAscendant: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted boy ascendant for matching report parity",
+    },
+    girlAscendant: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Persisted girl ascendant for matching report parity",
+    },
     conclusion: {
       type: DataTypes.TEXT,
       allowNull: true,

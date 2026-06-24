@@ -1450,6 +1450,82 @@ async function ensureSupportTicketActorColumns() {
   }
 }
 
+async function ensureMatchingProfileColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("matching_profiles");
+    const operations = [];
+
+    if (!table.boyPlanetDetails && !table.boy_planet_details) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "boyPlanetDetails", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted boy planet details for matching reports",
+        })
+      );
+    }
+
+    if (!table.girlPlanetDetails && !table.girl_planet_details) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "girlPlanetDetails", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted girl planet details for matching reports",
+        })
+      );
+    }
+
+    if (!table.boyLagnaChart && !table.boy_lagna_chart) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "boyLagnaChart", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted boy lagna chart for matching reports",
+        })
+      );
+    }
+
+    if (!table.girlLagnaChart && !table.girl_lagna_chart) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "girlLagnaChart", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted girl lagna chart for matching reports",
+        })
+      );
+    }
+
+    if (!table.boyAscendant && !table.boy_ascendant) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "boyAscendant", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted boy ascendant for matching reports",
+        })
+      );
+    }
+
+    if (!table.girlAscendant && !table.girl_ascendant) {
+      operations.push(
+        queryInterface.addColumn("matching_profiles", "girlAscendant", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Persisted girl ascendant for matching reports",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured matching_profiles report columns exist");
+    }
+  } catch (error) {
+    console.log("matching_profiles table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -1483,6 +1559,7 @@ const initDB = (callback) => {
     .then(() => ensurePalmUploadColumns())
     .then(() => ensurePalmOrderColumns())
     .then(() => ensureSupportTicketActorColumns())
+    .then(() => ensureMatchingProfileColumns())
     .then(() => {
       console.log("All models synced");
       callback();
