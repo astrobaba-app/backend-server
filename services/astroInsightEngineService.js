@@ -193,9 +193,14 @@ function getCoreSigns(kundli) {
   };
 }
 
+const VIMSHOTTARI_SEQUENCE = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury'];
+const VIMSHOTTARI_PERIODS = { Ketu: 7, Venus: 20, Sun: 6, Moon: 10, Mars: 7, Rahu: 18, Jupiter: 16, Saturn: 19, Mercury: 17 };
+
 function getCurrentDasha(dasha, date = new Date()) {
   const dashas = Array.isArray(dasha?.dashas) ? dasha.dashas : Array.isArray(dasha?.major_dashas) ? dasha.major_dashas : [];
   const target = date.toISOString().slice(0, 10);
+  const targetTime = new Date(target + 'T00:00:00').getTime();
+
   const current = dashas.find((period) => {
     const start = period.start_date || period.start;
     const end = period.end_date || period.end;
@@ -206,18 +211,111 @@ function getCurrentDasha(dasha, date = new Date()) {
     return {
       system: dasha?.system || "Vimshottari",
       mahadasha: null,
+      mahaStart: null,
+      mahaEnd: null,
       antardasha: null,
+      antarStart: null,
+      antarEnd: null,
       pratyantardasha: null,
+      pratyStart: null,
+      pratyEnd: null,
       sookshmadasha: null,
       source: "not_found",
     };
   }
 
+  const mahaPlanet = current.planet || current.lord || null;
+  const mahaStartStr = current.start_date || current.start || null;
+  const mahaEndStr = current.end_date || current.end || null;
+
+  let activeAntar = null;
+  let activePraty = null;
+
+  if (mahaPlanet && mahaStartStr && mahaEndStr) {
+    const mahaStart = new Date(mahaStartStr + 'T00:00:00');
+    const mahaEnd = new Date(mahaEndStr + 'T00:00:00');
+    const mahaTotalDays = (mahaEnd - mahaStart) / (1000 * 60 * 60 * 24);
+
+    const mahaStartIndex = VIMSHOTTARI_SEQUENCE.indexOf(mahaPlanet);
+    if (mahaStartIndex !== -1) {
+      let currentStart = new Date(mahaStart);
+
+      for (let i = 0; i < 9; i++) {
+        const planet = VIMSHOTTARI_SEQUENCE[(mahaStartIndex + i) % 9];
+        const period = VIMSHOTTARI_PERIODS[planet];
+        const proportion = period / 120;
+        const antarDays = Math.round(mahaTotalDays * proportion);
+
+        const currentEnd = new Date(currentStart);
+        currentEnd.setDate(currentEnd.getDate() + antarDays);
+
+        if (i === 8) {
+          currentEnd.setTime(mahaEnd.getTime());
+        }
+
+        if (currentStart.getTime() <= targetTime && targetTime <= currentEnd.getTime()) {
+          activeAntar = {
+            planet,
+            start_date: currentStart.toISOString().slice(0, 10),
+            end_date: currentEnd.toISOString().slice(0, 10),
+            totalDays: (currentEnd - currentStart) / (1000 * 60 * 60 * 24),
+          };
+          break;
+        }
+
+        currentStart = new Date(currentEnd);
+      }
+    }
+  }
+
+  if (activeAntar) {
+    const antarPlanet = activeAntar.planet;
+    const antarStart = new Date(activeAntar.start_date + 'T00:00:00');
+    const antarEnd = new Date(activeAntar.end_date + 'T00:00:00');
+    const antarTotalDays = activeAntar.totalDays;
+
+    const antarStartIndex = VIMSHOTTARI_SEQUENCE.indexOf(antarPlanet);
+    if (antarStartIndex !== -1) {
+      let currentStart = new Date(antarStart);
+
+      for (let j = 0; j < 9; j++) {
+        const planet = VIMSHOTTARI_SEQUENCE[(antarStartIndex + j) % 9];
+        const period = VIMSHOTTARI_PERIODS[planet];
+        const proportion = period / 120;
+        const pratyDays = Math.round(antarTotalDays * proportion);
+
+        const currentEnd = new Date(currentStart);
+        currentEnd.setDate(currentEnd.getDate() + pratyDays);
+
+        if (j === 8) {
+          currentEnd.setTime(antarEnd.getTime());
+        }
+
+        if (currentStart.getTime() <= targetTime && targetTime <= currentEnd.getTime()) {
+          activePraty = {
+            planet,
+            start_date: currentStart.toISOString().slice(0, 10),
+            end_date: currentEnd.toISOString().slice(0, 10),
+          };
+          break;
+        }
+
+        currentStart = new Date(currentEnd);
+      }
+    }
+  }
+
   return {
     system: dasha?.system || "Vimshottari",
-    mahadasha: current.planet || current.lord || null,
-    antardasha: current.current_antardasha?.planet || current.antardasha || null,
-    pratyantardasha: current.current_pratyantardasha?.planet || current.pratyantardasha || null,
+    mahadasha: mahaPlanet,
+    mahaStart: mahaStartStr,
+    mahaEnd: mahaEndStr,
+    antardasha: activeAntar ? activeAntar.planet : null,
+    antarStart: activeAntar ? activeAntar.start_date : null,
+    antarEnd: activeAntar ? activeAntar.end_date : null,
+    pratyantardasha: activePraty ? activePraty.planet : null,
+    pratyStart: activePraty ? activePraty.start_date : null,
+    pratyEnd: activePraty ? activePraty.end_date : null,
     sookshmadasha: current.current_sookshmadasha?.planet || current.sookshmadasha || null,
     period: current,
     source: "kundli_dasha",

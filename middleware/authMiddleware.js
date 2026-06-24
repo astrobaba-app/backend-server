@@ -66,4 +66,35 @@ function checkForAuthenticationCookie() {
   };
 }
 
+function optionalAuthenticationCookie() {
+  return async (req, _res, next) => {
+    try {
+      let token;
+      if (req.headers.cookie) {
+        const parsedCookies = parse(req.headers.cookie);
+        token = parsedCookies.token;
+      }
+      if (!token && req.headers.authorization) {
+        const authHeader = req.headers.authorization;
+        if (authHeader.startsWith("Bearer ")) {
+          token = authHeader.split(" ")[1];
+        }
+      }
+
+      if (!token) return next();
+
+      const userPayload = validateToken(token);
+      if (userPayload) {
+        req.user = userPayload;
+      }
+
+      return next();
+    } catch (_error) {
+      return next();
+    }
+  };
+}
+
+checkForAuthenticationCookie.optional = optionalAuthenticationCookie;
+
 module.exports = checkForAuthenticationCookie;

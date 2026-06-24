@@ -50,6 +50,12 @@ const AIChatSession = sequelize.define(
       onUpdate: "CASCADE",
       comment: "The Kundli (user request) linked to this chat session for personalized readings",
     },
+    interestSignals: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: [],
+      comment: "Internal per-turn interest signals captured during AI chat for final cohort scoring",
+    },
   },
   {
     tableName: "ai_chat_sessions",

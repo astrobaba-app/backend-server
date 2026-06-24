@@ -97,6 +97,15 @@ const MatchingProfile = sequelize.define(
       allowNull: true,
       comment: "Overall matching conclusion",
     },
+    viewCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    lastViewedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "matching_profiles",

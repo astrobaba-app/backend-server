@@ -1,4 +1,5 @@
 const { getCachedHoroscope } = require('../../services/horoscopeGenerationService');
+const { queueHoroscopeView } = require('../../services/astroProductCohortService');
 
 // Astro Engine configuration
 const ASTRO_ENGINE_BASE_URL = process.env.ASTRO_ENGINE_URL || 'http://localhost:8000/api/v1';
@@ -25,6 +26,7 @@ const getDailyHoroscope = async (req, res) => {
     // Use cached horoscope system
     const requestDate = date ? new Date(date) : new Date();
     const result = await getCachedHoroscope(zodiacSign, 'daily', requestDate);
+    queueHoroscopeView(req.user?.id, "daily");
     
     res.status(200).json(result);
   } catch (error) {
@@ -59,6 +61,7 @@ const getWeeklyHoroscope = async (req, res) => {
     // Use cached horoscope system
     const requestDate = start_date ? new Date(start_date) : new Date();
     const result = await getCachedHoroscope(zodiacSign, 'weekly', requestDate);
+    queueHoroscopeView(req.user?.id, "weekly");
     
     res.status(200).json(result);
   } catch (error) {
@@ -98,6 +101,7 @@ const getMonthlyHoroscope = async (req, res) => {
       1
     );
     const result = await getCachedHoroscope(zodiacSign, 'monthly', requestDate);
+    queueHoroscopeView(req.user?.id, "monthly");
     
     res.status(200).json(result);
   } catch (error) {
@@ -132,6 +136,7 @@ const getYearlyHoroscope = async (req, res) => {
     // Use cached horoscope system
     const requestDate = new Date(year ? parseInt(year) : new Date().getFullYear(), 0, 1);
     const result = await getCachedHoroscope(zodiacSign, 'yearly', requestDate);
+    queueHoroscopeView(req.user?.id, "yearly");
     
     res.status(200).json(result);
   } catch (error) {

@@ -3,14 +3,23 @@ const PalmFeature = require("../../model/palm/palmFeature");
 const PalmReport = require("../../model/palm/palmReport");
 const AIJob = require("../../model/palm/aiJob");
 const PalmOrder = require("../../model/palm/palmOrder");
+const ReportGenerationRequest = require("../../model/report/reportGenerationRequest");
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const Razorpay = require("razorpay");
 const crypto = require("crypto");
+const axios = require("axios");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
 const { enqueuePalmJob } = require("../../services/palmQueueService");
 const { checkPalmEngineHealth } = require("../../services/palmReadingService");
+const { generatePalmReportPDF } = require("../../services/palmReportPdfService");
+const { uploadPdfBuffer } = require("../../config/uploadConfig/cloudinaryPdfUpload");
+const { findOrCreateUserRequestForPalm } = require("../../services/palmKundliContextService");
+const {
+  assertReportPurchaseAccess,
+  markReportPurchaseConsumed,
+} = require("../../services/reportPurchaseService");
 
 const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 59);
 const PALM_CHECKOUT_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -130,6 +139,26 @@ const toMaxRetries = (value) => {
   if (value === null || value === undefined) return 3;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 3;
+};
+
+const PALM_READY_MESSAGE =
+  "Your palm report request has been accepted. Your report will be available within 24-48 hours. Check status in Profile > Reports.";
+
+const sendPdfBuffer = (res, pdfBuffer, fileName) => {
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+  res.setHeader("Content-Length", pdfBuffer.length);
+  return res.send(pdfBuffer);
+};
+
+const proxyPdfDownload = async (res, pdfUrl, fileName) => {
+  const response = await axios.get(pdfUrl, {
+    responseType: "arraybuffer",
+    timeout: 60000,
+    maxContentLength: 60 * 1024 * 1024,
+    maxBodyLength: 60 * 1024 * 1024,
+  });
+  return sendPdfBuffer(res, Buffer.from(response.data), fileName);
 };
 
 const getActiveRetrySourceOrder = async (userId) => {
@@ -313,19 +342,42 @@ const createPalmReadingOrder = async (req, res) => {
 
     const health = await checkPalmEngineHealth();
     if (!health.ok) {
-      console.error("[PalmController] Palm engine unavailable", health);
+      console.error("[PalmController] Palm analysis unavailable", health);
       return res.status(503).json({
         success: false,
-        message: "Palm AI engine is temporarily unavailable. Please try again in a minute.",
+        message: "Palm analysis service is temporarily unavailable. Please try again in a minute.",
         details: health,
       });
     }
 
+    const dominantHand = String(req.body.dominantHand || "right").trim().toLowerCase();
+    if (dominantHand !== "right") {
+      return res.status(400).json({
+        success: false,
+        message: "Please upload a clear right-hand palm image for this report.",
+      });
+    }
+
+    const reportPurchase = await assertReportPurchaseAccess({
+      userId,
+      reportType: "palm",
+      accessToken: req.body.reportAccessToken,
+    });
+
+    const userRequest = await findOrCreateUserRequestForPalm(userId, req.body);
+    const plainUserRequest = userRequest?.toJSON ? userRequest.toJSON() : userRequest;
     const metadata = {
-      gender: req.body.gender || null,
+      gender: plainUserRequest?.gender || req.body.gender || null,
       ageRange: req.body.ageRange || null,
-      dominantHand: req.body.dominantHand || null,
+      dominantHand: "right",
       notes: req.body.notes || null,
+      userRequestId: plainUserRequest?.id || null,
+      fullName: plainUserRequest?.fullName || null,
+      dateOfbirth: plainUserRequest?.dateOfbirth || null,
+      timeOfbirth: plainUserRequest?.timeOfbirth || null,
+      placeOfBirth: plainUserRequest?.placeOfBirth || null,
+      latitude: plainUserRequest?.latitude || null,
+      longitude: plainUserRequest?.longitude || null,
     };
 
     const retrySourceOrder = await getActiveRetrySourceOrder(userId);
@@ -374,6 +426,12 @@ const createPalmReadingOrder = async (req, res) => {
         stageMessage: "Free retry detected. Your palm report is entering the analysis queue.",
       });
       await enqueuePalmJob(job.id);
+      await markReportPurchaseConsumed(reportPurchase, {
+        palmUploadId: palmUpload.id,
+        orderId: retryOrder.id,
+        jobId: job.id,
+        retry: true,
+      });
       const sourceMax = toMaxRetries(retrySourceOrder.maxRetries);
       const sourceUsed = Number(retrySourceOrder.retriesUsed || 0);
       return res.status(202).json({
@@ -386,27 +444,50 @@ const createPalmReadingOrder = async (req, res) => {
           totalRetries: sourceMax,
           remainingRetries: Math.max(0, sourceMax - sourceUsed),
         },
+        message: PALM_READY_MESSAGE,
       });
     }
 
-    let wallet = await Wallet.findOne({ where: { userId } });
-    if (!wallet) {
-      wallet = await Wallet.create({ userId });
-    }
-    const walletBalance = Number(wallet.balance || 0);
-    const checkoutPayload = {
-      sessionId: crypto.randomUUID(),
+    const palmUpload = await PalmUpload.create({
       userId,
       imageUrls: uploadedPalmImages.map((item) => item.url),
       imageHash: uploadedPalmImages[0]?.hash || null,
       metadata,
-      iat: Date.now(),
-      exp: Date.now() + PALM_CHECKOUT_TOKEN_TTL_MS,
-    };
-    const checkoutToken = signCheckoutToken(checkoutPayload);
-    beLog("checkout_created", {
+    });
+
+    const order = await PalmOrder.create({
       userId,
-      sessionId: checkoutPayload.sessionId,
+      palmUploadId: palmUpload.id,
+      amount: 0,
+      status: "paid",
+      paymentMethod: null,
+      idempotencyKey: `free:${crypto.randomUUID()}`,
+      maxRetries: 3,
+      retriesUsed: 0,
+    });
+
+    const job = await AIJob.create({
+      userId,
+      palmUploadId: palmUpload.id,
+      type: "palm_reading",
+      status: "queued",
+      stage: "queued",
+      progress: 8,
+      stageMessage: "Your palm report is entering the analysis queue.",
+    });
+
+    await enqueuePalmJob(job.id);
+    await markReportPurchaseConsumed(reportPurchase, {
+      palmUploadId: palmUpload.id,
+      orderId: order.id,
+      jobId: job.id,
+    });
+
+    beLog("free_order_created", {
+      userId,
+      orderId: order.id,
+      jobId: job.id,
+      palmUploadId: palmUpload.id,
       imageCount: uploadedPalmImages.length,
       ignoredImages: req.ignoredPalmImagesCount || 0,
       imageFormats: uploadedPalmImages.map((it) => it.format || "unknown"),
@@ -414,18 +495,20 @@ const createPalmReadingOrder = async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      checkoutToken,
-      amount: PALM_REPORT_PRICE,
-      walletBalance,
-      canPayWithWallet: walletBalance >= PALM_REPORT_PRICE,
-      paymentRequired: true,
+      paymentRequired: false,
+      orderId: order.id,
+      jobId: job.id,
+      amount: 0,
+      status: "paid",
       optimization: {
         processedImages: uploadedPalmImages.length,
         ignoredImages: req.ignoredPalmImagesCount || 0,
       },
+      userRequestId: metadata.userRequestId,
+      message: PALM_READY_MESSAGE,
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: "Failed to create palm order", error: error.message });
+    return res.status(error.statusCode || 500).json({ success: false, message: "Failed to create palm order", error: error.message });
   }
 };
 
@@ -705,6 +788,8 @@ const getPalmReadingJob = async (req, res) => {
         structuredInsights: report?.structuredInsights || {},
         finalNarrativeReport: report?.finalNarrative || "",
         confidenceScores: report?.confidenceScores || feature?.confidenceScores || {},
+        pdfUrl: report?.pdfUrl || null,
+        pdfDownloadUrl: report ? `/palm-reading/reports/${job.palmUploadId}/pdf` : null,
       };
     }
     if (job.status === "failed") {
@@ -782,6 +867,12 @@ const getPalmReadingHistory = async (req, res) => {
             structuredInsights: item.report.structuredInsights || {},
             finalNarrative: item.report.finalNarrative || "",
             confidenceScores: item.report.confidenceScores || {},
+            reportData: item.report.reportData || {},
+            pdfUrl: item.report.pdfUrl || null,
+            pdfPublicId: item.report.pdfPublicId || null,
+            pdfFileName: item.report.pdfFileName || null,
+            pdfUploadedAt: item.report.pdfUploadedAt || null,
+            pdfDownloadUrl: `/palm-reading/reports/${item.id}/pdf`,
           }
         : null,
       features: item.features?.features || {},
@@ -790,6 +881,187 @@ const getPalmReadingHistory = async (req, res) => {
     return res.status(200).json({ success: true, history });
   } catch (error) {
     return res.status(500).json({ success: false, message: "Failed to fetch palm history", error: error.message });
+  }
+};
+
+const downloadPalmReadingPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { palmUploadId } = req.params;
+    const upload = await PalmUpload.findOne({
+      where: { id: palmUploadId, userId },
+      include: [
+        { model: AIJob, as: "aiJob", required: false },
+        { model: PalmFeature, as: "features", required: false },
+        { model: PalmReport, as: "report", required: true },
+      ],
+    });
+
+    if (!upload || !upload.report) {
+      return res.status(404).json({ success: false, message: "Completed palm report not found" });
+    }
+
+    if (upload.report.pdfUrl) {
+      const fileName = upload.report.pdfFileName || `graho_palmistry_report_${String(palmUploadId).slice(0, 8)}.pdf`;
+      return proxyPdfDownload(res, upload.report.pdfUrl, fileName);
+    }
+
+    if (upload.aiJob && upload.aiJob.status !== "completed") {
+      return res.status(409).json({ success: false, message: "Palm report is still processing" });
+    }
+
+    const pdfBuffer = await generatePalmReportPDF({
+      palmImages: upload.imageUrls || [],
+      features: upload.features?.features || {},
+      structuredInsights: upload.report.structuredInsights || {},
+      finalNarrative: upload.report.finalNarrative || "",
+      generatedAt: upload.report.createdAt || upload.createdAt,
+    });
+
+    const fileName = `graho_palmistry_report_${String(palmUploadId).slice(0, 8)}.pdf`;
+    try {
+      const uploadResult = await uploadPdfBuffer({
+        buffer: pdfBuffer,
+        fileName,
+        folder: "graho/palm-reports",
+      });
+      await upload.report.update({
+        pdfUrl: uploadResult.secure_url,
+        pdfPublicId: uploadResult.public_id,
+        pdfFileName: fileName,
+        pdfUploadedAt: new Date(),
+      });
+    } catch (uploadError) {
+      console.error("[Palm PDF] Cloudinary upload fallback failed", {
+        palmUploadId,
+        message: uploadError.message,
+      });
+    }
+    return sendPdfBuffer(res, pdfBuffer, fileName);
+  } catch (error) {
+    console.error("[Palm PDF] download failed", {
+      userId: req.user?.id,
+      palmUploadId: req.params?.palmUploadId,
+      message: error?.message,
+    });
+    return res.status(500).json({ success: false, message: "Failed to generate palm PDF", error: error.message });
+  }
+};
+
+const regeneratePalmReadingPdf = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { palmUploadId } = req.params;
+    const upload = await PalmUpload.findOne({
+      where: { id: palmUploadId, userId },
+      include: [
+        { model: AIJob, as: "aiJob", required: false },
+        { model: PalmFeature, as: "features", required: false },
+        { model: PalmReport, as: "report", required: true },
+      ],
+    });
+
+    if (!upload || !upload.report) {
+      return res.status(404).json({ success: false, message: "Stored palm report not found" });
+    }
+
+    const reportRequest =
+      (await ReportGenerationRequest.findOne({
+        where: { userId, sourceType: "palm_upload", sourceId: palmUploadId, reportType: "palmistry" },
+        order: [["createdAt", "DESC"]],
+      })) ||
+      (await ReportGenerationRequest.create({
+        userId,
+        userRequestId: upload.report.userRequestId || upload.metadata?.userRequestId || null,
+        kundliId: null,
+        reportType: "palmistry",
+        sourceType: "palm_upload",
+        sourceId: palmUploadId,
+        status: "pdf_generation",
+        price: Number(process.env.PALM_REPORT_GENERATION_PRICE || 0),
+        currency: "INR",
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        tokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, calls: [] },
+        requestPayload: { regeneratedFromStoredData: true, palmUploadId },
+        llmResponse: {
+          structuredInsights: upload.report.structuredInsights || {},
+          finalNarrative: upload.report.finalNarrative || "",
+        },
+        reportData: upload.report.reportData || {},
+        startedAt: new Date(),
+        metadata: { temporaryPdfRegeneration: true },
+      }));
+
+    await reportRequest.update({
+      status: "pdf_generation",
+      error: null,
+      metadata: {
+        ...(reportRequest.metadata || {}),
+        temporaryPdfRegeneration: true,
+        regeneratedAt: new Date().toISOString(),
+      },
+    });
+
+    const pdfBuffer = await generatePalmReportPDF({
+      palmImages: upload.imageUrls || [],
+      features: upload.features?.features || {},
+      structuredInsights: upload.report.structuredInsights || {},
+      finalNarrative: upload.report.finalNarrative || "",
+      generatedAt: new Date(),
+    });
+
+    const safeName = String(upload.metadata?.fullName || "palm_report")
+      .replace(/[^a-zA-Z0-9-_]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 60);
+    const fileName = `palm_report_regenerated_${safeName || "user"}_${Date.now()}.pdf`;
+    const uploadResult = await uploadPdfBuffer({
+      buffer: pdfBuffer,
+      fileName,
+      folder: "graho/palm-reports",
+    });
+
+    await upload.report.update({
+      pdfUrl: uploadResult.secure_url,
+      pdfPublicId: uploadResult.public_id,
+      pdfFileName: fileName,
+      pdfUploadedAt: new Date(),
+    });
+    await reportRequest.update({
+      status: "completed",
+      pdfUrl: uploadResult.secure_url,
+      pdfPublicId: uploadResult.public_id,
+      pdfFileName: fileName,
+      pdfUploadedAt: new Date(),
+      completedAt: new Date(),
+      reportData: {
+        ...(upload.report.reportData || {}),
+        regeneratedPdfFromStoredData: true,
+      },
+    });
+
+    console.log("[Palm PDF] regenerated from stored data", {
+      userId,
+      palmUploadId,
+      reportRequestId: reportRequest.id,
+      pdfUrl: uploadResult.secure_url,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Palm PDF regenerated from stored data without OpenAI call",
+      pdfUrl: uploadResult.secure_url,
+      reportRequestId: reportRequest.id,
+    });
+  } catch (error) {
+    console.error("[Palm PDF] regenerate failed", {
+      userId: req.user?.id,
+      palmUploadId: req.params?.palmUploadId,
+      message: error?.message,
+    });
+    return res.status(500).json({ success: false, message: "Failed to regenerate palm PDF", error: error.message });
   }
 };
 
@@ -827,6 +1099,8 @@ module.exports = {
   resumePalmOrder,
   getPalmReadingJob,
   getPalmReadingHistory,
+  downloadPalmReadingPdf,
+  regeneratePalmReadingPdf,
   getPalmReadingTrustIndicator,
   payPalmCheckoutWithWallet,
   createPalmCheckoutRazorpay,

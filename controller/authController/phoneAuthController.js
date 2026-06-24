@@ -4,11 +4,13 @@ const {
   createToken,
   createMiddlewareToken,
   createRefreshToken,
+  validateToken,
   validateRefreshToken,
   resolveActorType,
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
+const { parse } = require("cookie");
 const { applySignupBonus } = require("../../services/signupBonusService");
 const {
   validateWhatsappApiKey,
@@ -21,6 +23,7 @@ const {
   verifyQueuedOtp,
 } = require("../../services/otpQueueService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
+const { recordUserLogout } = require("../../services/userActivityCohortService");
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -408,6 +411,20 @@ const refreshAccessToken = async (req, res) => {
 
 const logout = async (req, res) => {
   try {
+    let token;
+    if (req.headers.cookie) {
+      const parsedCookies = parse(req.headers.cookie);
+      token = parsedCookies.token;
+    }
+    if (!token && req.headers.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.split(" ")[1];
+    }
+
+    const payload = token ? validateToken(token) : null;
+    if (payload?.id && payload?.role !== "astrologer") {
+      await recordUserLogout(payload.id);
+    }
+
     clearTokenCookie(res);
 
     res.status(200).json({
