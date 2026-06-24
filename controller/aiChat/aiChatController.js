@@ -1898,7 +1898,10 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
         lastMessagePreview: aiResponse.substring(0, 250),
       });
     } else {
-      await session.update({ lastMessageAt: new Date() });
+      await session.update({ ...sessionUpdates,
+        lastMessageAt: new Date(),
+        lastMessagePreview: aiResponse.substring(0, 250),
+      });
     }
 
     res.status(200).json({
@@ -2287,6 +2290,83 @@ const getAiChatHistoryV2 = async (req, res) => {
   }
 };
 
+// const getAiChatHistorySessionV2 = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { sessionId } = req.params;
+
+//     const session = await AIChatSession.findOne({
+//       where: { id: sessionId, userId },
+//     });
+
+//     if (!session) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "AI chat history session not found",
+//       });
+//     }
+
+//     const messages = await AIChatMessage.findAll({
+//       where: { sessionId },
+//       order: [["createdAt", "ASC"]],
+//     });
+
+//     return res.status(200).json({
+//       success: true,
+//       session: formatAiSession(session),
+//       messages: messages.map(formatAiChatMessage),
+//     });
+//   } catch (error) {
+//     console.error("Get AI chat history session v2 error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch AI chat history session",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// const endChatSessionV2 = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
+//     const { sessionId } = req.params;
+//     const { reason = "user_ended_ai_chat" } = req.body || {};
+
+//     const session = await AIChatSession.findOne({
+//       where: { id: sessionId, userId },
+//     });
+
+//     if (!session) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "AI chat session not found",
+//       });
+//     }
+
+//     const finalized = await completeAiChatSessionWithBilling(session, reason);
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "AI chat ended successfully",
+//       session: formatAiSession(finalized.session),
+//       billing: finalized.billing,
+//       walletBalance: finalized.walletBalance,
+//     });
+//   } catch (error) {
+//     console.error("End AI chat session v2 error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to end AI chat",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// const sendMessageV2 = (req, res) => {
+//   req.aiChatV2 = true;
+//   return sendMessage(req, res);
+// };
+
 const getAiChatHistorySessionV2 = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -2616,6 +2696,10 @@ module.exports = {
   sendMessageV2,
   getMyChatSessions,
   getChatMessages,
+  endChatSession,
+  getAiChatHistoryV2,
+  getAiChatHistorySessionV2,
+  endChatSessionV2,
   deleteChatSession,
   clearChatSession,
   attachKundliToSession,
