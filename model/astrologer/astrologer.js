@@ -125,6 +125,28 @@ const Astrologer = sequelize.define(
       defaultValue: {},
       comment: "Availability schedule in JSON format",
     },
+    sessionVersion: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      comment: "Incremented whenever astrologer sessions are invalidated",
+    },
+    activeDeviceId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    activeDeviceName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    activeDeviceType: {
+      type: DataTypes.ENUM("ios", "android", "web"),
+      allowNull: true,
+    },
+    activeSessionStartedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "astrologers",

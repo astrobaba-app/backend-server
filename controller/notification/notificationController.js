@@ -162,7 +162,7 @@ const getUnreadCount = async (req, res) => {
  */
 const registerDeviceToken = async (req, res) => {
   try {
-    const { token, deviceType, deviceId } = req.body;
+    const { token, deviceType, deviceId, deviceName } = req.body;
     const actorId = req.user.id;
     const actorType = await resolveActorType(req);
 
@@ -179,7 +179,8 @@ const registerDeviceToken = async (req, res) => {
             actorId,
             token,
             deviceType || "android",
-            deviceId
+            deviceId,
+            deviceName
           )
         : await pushNotificationService.saveDeviceToken(
             actorId,
@@ -199,6 +200,7 @@ const registerDeviceToken = async (req, res) => {
       data: {
         id: savedToken.id,
         deviceType: savedToken.deviceType,
+        deviceName: savedToken.deviceName,
         actorType,
         pendingPush: pendingPushResult,
       },
@@ -269,6 +271,7 @@ const getUserTokens = async (req, res) => {
         id: t.id,
         deviceType: t.deviceType,
         deviceId: t.deviceId,
+        deviceName: t.deviceName,
         lastUsedAt: t.lastUsedAt,
       })),
     });

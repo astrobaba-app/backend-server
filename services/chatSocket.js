@@ -5,6 +5,7 @@ const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
 const Wallet = require("../model/wallet/wallet");
+const { Op } = require("sequelize");
 const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
@@ -13,7 +14,9 @@ const { getWalletBalanceBreakdown } = require("./walletService");
 
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const userInactivityTimers = new Map();
+const walletLimitTimers = new Map();
 const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
 
 /**
@@ -76,6 +79,9 @@ function toSessionAccessSnapshot(session) {
     astrologerId: json.astrologerId,
     requestStatus: json.requestStatus,
     status: json.status,
+    maxDurationSeconds: json.maxDurationSeconds || null,
+    maxEndTime: json.maxEndTime || null,
+    walletBalanceAtApproval: json.walletBalanceAtApproval || null,
   };
 }
 
@@ -125,7 +131,16 @@ async function getAuthorizedSessionAccess({ socket, sessionId, authId, isAstrolo
   }
 
   const session = await ChatSession.findByPk(sessionId, {
-    attributes: ["id", "userId", "astrologerId", "requestStatus", "status"],
+    attributes: [
+      "id",
+      "userId",
+      "astrologerId",
+      "requestStatus",
+      "status",
+      "maxDurationSeconds",
+      "maxEndTime",
+      "walletBalanceAtApproval",
+    ],
   });
 
   if (!session) {
@@ -146,6 +161,14 @@ function clearUserInactivityAutoEnd(sessionId) {
   if (timer) {
     clearTimeout(timer);
     userInactivityTimers.delete(sessionId);
+  }
+}
+
+function clearWalletLimitAutoEnd(sessionId) {
+  const timer = walletLimitTimers.get(sessionId);
+  if (timer) {
+    clearTimeout(timer);
+    walletLimitTimers.delete(sessionId);
   }
 }
 
@@ -217,6 +240,84 @@ async function autoEndSessionForUserInactivity(io, sessionId) {
   }
 }
 
+async function endSessionForWalletTimeLimit(io, session) {
+  const billing = await completeChatSessionWithBilling(session, io, {
+    endTime: session.maxEndTime || new Date(),
+  });
+  await session.reload();
+  clearUserInactivityAutoEnd(session.id);
+  clearWalletLimitAutoEnd(session.id);
+
+  if (io) {
+    emitChatEnded(io, session, {
+      endedBy: "system",
+      reason: "wallet_time_limit",
+      currentMinutes: billing.currentMinutes,
+      currentCost: billing.currentCost,
+      totalMinutes: billing.totalMinutes,
+      totalCost: billing.totalCost,
+      billedAmount: billing.billedAmount,
+      maxEndTime: session.maxEndTime,
+      maxDurationSeconds: session.maxDurationSeconds,
+    });
+
+    io.to(getUserRoom(session.userId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "user"),
+    });
+
+    io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "astrologer"),
+    });
+  }
+
+  queueArchiveAndDeleteSession(session.id, {
+    endReason: "wallet_time_limit",
+    billedAmount: billing.billedAmount,
+  });
+
+  return billing;
+}
+
+async function autoEndSessionForWalletTimeLimit(io, sessionId) {
+  clearWalletLimitAutoEnd(sessionId);
+
+  try {
+    const session = await ChatSession.findByPk(sessionId);
+    if (!session) return;
+
+    if (session.status !== "active" || session.requestStatus !== "approved") {
+      return;
+    }
+
+    if (!session.maxEndTime || Date.now() < new Date(session.maxEndTime).getTime()) {
+      scheduleWalletLimitAutoEnd(io, session);
+      return;
+    }
+
+    await endSessionForWalletTimeLimit(io, session);
+  } catch (error) {
+    console.error("auto end chat wallet limit error:", error);
+  }
+}
+
+async function scheduleExistingWalletLimitSessions(io) {
+  try {
+    const sessions = await ChatSession.findAll({
+      where: {
+        status: "active",
+        requestStatus: "approved",
+        maxEndTime: { [Op.ne]: null },
+      },
+    });
+
+    sessions.forEach((session) => scheduleWalletLimitAutoEnd(io, session));
+  } catch (error) {
+    console.error("schedule existing wallet limit sessions error:", error);
+  }
+}
+
 function scheduleUserInactivityAutoEnd(io, sessionLike) {
   if (!io || !sessionLike?.id) return;
 
@@ -234,10 +335,55 @@ function scheduleUserInactivityAutoEnd(io, sessionLike) {
   userInactivityTimers.set(sessionLike.id, timeout);
 }
 
+function scheduleWalletLimitAutoEnd(io, sessionLike) {
+  if (!io || !sessionLike?.id) return;
+
+  if (sessionLike.status !== "active" || sessionLike.requestStatus !== "approved") {
+    clearWalletLimitAutoEnd(sessionLike.id);
+    return;
+  }
+
+  if (!sessionLike.maxEndTime) {
+    clearWalletLimitAutoEnd(sessionLike.id);
+    return;
+  }
+
+  clearWalletLimitAutoEnd(sessionLike.id);
+
+  const delayMs = Math.min(
+    Math.max(0, new Date(sessionLike.maxEndTime).getTime() - Date.now()),
+    MAX_TIMER_DELAY_MS
+  );
+  const timeout = setTimeout(() => {
+    autoEndSessionForWalletTimeLimit(io, sessionLike.id);
+  }, delayMs);
+
+  walletLimitTimers.set(sessionLike.id, timeout);
+}
+
+async function enforceWalletTimeLimit(io, session) {
+  if (
+    !session ||
+    session.status !== "active" ||
+    session.requestStatus !== "approved" ||
+    !session.maxEndTime
+  ) {
+    return null;
+  }
+
+  if (Date.now() < new Date(session.maxEndTime).getTime()) {
+    scheduleWalletLimitAutoEnd(io, session);
+    return null;
+  }
+
+  return endSessionForWalletTimeLimit(io, session);
+}
+
 async function endSessionForInsufficientBalance(io, session) {
   const billing = await completeChatSessionWithBilling(session, io);
   await session.reload();
   clearUserInactivityAutoEnd(session.id);
+  clearWalletLimitAutoEnd(session.id);
 
   if (io) {
     emitChatEnded(io, session, {
@@ -307,12 +453,37 @@ function mapSession(session, viewerRole) {
     totalMinutes: json.totalMinutes,
     totalCost: json.totalCost,
     pricePerMinute: json.pricePerMinute,
+    maxDurationSeconds: json.maxDurationSeconds || null,
+    maxEndTime: json.maxEndTime || null,
+    walletBalanceAtApproval: json.walletBalanceAtApproval || null,
     lastMessagePreview: json.lastMessagePreview || null,
     lastMessageAt: json.lastMessageAt || null,
     unreadCount:
       viewerRole === "astrologer"
         ? json.astrologerUnreadCount || 0
         : json.userUnreadCount || 0,
+  };
+}
+
+function calculateWalletLimitedChatTime({ rechargeBalance, pricePerMinute, startTime }) {
+  const realChatBalance = parseFloat(rechargeBalance || 0);
+  const rate = parseFloat(pricePerMinute || 0);
+
+  if (!Number.isFinite(rate) || rate <= 0) {
+    return {
+      maxDurationSeconds: null,
+      maxEndTime: null,
+      walletBalanceAtApproval: realChatBalance,
+    };
+  }
+
+  const maxDurationSeconds = Math.max(1, Math.floor((realChatBalance / rate) * 60));
+  const startedAt = startTime instanceof Date ? startTime : new Date(startTime);
+
+  return {
+    maxDurationSeconds,
+    maxEndTime: new Date(startedAt.getTime() + maxDurationSeconds * 1000),
+    walletBalanceAtApproval: realChatBalance,
   };
 }
 
@@ -428,9 +599,10 @@ async function markMessagesRead({ io, session, readerRole }) {
 
 function initializeChatSocket(io) {
   io.use(authenticateSocket);
+  scheduleExistingWalletLimitSessions(io);
 
   io.on("connection", (socket) => {
-    const { id: authId, role } = socket.user;
+    const { id: authId, role } = socket?.user;
     const isAstrologer = role === "astrologer";
     socket.data.sessionAccessCache = new Map();
 
@@ -465,6 +637,7 @@ function initializeChatSocket(io) {
         // Start/refresh inactivity timer when user joins an approved active session.
         if (!isAstrologer && sessionAccess.status === "active" && sessionAccess.requestStatus === "approved") {
           scheduleUserInactivityAutoEnd(io, sessionAccess);
+          scheduleWalletLimitAutoEnd(io, sessionAccess);
         }
       } catch (error) {
         console.error("join_chat error:", error);
@@ -515,8 +688,12 @@ function initializeChatSocket(io) {
         try {
           const normalizedMessageType = String(messageType || "text").toLowerCase();
           const normalizedText = String(text || "").trim();
+          const isSocketAttachmentMessage =
+            normalizedMessageType === "voice" ||
+            normalizedMessageType === "image" ||
+            normalizedMessageType === "file";
 
-          if (!sessionId || (!normalizedText && normalizedMessageType !== "voice")) {
+          if (!sessionId || (!normalizedText && !isSocketAttachmentMessage)) {
             if (callback) callback({ success: false, error: "Missing data" });
             return;
           }
@@ -528,11 +705,11 @@ function initializeChatSocket(io) {
             return;
           }
 
-          if (normalizedMessageType === "voice" && !fileUrl) {
+          if (isSocketAttachmentMessage && !fileUrl) {
             if (callback) {
               callback({
                 success: false,
-                error: "Voice notes require uploaded audio file",
+                error: "Attachment messages require uploaded file URL",
               });
             }
             return;
@@ -555,6 +732,19 @@ function initializeChatSocket(io) {
           }
 
           cacheSessionAccess(socket, toSessionAccessSnapshot(session));
+
+          const walletLimitBilling = await enforceWalletTimeLimit(io, session);
+          if (walletLimitBilling) {
+            if (callback) {
+              callback({
+                success: false,
+                error: "Chat ended because wallet balance time limit was reached.",
+                code: "CHAT_WALLET_TIME_LIMIT_REACHED",
+                billing: walletLimitBilling,
+              });
+            }
+            return;
+          }
 
           // If astrologer, ensure request approved before sending
           if (isAstrologer && session.requestStatus !== "approved") {
@@ -596,7 +786,14 @@ function initializeChatSocket(io) {
             session,
             senderId: authId,
             senderType: isAstrologer ? "astrologer" : "user",
-            text: normalizedMessageType === "voice" ? (normalizedText || "[Voice note]") : normalizedText,
+            text:
+              normalizedMessageType === "voice"
+                ? normalizedText || "[Voice note]"
+                : normalizedMessageType === "image"
+                ? normalizedText || "[Image]"
+                : normalizedMessageType === "file"
+                ? normalizedText || "[Attachment]"
+                : normalizedText,
             messageType: normalizedMessageType,
             fileUrl,
             replyToMessageId,
@@ -654,6 +851,7 @@ function initializeChatSocket(io) {
         const billing = await completeChatSessionWithBilling(session, io);
         await session.reload();
         clearUserInactivityAutoEnd(session.id);
+        clearWalletLimitAutoEnd(session.id);
 
         emitChatEnded(io, session, {
           endedBy: isAstrologer ? "astrologer" : "user",
@@ -718,18 +916,52 @@ function initializeChatSocket(io) {
       }
     });
 
-    socket.on("approve_chat", async ({ sessionId }) => {
+    socket.on("approve_chat", async ({ sessionId }, callback) => {
       try {
         if (!isAstrologer || !sessionId) return;
         const session = await ChatSession.findByPk(sessionId);
         if (!session || session.astrologerId !== authId) return;
 
+        const approvalStartTime = new Date();
+        const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+        const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+        const pricePerMinute = parseFloat(session.pricePerMinute || 0);
+
+        if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
+          if (callback) {
+            callback({
+              success: false,
+              error:
+                "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.",
+              code: "RECHARGE_REQUIRED_FOR_HUMAN_CHAT",
+              wallet: {
+                balance: walletBreakdown.balance,
+                signupBonusBalance: walletBreakdown.signupBonusBalance,
+                humanChatBalance: walletBreakdown.rechargeBalance,
+              },
+            });
+          }
+          return;
+        }
+
+        const walletLimit = calculateWalletLimitedChatTime({
+          rechargeBalance: walletBreakdown.rechargeBalance,
+          pricePerMinute,
+          startTime: approvalStartTime,
+        });
+
         await session.update({
           requestStatus: "approved",
-          startTime: new Date(),
+          status: "active",
+          startTime: approvalStartTime,
+          endTime: null,
+          maxDurationSeconds: walletLimit.maxDurationSeconds,
+          maxEndTime: walletLimit.maxEndTime,
+          walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
         });
 
         scheduleUserInactivityAutoEnd(io, session);
+        scheduleWalletLimitAutoEnd(io, session);
 
         const sessionPayloadForUser = mapSession(session, "user");
         const sessionPayloadForAstrologer = mapSession(session, "astrologer");
@@ -747,8 +979,18 @@ function initializeChatSocket(io) {
           sessionId,
           session: sessionPayloadForAstrologer,
         });
+
+        if (callback) {
+          callback({
+            success: true,
+            session: mapSession(session, "astrologer"),
+          });
+        }
       } catch (error) {
         console.error("approve_chat error:", error);
+        if (callback) {
+          callback({ success: false, error: "Failed to approve chat" });
+        }
       }
     });
 
@@ -760,6 +1002,7 @@ function initializeChatSocket(io) {
 
         await session.update({ requestStatus: "rejected" });
         clearUserInactivityAutoEnd(session.id);
+        clearWalletLimitAutoEnd(session.id);
 
         const sessionPayloadForUser = mapSession(session, "user");
         const sessionPayloadForAstrologer = mapSession(session, "astrologer");
@@ -826,6 +1069,10 @@ module.exports = {
   getAstrologerRoom,
   getLiveSessionRoom,
   endSessionForInsufficientBalance,
+  endSessionForWalletTimeLimit,
+  enforceWalletTimeLimit,
+  scheduleWalletLimitAutoEnd,
   scheduleUserInactivityAutoEnd,
   clearUserInactivityAutoEnd,
+  clearWalletLimitAutoEnd,
 };

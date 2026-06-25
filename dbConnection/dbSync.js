@@ -5,6 +5,8 @@ const { DataTypes } = require("sequelize");
 const Admin = require("../model/admin/admin");
 const AdminSettings = require("../model/admin/adminSettings");
 const BroadcastLog = require("../model/admin/broadcastLog");
+const ScheduledNotificationBatch = require("../model/admin/scheduledNotificationBatch");
+const ScheduledNotificationItem = require("../model/admin/scheduledNotificationItem");
 
 // AI Chat models
 const AiChatMessage = require("../model/aiChat/aiChatMessage");
@@ -182,6 +184,36 @@ async function ensureChatSessionColumns() {
         allowNull: false,
         defaultValue: 0,
         comment: "Unread messages for the astrologer in this session",
+      })
+    );
+  }
+
+  if (!table.max_duration_seconds && !table.maxDurationSeconds) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "max_duration_seconds", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: "Maximum approved chat duration based on recharge wallet balance",
+      })
+    );
+  }
+
+  if (!table.max_end_time && !table.maxEndTime) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "max_end_time", {
+        type: DataTypes.DATE,
+        allowNull: true,
+        comment: "Auto-end time calculated from real chat wallet balance",
+      })
+    );
+  }
+
+  if (!table.wallet_balance_at_approval && !table.walletBalanceAtApproval) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "wallet_balance_at_approval", {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        comment: "Recharge wallet balance used to calculate max chat duration",
       })
     );
   }
@@ -682,6 +714,59 @@ async function ensureBroadcastLogDeliveryColumns() {
   }
 }
 
+async function ensureScheduledNotificationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const batchTable = await queryInterface.describeTable("scheduled_notification_batches");
+    const itemTable = await queryInterface.describeTable("scheduled_notification_items");
+    const operations = [];
+
+    if (!batchTable.cancelledAt && !batchTable.cancelled_at) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_batches", "cancelledAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!batchTable.deletedAt && !batchTable.deleted_at) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_batches", "deletedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!itemTable.broadcastLogId && !itemTable.broadcast_log_id) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "broadcastLogId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!itemTable.lockToken && !itemTable.lock_token) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "lockToken", {
+          type: DataTypes.STRING(64),
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured scheduled notification columns exist");
+    }
+  } catch (error) {
+    console.log("scheduled notification tables will be created by sequelize.sync()");
+  }
+}
+
 async function ensureForumPostModerationColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -1002,6 +1087,7 @@ async function ensureAstrologerAuthColumns() {
 
   try {
     const table = await queryInterface.describeTable("astrologers");
+    const operations = [];
 
     if (table.email && table.email.allowNull === false) {
       await sequelize.query(
@@ -1009,8 +1095,73 @@ async function ensureAstrologerAuthColumns() {
       );
       console.log("Ensured astrologers.email is nullable for OTP-only auth");
     }
+
+    if (!table.sessionVersion && !table.session_version) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "sessionVersion", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+    if (!table.activeDeviceId && !table.active_device_id) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceId", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeDeviceName && !table.active_device_name) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceName", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeDeviceType && !table.active_device_type) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeDeviceType", {
+          type: DataTypes.ENUM("ios", "android", "web"),
+          allowNull: true,
+        })
+      );
+    }
+    if (!table.activeSessionStartedAt && !table.active_session_started_at) {
+      operations.push(
+        queryInterface.addColumn("astrologers", "activeSessionStartedAt", {
+          type: DataTypes.DATE,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured astrologer session columns exist");
+    }
   } catch (error) {
     console.log("astrologers table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureAstrologerDeviceTokenColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("astrologer_device_tokens");
+
+    if (!table.deviceName && !table.device_name) {
+      await queryInterface.addColumn("astrologer_device_tokens", "deviceName", {
+        type: DataTypes.STRING,
+        allowNull: true,
+      });
+      console.log("Ensured astrologer device token deviceName column exists");
+    }
+  } catch (error) {
+    console.log("astrologer_device_tokens table will be created by sequelize.sync()");
   }
 }
 
@@ -1374,10 +1525,12 @@ const initDB = (callback) => {
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureNotificationPushColumns())
     .then(() => ensureBroadcastLogDeliveryColumns())
+    .then(() => ensureScheduledNotificationColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())
     .then(() => ensureAstrologerEarningColumns())
     .then(() => ensureAstrologerAuthColumns())
+    .then(() => ensureAstrologerDeviceTokenColumns())
     .then(() => ensureJobApplicationColumns())
     .then(() => ensureKundliReportPdfColumns())
     .then(() => ensurePalmJobColumns())
