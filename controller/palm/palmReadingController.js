@@ -21,7 +21,7 @@ const {
   markReportPurchaseConsumed,
 } = require("../../services/reportPurchaseService");
 
-const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PRICE || 59);
+const PALM_REPORT_PRICE = Number(process.env.PALM_REPORT_PURCHASE_PRICE || process.env.PALM_REPORT_PRICE || 151);
 const PALM_CHECKOUT_TOKEN_TTL_MS = 30 * 60 * 1000;
 const PALM_TRUST_BASE_MIN = 2000;
 const PALM_TRUST_BASE_MAX = 2200;
