@@ -4,7 +4,8 @@ const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
-const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts_ringtone";
+const CHAT_REQUEST_CATEGORY = "CHAT_REQUEST";
 
 class PushNotificationService {
 
@@ -22,7 +23,6 @@ class PushNotificationService {
       return { success: false, message: "No device tokens found" };
     }
 
-    const fcmTokens = tokens.map((t) => t.token);
     const isChatRequest = data?.type === "chat_request";
     const requestExpiresAt = data?.requestExpiresAt
       ? new Date(data.requestExpiresAt).getTime()
@@ -30,70 +30,125 @@ class PushNotificationService {
     const ttlMs = isChatRequest
       ? Math.max(1, Math.min(30000, requestExpiresAt ? requestExpiresAt - Date.now() : 30000))
       : undefined;
+    const baseData = {
+      ...data,
+      ownerId: String(ownerId),
+      timestamp: new Date().toISOString(),
+    };
+    const isIosToken = (token) =>
+      String(token.deviceType || "").toLowerCase() === "ios";
+    const androidTokens = isChatRequest
+      ? tokens.filter((token) => !isIosToken(token))
+      : tokens;
+    const nonAndroidTokens = isChatRequest
+      ? tokens.filter((token) => isIosToken(token))
+      : [];
+    const multicastMessages = [];
 
-    const message = {
-      notification: {
-        title,
-        body,
-        ...(imageUrl && { imageUrl }),
-      },
-      data: {
-        ...data,
-        ownerId: String(ownerId),
-        timestamp: new Date().toISOString(),
-      },
-      android: {
+    if (androidTokens.length > 0) {
+      const androidConfig = {
         priority: "high",
         ...(ttlMs ? { ttl: ttlMs } : {}),
         ...(isChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
-        notification: {
-          channelId: CHAT_ALERTS_CHANNEL_ID,
-          ...(isChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
-          priority: isChatRequest ? "max" : "high",
-          visibility: "public",
-          defaultSound: true,
-          defaultVibrateTimings: true,
-          defaultLightSettings: true,
-        },
-      },
-      apns: {
-        headers: {
-          "apns-priority": "10",
-          ...(ttlMs ? { "apns-expiration": String(Math.floor((Date.now() + ttlMs) / 1000)) } : {}),
-        },
         ...(isChatRequest
-          ? {
-              payload: {
-                aps: {
-                  sound: "default",
-                  interruptionLevel: "time-sensitive",
-                  category: "CHAT_REQUEST",
-                },
+          ? {}
+          : {
+              notification: {
+                channelId: CHAT_ALERTS_CHANNEL_ID,
+                priority: "max",
+                visibility: "public",
+                defaultSound: true,
+                defaultVibrateTimings: true,
+                defaultLightSettings: true,
               },
-            }
-          : {}),
-      },
-      tokens: fcmTokens,
-    };
+            }),
+      };
 
-    const response = await admin.messaging().sendEachForMulticast(message);
+      multicastMessages.push({
+        tokens: androidTokens,
+        message: {
+          ...(isChatRequest
+            ? {}
+            : {
+                notification: {
+                  title,
+                  body,
+                  ...(imageUrl && { imageUrl }),
+                },
+              }),
+          data: {
+            ...baseData,
+            title: String(title || ""),
+            body: String(body || ""),
+            notificationTitle: String(title || ""),
+            notificationBody: String(body || ""),
+            category: isChatRequest ? CHAT_REQUEST_CATEGORY : "",
+          },
+          android: androidConfig,
+        },
+      });
+    }
+
+    if (nonAndroidTokens.length > 0) {
+      multicastMessages.push({
+        tokens: nonAndroidTokens,
+        message: {
+          notification: {
+            title,
+            body,
+            ...(imageUrl && { imageUrl }),
+          },
+          data: baseData,
+          apns: {
+            headers: {
+              "apns-priority": "10",
+              ...(ttlMs ? { "apns-expiration": String(Math.floor((Date.now() + ttlMs) / 1000)) } : {}),
+            },
+            ...(isChatRequest
+              ? {
+                  payload: {
+                    aps: {
+                      sound: "default",
+                      interruptionLevel: "time-sensitive",
+                      category: CHAT_REQUEST_CATEGORY,
+                    },
+                  },
+                }
+              : {}),
+          },
+        },
+      });
+    }
+
+    const responses = [];
+    for (const entry of multicastMessages) {
+      const response = await admin.messaging().sendEachForMulticast({
+        ...entry.message,
+        tokens: entry.tokens.map((t) => t.token),
+      });
+      responses.push({ response, tokens: entry.tokens });
+    }
+    const successCount = responses.reduce((sum, entry) => sum + entry.response.successCount, 0);
+    const failureCount = responses.reduce((sum, entry) => sum + entry.response.failureCount, 0);
 
     console.log(
-      `[FCM] Sent to ${ownerKey}=${ownerId}: ${response.successCount} success, ${response.failureCount} failures`
+      `[FCM] Sent to ${ownerKey}=${ownerId}: ${successCount} success, ${failureCount} failures`
     );
 
-    if (response.failureCount > 0) {
+    if (failureCount > 0) {
       const failedTokens = [];
-      response.responses.forEach((resp, idx) => {
-        if (!resp.success) {
-          const errorCode = resp.error?.code;
-          if (
-            errorCode === "messaging/invalid-registration-token" ||
-            errorCode === "messaging/registration-token-not-registered"
-          ) {
-            failedTokens.push(tokens[idx].id);
+      responses.forEach((entry) => {
+        entry.response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            const errorCode = resp.error?.code;
+            if (
+              errorCode === "messaging/invalid-registration-token" ||
+              errorCode === "messaging/registration-token-not-registered"
+            ) {
+              failedTokens.push(entry.tokens[idx].id);
+            }
           }
-        }
+        });
       });
 
       if (failedTokens.length > 0) {
@@ -107,8 +162,8 @@ class PushNotificationService {
 
     return {
       success: true,
-      successCount: response.successCount,
-      failureCount: response.failureCount,
+      successCount,
+      failureCount,
     };
   }
 

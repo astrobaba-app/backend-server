@@ -287,6 +287,7 @@ const startChatSession = async (req, res) => {
           requestExpiresAt: getRequestExpiryIso(session),
           astrologerId: String(astrologerId),
           userId: String(req.user.id),
+          userName: String(req.user.fullName || "User"),
           clickAction: "/astrologer/live-chats",
           url: `https://graho.in/astrologer/live-chats?sessionId=${session.id}`,
         },
