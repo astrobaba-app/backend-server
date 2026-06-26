@@ -2,9 +2,11 @@ const axios = require("axios");
 
 const MSG91_SEND_OTP_URL = "https://control.msg91.com/api/v5/otp";
 
-const getRequiredConfig = () => {
+const getRequiredConfig = (templateIdOverride) => {
   const authKey = String(process.env.MSG91_AUTH_KEY || "").trim();
-  const templateId = String(process.env.MSG91_OTP_TEMPLATE_ID || "").trim();
+  const templateId = String(
+    templateIdOverride || process.env.MSG91_OTP_TEMPLATE_ID || ""
+  ).trim();
 
   if (!authKey || !templateId) {
     const error = new Error(
@@ -21,11 +23,12 @@ const assertMsg91OtpConfigured = () => {
   getRequiredConfig();
 };
 
-const sendMsg91Otp = async ({ mobile, otp, variables = {} }) => {
-  const { authKey, templateId } = getRequiredConfig();
+const sendMsg91Otp = async ({ mobile, otp, variables = {}, templateId }) => {
+  const { authKey, templateId: resolvedTemplateId } =
+    getRequiredConfig(templateId);
   const params = {
     authkey: authKey,
-    template_id: templateId,
+    template_id: resolvedTemplateId,
     mobile,
   };
 

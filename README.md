@@ -75,10 +75,10 @@ https://www.notion.so/Graho-Credentials-and-Apis-keys-36bb3837c15f803db79ec57c8c
 ```
 PORT=6001
 JWT_SECRET=YOUR_JWT_SECRET
-JWT_ACCESS_EXPIRES_IN=8m
-JWT_REFRESH_EXPIRES_IN=15m
-ACCESS_COOKIE_MAX_AGE_SECONDS=120
-REFRESH_COOKIE_MAX_AGE_SECONDS=600
+JWT_ACCESS_EXPIRES_IN=30d
+JWT_REFRESH_EXPIRES_IN=30d
+ACCESS_COOKIE_MAX_AGE_SECONDS=2592000
+REFRESH_COOKIE_MAX_AGE_SECONDS=2592000
 JWT_REFRESH_SECRET=YOUR_JWT_REFRESH_SECRET
 
 COOKIE_DOMAIN=
@@ -162,7 +162,15 @@ WEB_PUSH_SUBJECT=mailto:hello@graho.in
 # Temporary MSG91 OTP test route
 MSG91_AUTH_KEY=YOUR_MSG91_AUTH_KEY
 MSG91_OTP_TEMPLATE_ID=YOUR_MSG91_OTP_TEMPLATE_ID
+MSG91_MOBILE_OTP_TEMPLATE_ID=YOUR_MSG91_MOBILE_OTP_TEMPLATE_ID
+ANDROID_SMS_RETRIEVER_HASH=YOUR_ANDROID_APP_HASH
 OTP_QUEUE_WORKER_ENABLED=true
+OTP_SEND_HOURLY_LIMIT=5
+OTP_SEND_DAILY_LIMIT=30
+OTP_SEND_MONTHLY_LIMIT=300
+OTP_VERIFY_PER_OTP_LIMIT=5
+OTP_VERIFY_DAILY_LIMIT=60
+OTP_VERIFY_MONTHLY_LIMIT=600
 TEMP_MSG91_OTP_ENABLED=false
 TEMP_MSG91_OTP_API_KEY=YOUR_RANDOM_INTERNAL_TEST_KEY
 ```
@@ -170,7 +178,27 @@ TEMP_MSG91_OTP_API_KEY=YOUR_RANDOM_INTERNAL_TEST_KEY
 User and astrologer OTP sends use backend-generated 4-digit OTPs, Redis storage,
 a Redis queue, and MSG91 delivery from an on-demand OTP worker. The worker wakes
 when an OTP is queued, drains pending OTP jobs, then goes idle without polling
-Redis. Each phone number is limited to 5 OTP requests per 1 hour.
+Redis. Each phone number is limited by hourly, daily, and monthly send counters.
+OTP verification is limited per OTP plus daily and monthly counters.
+
+`MSG91_OTP_TEMPLATE_ID` is the default/web OTP template. `MSG91_MOBILE_OTP_TEMPLATE_ID`
+is used only by mobile `/v2` OTP routes and should point to the DLT-approved
+template that includes the Android SMS Retriever hash.
+
+For Android OTP auto-fill through SMS Retriever, approve a DLT template like:
+
+```text
+<#> {#numeric#} is your verification code for GRAHO. Do not share it with anyone.
+{#alphanumeric#}
+```
+
+Then configure the MSG91 mobile OTP template content with the release app hash
+as the final variable. The backend sends it as `app_hash`.
+
+```text
+<#> ##OTP## is your verification code for GRAHO. Do not share it with anyone.
+##app_hash##
+```
 
 ## Temporary MSG91 OTP Route
 

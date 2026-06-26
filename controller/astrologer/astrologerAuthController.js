@@ -170,7 +170,8 @@ const verifyOTP = async (req, res) => {
     const statusCode = error.statusCode || 500;
     res.status(statusCode).json({
       success: false,
-      message: "Failed to verify OTP",
+      message:
+        statusCode < 500 ? error.message : "Failed to verify OTP",
       error: error.message,
     });
   }
@@ -557,7 +558,10 @@ const updateProfile = async (req, res) => {
 
 const refreshAccessToken = async (req, res) => {
   try {
-    const refreshToken = req.cookies?.refresh_token;
+    const refreshToken =
+      req.cookies?.refresh_token ||
+      req.body?.refreshToken ||
+      req.headers["x-refresh-token"];
 
     if (!refreshToken) {
       return res.status(401).json({
@@ -608,6 +612,7 @@ const refreshAccessToken = async (req, res) => {
       message: "Token refreshed successfully",
       token,
       astrologerToken,
+      refreshToken: nextRefreshToken,
     });
   } catch (error) {
     console.error("Astrologer refresh token error:", error);

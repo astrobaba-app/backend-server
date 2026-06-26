@@ -1,4 +1,3 @@
-const { randomInt } = require("crypto");
 const User = require("../../model/user/userAuth");
 const {
   createToken,
@@ -6,17 +5,15 @@ const {
   createRefreshToken,
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
-const redis = require("../../config/redis/redis");
 const { applySignupBonus } = require("../../services/signupBonusService");
 const {
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
-const sendUserOtpV2 = require("../../services/otpProviders/sendUserOtpV2");
-
-const OTP_TTL_SECONDS_V2 = 5 * 60;
-
-const generate4DigitOtp = () => randomInt(1000, 10000).toString();
+const {
+  createAndQueueMobileOtp,
+  verifyQueuedOtp,
+} = require("../../services/otpQueueService");
 
 const sendOtpV2 = async (req, res) => {
   try {
@@ -37,18 +34,9 @@ const sendOtpV2 = async (req, res) => {
       });
     }
 
-    const otp = generate4DigitOtp();
-    const otpKey = `user:v2:otp:${normalizedMobile}`;
-
-    await redis.setex(otpKey, OTP_TTL_SECONDS_V2, {
-      otp,
+    await createAndQueueMobileOtp({
+      actorType: "user",
       mobile: normalizedMobile,
-      createdAt: Date.now(),
-    });
-
-    await sendUserOtpV2({
-      mobile: normalizedMobile,
-      otp,
     });
 
     return res.status(200).json({
@@ -58,9 +46,9 @@ const sendOtpV2 = async (req, res) => {
     });
   } catch (error) {
     console.error("Generate OTP V2 error:", error);
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to send OTP",
+      message: error.statusCode === 429 ? error.message : "Failed to send OTP",
       error: error.message,
     });
   }
@@ -85,27 +73,11 @@ const verifyOtpV2 = async (req, res) => {
       });
     }
 
-    const otpKey = `user:v2:otp:${verifiedMobile}`;
-    const storedData = await redis.get(otpKey);
-
-    if (!storedData) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP",
-      });
-    }
-
-    const otpData =
-      typeof storedData === "string" ? JSON.parse(storedData) : storedData;
-
-    if (otpData.otp !== otp || otpData.mobile !== verifiedMobile) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired OTP",
-      });
-    }
-
-    await redis.del(otpKey);
+    await verifyQueuedOtp({
+      actorType: "user",
+      mobile: verifiedMobile,
+      otp,
+    });
 
     // Keep the post-verification flow identical to the existing Firebase flow.
     let user = await User.findOne({ where: { mobile: verifiedMobile } });
@@ -153,6 +125,7 @@ const verifyOtpV2 = async (req, res) => {
       isNewUser: profileIncomplete,
       token: token,
       middlewareToken: middlewareToken,
+      refreshToken,
       bonusInfo: bonusInfo,
       user: {
         id: user.id,
@@ -169,7 +142,8 @@ const verifyOtpV2 = async (req, res) => {
     const statusCode = error.statusCode || 500;
     return res.status(statusCode).json({
       success: false,
-      message: "Failed to verify OTP",
+      message:
+        statusCode < 500 ? error.message : "Failed to verify OTP",
       error: error.message,
     });
   }

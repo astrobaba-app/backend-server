@@ -2,7 +2,6 @@ const Astrologer = require("../../model/astrologer/astrologer");
 const redis = require("../../config/redis/redis");
 const clearTokenCookieAstrologer = require("../../services/clearTokenCookieAstrologer");
 const pushNotificationService = require("../../services/pushNotificationService");
-const sendAstrologerOtpV2 = require("../../services/otpProviders/sendAstrologerOtpV2");
 const {
   createToken,
   createMiddlewareToken,
@@ -11,13 +10,13 @@ const {
 const setTokenCookieAstrologer = require("../../services/setTokenCookieAstrologer");
 const {
   normalizeIndianMobile,
-} = require("../../services/firebasePhoneAuthService");
+} = require("../../services/phoneNumberService");
+const {
+  createAndQueueMobileOtp,
+  verifyQueuedOtp,
+} = require("../../services/otpQueueService");
 
-const OTP_TTL_SECONDS_V2 = 10 * 60;
 const REGISTRATION_VERIFIED_TTL_SECONDS = 20 * 60;
-
-const generate4DigitOTP = () =>
-  Math.floor(1000 + Math.random() * 9000).toString();
 
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 
@@ -30,7 +29,13 @@ const normalizeDeviceName = (deviceName, deviceType) => {
   return deviceType === "ios" ? "iOS device" : "Android device";
 };
 
-const buildAstrologerLoginResponse = (astrologer, phoneNumber, token, astrologerToken) => ({
+const buildAstrologerLoginResponse = (
+  astrologer,
+  phoneNumber,
+  token,
+  astrologerToken,
+  refreshToken
+) => ({
   success: true,
   message: "Login successful",
   phoneNumber,
@@ -52,6 +57,7 @@ const buildAstrologerLoginResponse = (astrologer, phoneNumber, token, astrologer
   },
   token,
   astrologerToken,
+  refreshToken,
 });
 
 const toStringArray = (value) => {
@@ -115,18 +121,9 @@ const sendRegistrationOTPV2 = async (req, res) => {
       });
     }
 
-    const otp = generate4DigitOTP();
-    const otpKey = `astrologer:v2:otp:${normalizedPhoneNumber}`;
-
-    await redis.setex(otpKey, OTP_TTL_SECONDS_V2, {
-      otp,
-      phoneNumber: normalizedPhoneNumber,
-      createdAt: Date.now(),
-    });
-
-    await sendAstrologerOtpV2({
-      phoneNumber: normalizedPhoneNumber,
-      otp,
+    await createAndQueueMobileOtp({
+      actorType: "astrologer",
+      mobile: normalizedPhoneNumber,
     });
 
     return res.status(200).json({
@@ -138,9 +135,9 @@ const sendRegistrationOTPV2 = async (req, res) => {
     });
   } catch (error) {
     console.error("Send registration OTP V2 error:", error);
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to send OTP",
+      message: error.statusCode === 429 ? error.message : "Failed to send OTP",
       error: error.message,
     });
   }
@@ -176,24 +173,11 @@ const verifyOTPV2 = async (req, res) => {
       });
     }
 
-    const otpKey = `astrologer:v2:otp:${phoneNumber}`;
-    const storedData = await redis.get(otpKey);
-
-    if (!storedData) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP not found or expired. Please request a new OTP",
-      });
-    }
-
-    const otpData =
-      typeof storedData === "string" ? JSON.parse(storedData) : storedData;
-    if (otpData.otp !== otp) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
+    await verifyQueuedOtp({
+      actorType: "astrologer",
+      mobile: phoneNumber,
+      otp,
+    });
 
     const astrologer = await Astrologer.findOne({ where: { phoneNumber } });
 
@@ -204,7 +188,6 @@ const verifyOTPV2 = async (req, res) => {
         verifiedAt: Date.now(),
         source: "v2",
       });
-      await redis.del(otpKey);
 
       return res.status(200).json({
         success: true,
@@ -278,16 +261,26 @@ const verifyOTPV2 = async (req, res) => {
     const refreshToken = createRefreshToken(authPayload);
 
     setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
-    await redis.del(otpKey);
 
     return res
       .status(200)
-      .json(buildAstrologerLoginResponse(astrologer, phoneNumber, token, astrologerToken));
+      .json(
+        buildAstrologerLoginResponse(
+          astrologer,
+          phoneNumber,
+          token,
+          astrologerToken,
+          refreshToken
+        )
+      );
   } catch (error) {
     console.error("Verify OTP V2 error:", error);
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to verify OTP",
+      message:
+        error.statusCode && error.statusCode < 500
+          ? error.message
+          : "Failed to verify OTP",
       error: error.message,
     });
   }
