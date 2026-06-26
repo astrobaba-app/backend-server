@@ -510,6 +510,7 @@ async function generateMonthlyPredictions(monthlyPayload, userId) {
   // Log approximate prompt character count for monitoring
   console.log(`[YearlyReportService] Prompt chars for ${monthlyPayload.monthName}: ${prompt.length}`);
 
+  const startTime = Date.now();
   const response = await createChatCompletion(
     {
       model: CHAT_MODEL,
@@ -530,13 +531,15 @@ async function generateMonthlyPredictions(monthlyPayload, userId) {
     { feature: "yearly_kundali_report_month", userId }
   );
 
+  const duration = Date.now() - startTime;
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {
     throw new Error(`No prediction response returned from OpenAI for ${monthlyPayload.monthName}`);
   }
 
-  console.log(`[YearlyReportService] OpenAI Response for ${monthlyPayload.monthName}:`);
-  console.log(content);
+  // console.log(`[YearlyReportService] OpenAI Response for ${monthlyPayload.monthName}:`);
+  // console.log(content);
+  console.log(`[YearlyReportService] LLM response received successfully for ${monthlyPayload.monthName}. Time taken: ${duration} ms`);
 
   try {
     return JSON.parse(content);

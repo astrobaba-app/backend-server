@@ -510,6 +510,7 @@ function cleanJsonResponse(rawText) {
 
 async function generateSadeSatiReportContent(reportInput, userId) {
   console.log(`[SadeSatiReportService] Requesting full report from OpenAI for ${reportInput.user_profile?.name || "client"}...`);
+  const startTime = Date.now();
   const response = await createChatCompletion(
     {
       model: CHAT_MODEL,
@@ -530,10 +531,13 @@ async function generateSadeSatiReportContent(reportInput, userId) {
     { feature: "sadesati_report_generation_full", userId }
   );
 
+  const duration = Date.now() - startTime;
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {
     throw new Error("No Sade Sati report response returned from OpenAI Client");
   }
+
+  console.log(`[SadeSatiReportService] LLM response received successfully. Time taken: ${duration} ms`);
 
   const cleanedContent = cleanJsonResponse(content);
   try {

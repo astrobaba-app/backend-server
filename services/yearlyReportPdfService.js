@@ -312,7 +312,7 @@ function generateHTMLTemplate(reportData, userRequest) {
 
   // Generate monthly prediction pages (19 pages per month)
   let monthsHtml = "";
-  let pageNum = 16; // Table of Contents starts January at 16
+  let pageNum = 16; 
 
   MONTHS.forEach((monthName, monthIdx) => {
     const pred = reportData.predictions?.[monthName] || {};

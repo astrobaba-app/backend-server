@@ -370,6 +370,7 @@ EXPECTED JSON SCHEMA:
 async function generateDailyReport(payload, userRequest) {
   const prompt = buildPrompt(payload);
 
+  const startTime = Date.now();
   const response = await createChatCompletion(
     {
       model: CHAT_MODEL,
@@ -388,13 +389,15 @@ async function generateDailyReport(payload, userRequest) {
     { feature: "daily_kundali_report", userId: userRequest?.userId }
   );
 
+  const duration = Date.now() - startTime;
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {
     throw new Error("No daily report response returned from OpenAI Client");
   }
 
   try {
-    console.log("[DailyKundliReport] GPT response received:", JSON.parse(content));
+    // console.log("[DailyKundliReport] GPT response received:", JSON.parse(content));
+    console.log(`[DailyKundliReport] LLM response received successfully. Time taken: ${duration} ms`);
     return JSON.parse(content);
   } catch (error) {
     console.error("[DailyKundliReport] Failed to parse GPT response:", content);

@@ -3,6 +3,7 @@ const KundliReport = require("../../model/horoscope/kundliReport");
 const YearlyReport = require("../../model/horoscope/yearlyReport");
 const WealthReport = require("../../model/horoscope/wealthReport");
 const SadeSatiReport = require("../../model/horoscope/sadeSatiReport");
+const HealthReport = require("../../model/horoscope/healthReport");
 const UserRequest = require("../../model/user/userRequest");
 const { generateKundliReportContent } = require("../../services/kundliReportAiService");
 const { generateKundliReportPDF: buildKundliReportPDF } = require("../../services/kundliReportPdfService");
@@ -31,6 +32,12 @@ const {
 const {
   generateSadeSatiReportPDF,
 } = require("../../services/sadeSatiReportPdfService");
+const {
+  generateHealthReport,
+} = require("../../services/health-kundli-report");
+const {
+  generateHealthReportPDF,
+} = require("../../services/healthReportPdfService");
 // Note: dailyReportPdfService removed — PDF is now generated on the frontend via html2pdf.js
 
 const {
@@ -1800,6 +1807,292 @@ const deleteSadeSatiKundaliReport = async (req, res) => {
   }
 };
 
+const generateHealthPdfInBackground = async (reportRecord, userRequest) => {
+  try {
+    console.log(`[Health PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
+    const pdfBuffer = await generateHealthReportPDF(reportRecord.reportData, userRequest);
+
+    const safeName = (userRequest.fullName ?? "health_report").replace(/\s+/g, "_");
+    const fileName = `health_report_${safeName}_${Date.now()}.pdf`;
+
+    console.log(`[Health PDF Background] Uploading to Cloudinary...`);
+    const uploadResult = await uploadPdfBuffer({
+      buffer: pdfBuffer,
+      fileName,
+      folder: "graho/health-reports",
+    });
+
+    console.log(`[Health PDF Background] Saving pdfUrl in database...`);
+    await reportRecord.update({
+      pdfUrl: uploadResult.secure_url,
+      pdfPublicId: uploadResult.public_id,
+      pdfFileName: fileName,
+      pdfUploadedAt: new Date(),
+    });
+    console.log(`[Health PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
+  } catch (error) {
+    console.error(`[Health PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
+  }
+};
+
+const generateHealthKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      fullName,
+      gender,
+      dateOfbirth,
+      timeOfbirth,
+      placeOfBirth,
+      latitude,
+      longitude,
+    } = req.body;
+
+    if (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields (fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
+      });
+    }
+
+    console.log("Received Health report request for:", { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+
+    const parsedDob = new Date(dateOfbirth);
+    let userRequest = await UserRequest.findOne({
+      where: {
+        userId,
+        fullName: fullName.trim(),
+        dateOfbirth: parsedDob,
+        timeOfbirth: timeOfbirth.trim(),
+        placeOfBirth: placeOfBirth.trim(),
+        gender: gender.trim(),
+      },
+      include: [
+        {
+          model: Kundli,
+          as: "kundli",
+        },
+      ],
+    });
+
+    if (!userRequest) {
+      userRequest = await UserRequest.create({
+        userId,
+        fullName: fullName.trim(),
+        dateOfbirth: parsedDob,
+        timeOfbirth: timeOfbirth.trim(),
+        placeOfBirth: placeOfBirth.trim(),
+        gender: gender.trim(),
+        latitude: latitude ? parseFloat(latitude) : null,
+        longitude: longitude ? parseFloat(longitude) : null,
+      });
+    }
+
+    let reportRecord = await HealthReport.findOne({
+      where: {
+        userId,
+        userRequestId: userRequest.id,
+      },
+    });
+
+    let finalResponseData;
+    if (reportRecord) {
+      finalResponseData = reportRecord.reportData;
+      console.log(`[HealthReportController] Serving cached predictions`);
+      if (!reportRecord.pdfUrl) {
+        generateHealthPdfInBackground(reportRecord, userRequest);
+      }
+    } else {
+      let kundli;
+      if (userRequest.kundli) {
+        kundli = userRequest.kundli.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
+      } else {
+        const [
+          basicDetails, astroDetails, panchang, planetary, charts, dasha, yogini,
+          manglikAnalysis, personality, gemstoneRemedies, rudrakshaSuggestion,
+          ashtakavarga, transit, completeHoroscope,
+        ] = await Promise.allSettled([
+          getBasicDetails(userRequest), getAstroDetails(userRequest), getPanchang(userRequest),
+          getPlanetaryPositions(userRequest), getAllCharts(userRequest), getVimshottariDasha(userRequest),
+          getYoginiDasha(userRequest), getManglikAnalysis(userRequest), getAscendantReport(userRequest),
+          getGemstoneRemedies(userRequest), getRudrakshaSuggestion(userRequest),
+          getAshtakavarga(userRequest), getTransitChart(userRequest), getCompleteHoroscope(userRequest),
+        ]);
+
+        const extractValue = (result, name) => {
+          if (result.status === "fulfilled") return result.value;
+          console.error(`${name} failed:`, result.reason?.message || result.reason);
+          return null;
+        };
+
+        const basicDetailsVal = extractValue(basicDetails, "Basic Details");
+        const astroDetailsVal = extractValue(astroDetails, "Astro Details");
+        const panchangVal = extractValue(panchang, "Panchang");
+        const planetaryVal = extractValue(planetary, "Planetary");
+        const chartsVal = extractValue(charts, "Charts");
+        const dashaVal = extractValue(dasha, "Vimshottari Dasha");
+        const yoginiVal = extractValue(yogini, "Yogini Dasha");
+        const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik");
+        const personalityVal = extractValue(personality, "Personality");
+        const gemstones = extractValue(gemstoneRemedies, "Gemstones");
+        const rudraksha = extractValue(rudrakshaSuggestion, "Rudraksha");
+        const ashtakvargaData = extractValue(ashtakavarga, "Ashtakavarga");
+        const transitVal = extractValue(transit, "Transit");
+        const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
+
+        const ashtakvargaPayload = buildAshtakvargaPayload(
+          ashtakvargaData,
+          basicDetailsVal?.ascendant?.longitude ?? 0
+        );
+
+        let yogas = null;
+        if (horoscope && Array.isArray(horoscope.yoga_analysis)) {
+          yogas = horoscope.yoga_analysis.map((yoga) => ({
+            name: yoga.name, type: yoga.type, strength: yoga.strength,
+            description: yoga.description, effects: yoga.effects,
+          }));
+        }
+
+        const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
+        if (transitVal) finalHoroscope.transit = transitVal;
+
+        const kundliDataObj = {
+          requestId: userRequest.id,
+          basicDetails: basicDetailsVal,
+          astroDetails: astroDetailsVal,
+          manglikAnalysis: manglikAnalysisVal,
+          panchang: panchangVal,
+          charts: chartsVal,
+          dasha: dashaVal,
+          yogini: yoginiVal,
+          personality: personalityVal,
+          planetary: planetaryVal,
+          remedies: { gemstones, rudraksha },
+          ashtakvarga: ashtakvargaPayload,
+          yogas,
+          horoscope: finalHoroscope,
+        };
+
+        const createdKundli = await Kundli.create(kundliDataObj);
+        kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
+      }
+
+      finalResponseData = await generateHealthReport(kundli, userRequest);
+
+      if (reportRecord) {
+        await reportRecord.update({
+          reportData: finalResponseData,
+          generatedAt: new Date(),
+          pdfUrl: null,
+        });
+      } else {
+        reportRecord = await HealthReport.create({
+          userId,
+          userRequestId: userRequest.id,
+          reportData: finalResponseData,
+          generatedAt: new Date(),
+        });
+      }
+      generateHealthPdfInBackground(reportRecord, userRequest);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: finalResponseData,
+    });
+  } catch (error) {
+    console.error("Error in generateHealthKundaliReport:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate Health report",
+      error: error.message,
+    });
+  }
+};
+
+const getHealthKundaliHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const reports = await HealthReport.findAll({
+      where: { userId },
+      include: [
+        {
+          model: UserRequest,
+          as: "userRequest",
+          required: true,
+        },
+      ],
+      order: [["generatedAt", "DESC"]],
+    });
+
+    const formattedReports = reports.map((r) => ({
+      id: r.id,
+      userRequestId: r.userRequestId,
+      status: r.pdfUrl ? "completed" : "generating",
+      fullName: r.userRequest.fullName,
+      dateOfbirth: r.userRequest.dateOfbirth,
+      placeOfBirth: r.userRequest.placeOfBirth,
+      timeOfbirth: r.userRequest.timeOfbirth,
+      gender: r.userRequest.gender,
+      createdAt: r.generatedAt,
+      pdfUrl: r.pdfUrl || null,
+      reportData: r.reportData || null,
+    }));
+
+    res.status(200).json({
+      success: true,
+      reports: formattedReports,
+    });
+  } catch (error) {
+    console.error("Error in getHealthKundaliHistory:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch Health report history",
+      error: error.message,
+    });
+  }
+};
+
+const deleteHealthKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Report ID is required",
+      });
+    }
+
+    const reportRecord = await HealthReport.findOne({
+      where: { id, userId },
+    });
+
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or you do not have permission to delete it",
+      });
+    }
+
+    await reportRecord.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting Health report:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getUserKundlisForReport,
   generateKundliReport,
@@ -1818,4 +2111,7 @@ module.exports = {
   generateSadeSatiKundaliReport,
   getSadeSatiKundaliHistory,
   deleteSadeSatiKundaliReport,
+  generateHealthKundaliReport,
+  getHealthKundaliHistory,
+  deleteHealthKundaliReport,
 };

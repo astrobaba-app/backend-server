@@ -564,6 +564,7 @@ async function generateWealthReportContent(reportInput, userId) {
   console.log(`[WealthReportService] Requesting OpenAI analysis for client: ${reportInput.client.name}...`);
   console.log(`[WealthReportService] Prompt length: ${prompt.length} characters`);
 
+  const startTime = Date.now();
   const response = await createChatCompletion(
     {
       model: CHAT_MODEL,
@@ -584,13 +585,15 @@ async function generateWealthReportContent(reportInput, userId) {
     { feature: "wealth_report_generation", userId }
   );
 
+  const duration = Date.now() - startTime;
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {
     throw new Error("No wealth report response returned from OpenAI Client");
   }
 
   try {
-    console.log("[WealthReportService] Raw LLM response content:\n", content);
+    // console.log("[WealthReportService] Raw LLM response content:\n", content);
+    console.log(`[WealthReportService] LLM response received successfully. Time taken: ${duration} ms`);
     const data = JSON.parse(content);
     console.log("[WealthReportService] OpenAI parsed response successfully");
     return data;

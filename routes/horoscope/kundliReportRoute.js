@@ -18,6 +18,9 @@ const {
   generateSadeSatiKundaliReport,
   getSadeSatiKundaliHistory,
   deleteSadeSatiKundaliReport,
+  generateHealthKundaliReport,
+  getHealthKundaliHistory,
+  deleteHealthKundaliReport,
 } = require("../../controller/horoscope/kundliReportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
@@ -63,5 +66,12 @@ router.get("/sade-sati-kundali", checkForAuthenticationCookie(), getSadeSatiKund
 
 // Delete a sade-sati report record
 router.delete("/sade-sati-kundali/:id", checkForAuthenticationCookie(), deleteSadeSatiKundaliReport);
+
+// Health Kundali endpoints
+router.post("/health-kundali", checkForAuthenticationCookie(), generateHealthKundaliReport);
+router.get("/health-kundali", checkForAuthenticationCookie(), getHealthKundaliHistory);
+
+// Delete a health report record
+router.delete("/health-kundali/:id", checkForAuthenticationCookie(), deleteHealthKundaliReport);
 
 module.exports = router;
