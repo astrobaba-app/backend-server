@@ -23,8 +23,15 @@ const {
 const {
   queueAiChatInterestFinalization,
 } = require("../../services/aiChatInterestService");
+const {
+  generateAiChatEngineResponse,
+} = require("../../services/aiChatEngineClient");
 
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
+const AI_CHAT_ENGINE_MAX_BUBBLES = (() => {
+  const parsed = Number(process.env.AI_CHAT_ENGINE_MAX_BUBBLES || 5);
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(Math.floor(parsed), 5)) : 5;
+})();
 const AI_CHAT_PRICE_PER_MINUTE = (() => {
   const parsed = parseFloat(process.env.AI_CHAT_PRICE_PER_MINUTE);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
@@ -819,6 +826,53 @@ const buildGreetingMessage = (userName, astrologerId, hasKundli, userRequest) =>
 
   return `Namaste ${firstName}!  Main ${astrologerName} hun, ${possessivePronoun} astrologer. Aaj main aapki kya madad ${helpingVerb}? Koi bhi sawaal poochh sakte hain — career, love, health, ya life ke kisi bhi aspect ke baare mein. Feel free karo! `;
 };
+
+const buildFallbackGreetingMessages = (userName, astrologerId, hasKundli) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
+  const firstName = userName ? userName.trim().split(/\s+/)[0] : "";
+  const namePrefix = firstName && Math.random() > 0.45 ? `${firstName}, ` : "";
+  const options = hasKundli
+    ? [
+        [
+          { content: `Namaste ${namePrefix}kundli details mil gayi hain.` },
+          { content: "Aap apna sawal bataiye, main dhyan se dekhkar guide karta hun." },
+        ],
+        [
+          { content: "Namaste ji, swagat hai." },
+          { content: "Kundli attached hai, isliye timing aur direction dono angle se dekh paunga." },
+        ],
+        [
+          { content: `Namaste ${namePrefix}aap bataiye kis baat ko lekar guidance chahiye?` },
+          { content: "Main kundli ke basis par calmly dekh leta hun." },
+        ],
+      ]
+    : [
+        [
+          { content: `Namaste ${namePrefix}swagat hai.` },
+          { content: "Aap apna sawal bataiye, main astrology angle se guide karta hun." },
+        ],
+        [
+          { content: "Namaste ji, main sun raha hun." },
+          { content: "Career, relationship, family ya kisi bhi concern par seedha pooch sakte hain." },
+        ],
+        [
+          { content: `Namaste, main ${profile.name} hun.` },
+          { content: "Aaj kis baat ko lekar guidance chahiye?" },
+        ],
+      ];
+
+  return buildVariableChatDelays(options[Math.floor(Math.random() * options.length)]);
+};
+
+const formatCreatedAiMessage = (message, extra = {}) => ({
+  id: message.id,
+  sessionId: message.sessionId,
+  role: message.role,
+  content: message.content,
+  createdAt: message.createdAt,
+  updatedAt: message.updatedAt,
+  ...extra,
+});
 
 const USER_STOP_INTENT_PATTERNS = [
   /(?:\bmat\b|\bmt\b)\s*bolo/iu,
@@ -2444,6 +2498,343 @@ const sendMessageV2 = (req, res) => {
   return sendMessage(req, res);
 };
 
+const buildVariableChatDelays = (messages) => {
+  let previousDelay = 0;
+  return messages.map((item, index) => {
+    const wordCount = String(item.content || "").trim().split(/\s+/).filter(Boolean).length;
+    if (index === 0) {
+      previousDelay = 1400 + Math.floor(Math.random() * 1200) + Math.min(wordCount * 45, 900);
+    } else {
+      previousDelay += 1800 + Math.floor(Math.random() * 2400) + Math.min(wordCount * 55, 1200);
+    }
+
+    return {
+      ...item,
+      displayDelayMs: previousDelay,
+    };
+  });
+};
+
+const varyFallbackMessageCount = (messages) => {
+  const maxCount = Math.min(AI_CHAT_ENGINE_MAX_BUBBLES, messages.length);
+  if (maxCount <= 1) {
+    return messages.slice(0, 1);
+  }
+
+  const requestedCount = 1 + Math.floor(Math.random() * maxCount);
+  const selected = messages.slice(0, requestedCount);
+  if (selected.length === 1 && messages.length > 1) {
+    selected[0] = {
+      ...selected[0],
+      content: messages.map((item) => item.content).join(" "),
+    };
+  }
+
+  return selected;
+};
+
+const buildLocalEngineFallbackMessages = (message, astrologerId) => {
+  const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
+  const text = String(message || "").toLowerCase();
+  const isHinglish = /\b(kya|kab|kaise|mera|meri|mujhe|hai|hoga|hogi|shaadi)\b/i.test(text);
+  const isHindi = /[\u0900-\u097F]/.test(String(message || ""));
+
+  let fallbackMessages;
+  if (isHindi) {
+    fallbackMessages = [
+      { content: `${profile.name} बोल रहा हूँ, आपकी बात समझ रहा हूँ।` },
+      { content: "ज्योतिष के हिसाब से इस विषय में जल्दबाज़ी से बचना बेहतर रहेगा।" },
+      { content: "आप चाहें तो मैं इसे कुंडली के हिसाब से और गहराई से देख सकता हूँ।" },
+    ];
+  } else if (isHinglish) {
+    fallbackMessages = [
+      { content: `${profile.name} bol raha hun, aapki baat samajh raha hun.` },
+      { content: "Astrology ke hisaab se abhi patience aur timing zyada important dikh rahi hai." },
+      { content: "Aap ye sawal career angle se pooch rahe hain ya relationship angle se?" },
+    ];
+  } else {
+    fallbackMessages = [
+      { content: `${profile.name} here, I understand your concern.` },
+      { content: "Astrologically, this looks like a phase where patience and timing matter more than force." },
+      { content: "Is this more about career, relationship, or family?" },
+    ];
+  }
+
+  return buildVariableChatDelays(varyFallbackMessageCount(fallbackMessages));
+};
+
+const createAiGreetingMessages = async ({
+  session,
+  userId,
+  userName,
+  userRequest = null,
+  kundli = null,
+}) => {
+  const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
+  let engineResponse = null;
+
+  try {
+    engineResponse = await generateAiChatEngineResponse({
+      session_id: session.id,
+      user_message: "Namaste",
+      astrologer: {
+        id: publicAstrologer.id,
+        name: publicAstrologer.name,
+        gender: publicAstrologer.gender,
+        expertise: publicAstrologer.expertise,
+        skills: publicAstrologer.skills || [],
+      },
+      user: {
+        id: userId,
+        name: userName || null,
+      },
+      history: [],
+      kundli: kundli?.toJSON ? kundli.toJSON() : kundli,
+      user_request: userRequest?.toJSON ? userRequest.toJSON() : userRequest,
+      fast_mode: true,
+      max_bubbles: Math.min(AI_CHAT_ENGINE_MAX_BUBBLES, 3),
+      conversation_stage: "greeting",
+    });
+  } catch (engineError) {
+    console.error("AI chat greeting engine request failed:", engineError?.message || engineError);
+  }
+
+  const hasKundli = Boolean(userRequest || kundli || session.kundliUserRequestId);
+  const responseMessages =
+    Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
+      ? engineResponse.messages
+      : buildFallbackGreetingMessages(userName, session.astrologerId, hasKundli);
+
+  const createdMessages = [];
+  for (const item of responseMessages) {
+    const content = ensureCompleteSentenceEnding(
+      sanitizeAssistantResponse(item.content || "")
+    );
+    if (!content) continue;
+
+    const message = await AIChatMessage.create({
+      sessionId: session.id,
+      role: "assistant",
+      content,
+    });
+
+    createdMessages.push(
+      formatCreatedAiMessage(message, {
+        displayDelayMs: Number(item.displayDelayMs ?? item.display_delay_ms ?? 1200),
+      })
+    );
+  }
+
+  if (createdMessages.length === 0) {
+    const greetingText = buildGreetingMessage(userName, session.astrologerId, hasKundli, userRequest);
+    const message = await AIChatMessage.create({
+      sessionId: session.id,
+      role: "assistant",
+      content: greetingText,
+    });
+    createdMessages.push(formatCreatedAiMessage(message, { displayDelayMs: 1200 }));
+  }
+
+  await session.update({ lastMessageAt: new Date() });
+  return createdMessages;
+};
+
+const sendMessageV3 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const requestBody = req.body || {};
+    const trimmedMessage = String(requestBody.message || "").trim();
+    const fastMode = requestBody.fastMode !== false && requestBody.fast_mode !== false;
+    const requestedHistoryLimit = Number(
+      requestBody.historyLimit ?? requestBody.history_limit
+    );
+    const historyLimit = Number.isFinite(requestedHistoryLimit) && requestedHistoryLimit > 0
+      ? Math.min(Math.floor(requestedHistoryLimit), 20)
+      : 12;
+
+    if (!trimmedMessage) {
+      return res.status(400).json({
+        success: false,
+        message: "Message is required",
+      });
+    }
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    const sessionState = await enforceActiveAiSession(session);
+    if (sessionState.ended) {
+      return res.status(402).json({
+        success: false,
+        code: "AI_CHAT_ENDED",
+        reason: sessionState.reason,
+        message:
+          sessionState.reason === "wallet_time_limit"
+            ? "Out of balance. Recharge more to continue chatting."
+            : "This AI chat has ended.",
+        session: formatAiSession(sessionState.session),
+        billing: sessionState.billing,
+      });
+    }
+
+    const userMessage = await AIChatMessage.create({
+      sessionId,
+      role: "user",
+      content: trimmedMessage,
+    });
+
+    const previousMessages = await AIChatMessage.findAll({
+      where: { sessionId },
+      order: [["createdAt", "DESC"]],
+      limit: historyLimit + 1,
+    });
+    previousMessages.reverse();
+
+    let kundliJson = null;
+    let userRequestJson = null;
+    if (session.kundliUserRequestId) {
+      try {
+        const [kundliRecord, userRequestRecord] = await Promise.all([
+          Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
+          UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
+        ]);
+        kundliJson = kundliRecord?.toJSON ? kundliRecord.toJSON() : null;
+        userRequestJson = userRequestRecord?.toJSON ? userRequestRecord.toJSON() : null;
+      } catch (kundliErr) {
+        console.error("Failed to load Kundli context for AI chat engine:", kundliErr.message);
+      }
+    }
+
+    const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
+    let engineResponse = null;
+    try {
+      engineResponse = await generateAiChatEngineResponse({
+        session_id: sessionId,
+        user_message: trimmedMessage,
+        astrologer: {
+          id: publicAstrologer.id,
+          name: publicAstrologer.name,
+          gender: publicAstrologer.gender,
+          expertise: publicAstrologer.expertise,
+          skills: publicAstrologer.skills || [],
+        },
+        user: {
+          id: userId,
+          name: req.user?.fullName || null,
+        },
+        history: previousMessages
+          .filter((message) => message.id !== userMessage.id)
+          .map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        kundli: kundliJson,
+        user_request: userRequestJson,
+        fast_mode: fastMode,
+        max_bubbles: AI_CHAT_ENGINE_MAX_BUBBLES,
+      });
+    } catch (engineError) {
+      console.error("AI chat engine request failed:", engineError?.message || engineError);
+    }
+
+    const responseMessages =
+      Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
+        ? engineResponse.messages
+        : buildLocalEngineFallbackMessages(trimmedMessage, session.astrologerId);
+
+    const createdAssistantMessages = [];
+    let tokensUsed = Number(engineResponse?.tokens_used || 0);
+    for (const [index, item] of responseMessages.entries()) {
+      const content = ensureCompleteSentenceEnding(
+        sanitizeAssistantResponse(item.content || "")
+      );
+      if (!content) continue;
+
+      const aiMessage = await AIChatMessage.create({
+        sessionId,
+        role: "assistant",
+        content,
+        tokens: index === 0 ? tokensUsed : null,
+      });
+
+      createdAssistantMessages.push({
+        id: aiMessage.id,
+        role: aiMessage.role,
+        content: aiMessage.content,
+        createdAt: aiMessage.createdAt,
+        displayDelayMs: Number(item.displayDelayMs ?? item.display_delay_ms ?? 700),
+      });
+    }
+
+    if (createdAssistantMessages.length === 0) {
+      const fallback = buildLocalEngineFallbackMessages(trimmedMessage, session.astrologerId)[0];
+      const aiMessage = await AIChatMessage.create({
+        sessionId,
+        role: "assistant",
+        content: fallback.content,
+        tokens: tokensUsed || null,
+      });
+      createdAssistantMessages.push({
+        id: aiMessage.id,
+        role: aiMessage.role,
+        content: aiMessage.content,
+        createdAt: aiMessage.createdAt,
+        displayDelayMs: fallback.displayDelayMs,
+      });
+    }
+
+    const preview = createdAssistantMessages.map((message) => message.content).join(" ");
+    if (session.title === "New Chat" && previousMessages.length <= 2) {
+      const title = trimmedMessage.substring(0, 50) + (trimmedMessage.length > 50 ? "..." : "");
+      await session.update({
+        title,
+        lastMessageAt: new Date(),
+        lastMessagePreview: preview.substring(0, 250),
+      });
+    } else {
+      await session.update({
+        lastMessageAt: new Date(),
+        lastMessagePreview: preview.substring(0, 250),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      userMessage: {
+        id: userMessage.id,
+        role: "user",
+        content: userMessage.content,
+        createdAt: userMessage.createdAt,
+      },
+      aiMessage: createdAssistantMessages[0],
+      aiMessages: createdAssistantMessages,
+      tokensUsed,
+      disableAutoFollowUp: true,
+      engine: {
+        model: engineResponse?.model || null,
+        fallback: Boolean(engineResponse?.fallback || !engineResponse),
+        ragChunks: engineResponse?.rag_chunks || [],
+      },
+    });
+  } catch (error) {
+    console.error("Send message v3 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send message",
+      error: error.message,
+    });
+  }
+};
+
 /**
  * Delete a chat session
  */
@@ -2565,7 +2956,7 @@ const attachKundliToSession = async (req, res) => {
     await session.update({ kundliUserRequestId });
 
     // Generate greeting message only if this session has no messages yet
-    let greetingMessage = null;
+    let greetingMessages = [];
     const existingMessageCount = await AIChatMessage.count({
       where: { sessionId },
     });
@@ -2575,15 +2966,13 @@ const attachKundliToSession = async (req, res) => {
       const userRecord = await User.findOne({ where: { id: userId }, attributes: ["fullName"] });
       const userName = userRecord?.fullName || "";
 
-      const greetingText = buildGreetingMessage(userName, session.astrologerId, true, userRequest.toJSON());
-
-      greetingMessage = await AIChatMessage.create({
-        sessionId,
-        role: "assistant",
-        content: greetingText,
+      greetingMessages = await createAiGreetingMessages({
+        session,
+        userId,
+        userName,
+        userRequest,
+        kundli,
       });
-
-      await session.update({ lastMessageAt: new Date() });
     }
 
     return res.status(200).json({
@@ -2593,16 +2982,8 @@ const attachKundliToSession = async (req, res) => {
         id: session.id,
         kundliUserRequestId,
       },
-      greetingMessage: greetingMessage
-        ? {
-            id: greetingMessage.id,
-            sessionId: greetingMessage.sessionId,
-            role: greetingMessage.role,
-            content: greetingMessage.content,
-            createdAt: greetingMessage.createdAt,
-            updatedAt: greetingMessage.updatedAt,
-          }
-        : null,
+      greetingMessage: greetingMessages[0] || null,
+      greetingMessages,
     });
   } catch (error) {
     console.error("Attach Kundli to session error:", error);
@@ -2660,27 +3041,24 @@ const greetSession = async (req, res) => {
       userRequest = await UserRequest.findOne({ where: { id: session.kundliUserRequestId } });
     }
 
-    const greetingText = buildGreetingMessage(userName, session.astrologerId, !!(session.kundliUserRequestId && userRequest), userRequest ? userRequest.toJSON() : null);
+    let kundli = null;
+    if (session.kundliUserRequestId) {
+      kundli = await Kundli.findOne({ where: { requestId: session.kundliUserRequestId } });
+    }
 
-    const greetingMessage = await AIChatMessage.create({
-      sessionId,
-      role: "assistant",
-      content: greetingText,
+    const greetingMessages = await createAiGreetingMessages({
+      session,
+      userId,
+      userName,
+      userRequest,
+      kundli,
     });
-
-    await session.update({ lastMessageAt: new Date() });
 
     return res.status(201).json({
       success: true,
       alreadyGreeted: false,
-      greetingMessage: {
-        id: greetingMessage.id,
-        sessionId: greetingMessage.sessionId,
-        role: greetingMessage.role,
-        content: greetingMessage.content,
-        createdAt: greetingMessage.createdAt,
-        updatedAt: greetingMessage.updatedAt,
-      },
+      greetingMessage: greetingMessages[0] || null,
+      greetingMessages,
     });
   } catch (error) {
     console.error("Greet session error:", error);
@@ -2694,6 +3072,7 @@ module.exports = {
   getAiAstrologersV2,
   sendMessage,
   sendMessageV2,
+  sendMessageV3,
   getMyChatSessions,
   getChatMessages,
   endChatSession,

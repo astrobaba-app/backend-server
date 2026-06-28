@@ -6,6 +6,7 @@ const {
   getAiAstrologersV2,
   sendMessage,
   sendMessageV2,
+  sendMessageV3,
   getMyChatSessions,
   getChatMessages,
   endChatSession,
@@ -31,6 +32,7 @@ router.post("/v2/session/:sessionId/send", checkForAuthenticationCookie(), sendM
 router.post("/v2/session/:sessionId/end", checkForAuthenticationCookie(), endChatSessionV2);
 router.get("/v2/history", checkForAuthenticationCookie(), getAiChatHistoryV2);
 router.get("/v2/history/:sessionId", checkForAuthenticationCookie(), getAiChatHistorySessionV2);
+router.post("/v3/session/:sessionId/send", checkForAuthenticationCookie(), sendMessageV3);
 
 router.post("/create", checkForAuthenticationCookie(), createChatSession);
 router.get("/sessions", checkForAuthenticationCookie(), getMyChatSessions);
