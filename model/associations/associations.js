@@ -6,6 +6,7 @@ const YearlyReport = require("../horoscope/yearlyReport");
 const WealthReport = require("../horoscope/wealthReport");
 const SadeSatiReport = require("../horoscope/sadeSatiReport");
 const HealthReport = require("../horoscope/healthReport");
+const LoveRelationshipReport = require("../horoscope/loveRelationshipReport");
 const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
@@ -200,6 +201,30 @@ const PalmOrder = require("../palm/palmOrder");
   });
 
   HealthReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated LoveRelationshipReport
+  UserRequest.hasOne(LoveRelationshipReport, {
+    foreignKey: "userRequestId",
+    as: "loveRelationshipReport",
+    onDelete: "CASCADE",
+  });
+
+  LoveRelationshipReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated Love Relationship reports
+  User.hasMany(LoveRelationshipReport, {
+    foreignKey: "userId",
+    as: "loveRelationshipReports",
+    onDelete: "CASCADE",
+  });
+
+  LoveRelationshipReport.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });
