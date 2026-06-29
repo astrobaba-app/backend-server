@@ -13,6 +13,29 @@ const {
   sendOrderStatusUpdateEmail,
 } = require("../../emailService/storeOrderEmail");
 
+const enrichOrderItems = (order) => {
+  if (!order) {
+    return order;
+  }
+
+  const normalizedItems = (order.items || []).map((item) => ({
+    ...item,
+    itemStatus: item.itemStatus || order.orderStatus || "pending",
+    cancelledAt: item.cancelledAt || null,
+    cancellationReason: item.cancellationReason || null,
+  }));
+
+  if (typeof order.setDataValue === "function") {
+    order.setDataValue("items", normalizedItems);
+    return order;
+  }
+
+  return {
+    ...order,
+    items: normalizedItems,
+  };
+};
+
 // Helper function to generate unique order number
 const generateOrderNumber = async () => {
   const year = new Date().getFullYear();
@@ -149,6 +172,9 @@ exports.checkout = async (req, res) => {
         productType: product.productType,
         digitalFileUrl: product.digitalFileUrl,
         images: product.images,
+        itemStatus: paymentStatus === "completed" ? "confirmed" : "pending",
+        cancelledAt: null,
+        cancellationReason: null,
       });
     }
 
@@ -400,7 +426,7 @@ exports.getMyOrders = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      orders,
+      orders: orders.map((order) => enrichOrderItems(order)),
       pagination: {
         total: count,
         page: parseInt(page),
@@ -437,7 +463,7 @@ exports.getOrderDetails = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      order,
+      order: enrichOrderItems(order),
     });
   } catch (error) {
     console.error("Error fetching order details:", error);
@@ -650,6 +676,182 @@ exports.cancelOrder = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to cancel order",
+      error: error.message,
+    });
+  }
+};
+
+exports.cancelOrderItem = async (req, res) => {
+  const transaction = await sequelize.transaction();
+
+  try {
+    const userId = req.user.id;
+    const { orderNumber, productId } = req.params;
+    const { cancellationReason } = req.body;
+
+    const order = await Order.findOne({
+      where: { orderNumber, userId },
+      transaction,
+    });
+
+    if (!order) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    if (["shipped", "out_for_delivery", "delivered", "cancelled"].includes(order.orderStatus)) {
+      await transaction.rollback();
+      return res.status(400).json({
+        success: false,
+        message: `Order item cannot be cancelled as the order is already ${order.orderStatus}`,
+      });
+    }
+
+    const items = (order.items || []).map((item) => ({
+      ...item,
+      itemStatus: item.itemStatus || order.orderStatus || "pending",
+      cancelledAt: item.cancelledAt || null,
+      cancellationReason: item.cancellationReason || null,
+    }));
+
+    const targetIndex = items.findIndex(
+      (item) => item.productId === productId && item.itemStatus !== "cancelled"
+    );
+
+    if (targetIndex === -1) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Order item not found or already cancelled",
+      });
+    }
+
+    const targetItem = items[targetIndex];
+    const itemSubtotal = parseFloat(targetItem.price || 0) * Number(targetItem.quantity || 0);
+    const currentSubtotal = parseFloat(order.subtotal || 0);
+    const currentTaxAmount = parseFloat(order.taxAmount || 0);
+    const currentShippingCharges = parseFloat(order.shippingCharges || 0);
+    const taxShare =
+      currentSubtotal > 0
+        ? parseFloat(((currentTaxAmount * itemSubtotal) / currentSubtotal).toFixed(2))
+        : 0;
+
+    items[targetIndex] = {
+      ...targetItem,
+      itemStatus: "cancelled",
+      cancelledAt: new Date().toISOString(),
+      cancellationReason: cancellationReason || null,
+    };
+
+    if (targetItem.productType === "physical") {
+      const product = await Product.findByPk(targetItem.productId, { transaction });
+      if (product) {
+        await product.update(
+          {
+            stock: product.stock + targetItem.quantity,
+            soldCount: Math.max(0, product.soldCount - targetItem.quantity),
+          },
+          { transaction }
+        );
+      }
+    }
+
+    const activeItemsAfter = items.filter((item) => item.itemStatus !== "cancelled");
+    const hasActivePhysicalItemsAfter = activeItemsAfter.some(
+      (item) => item.productType === "physical"
+    );
+    const shippingRefund =
+      targetItem.productType === "physical" && !hasActivePhysicalItemsAfter
+        ? currentShippingCharges
+        : 0;
+    const refundAmount = parseFloat((itemSubtotal + taxShare + shippingRefund).toFixed(2));
+
+    const nextSubtotal = Math.max(
+      0,
+      parseFloat((currentSubtotal - itemSubtotal).toFixed(2))
+    );
+    const nextTaxAmount = Math.max(
+      0,
+      parseFloat((currentTaxAmount - taxShare).toFixed(2))
+    );
+    const nextShippingCharges = hasActivePhysicalItemsAfter ? currentShippingCharges : 0;
+    const nextTotalAmount = parseFloat(
+      (nextSubtotal + nextTaxAmount + nextShippingCharges).toFixed(2)
+    );
+    const allItemsCancelled = activeItemsAfter.length === 0;
+
+    let nextPaymentStatus = order.paymentStatus;
+    if (allItemsCancelled) {
+      nextPaymentStatus =
+        order.paymentStatus === "completed" ? "refunded" : "cancelled";
+    }
+
+    if (order.paymentStatus === "completed" && order.paymentMethod === "wallet" && refundAmount > 0) {
+      const wallet = await Wallet.findOne({ where: { userId }, transaction });
+      if (wallet) {
+        const oldBalance = parseFloat(wallet.balance);
+        const newBalance = oldBalance + refundAmount;
+
+        await wallet.update({ balance: newBalance }, { transaction });
+
+        await WalletTransaction.create(
+          {
+            walletId: wallet.id,
+            userId,
+            type: "credit",
+            amount: refundAmount,
+            description: `Refund for cancelled item in order ${orderNumber}`,
+            balanceBefore: oldBalance,
+            balanceAfter: newBalance,
+            status: "completed",
+            metadata: {
+              orderNumber,
+              productId,
+              refundType: "order_item_cancellation",
+            },
+          },
+          { transaction }
+        );
+      }
+    }
+
+    await order.update(
+      {
+        items,
+        subtotal: nextSubtotal,
+        taxAmount: nextTaxAmount,
+        shippingCharges: nextShippingCharges,
+        totalAmount: nextTotalAmount,
+        orderType: activeItemsAfter.length ? determineOrderType(activeItemsAfter) : order.orderType,
+        orderStatus: allItemsCancelled ? "cancelled" : order.orderStatus,
+        paymentStatus: nextPaymentStatus,
+        cancelledAt: allItemsCancelled ? new Date() : order.cancelledAt,
+        cancellationReason:
+          allItemsCancelled && cancellationReason
+            ? cancellationReason
+            : order.cancellationReason,
+      },
+      { transaction }
+    );
+
+    await transaction.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: "Order item cancelled successfully",
+      refunded: refundAmount > 0,
+      refundAmount,
+      order: enrichOrderItems(order),
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error("Error cancelling order item:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel order item",
       error: error.message,
     });
   }
@@ -1128,6 +1330,9 @@ exports.verifyAndCreateOrder = async (req, res) => {
         productType: product.productType,
         digitalFileUrl: product.digitalFileUrl,
         images: product.images,
+        itemStatus: "confirmed",
+        cancelledAt: null,
+        cancellationReason: null,
       });
     }
 

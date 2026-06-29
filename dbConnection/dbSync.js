@@ -73,6 +73,7 @@ const Notification = require("../model/notification/notification");
 
 // Review models
 const Review = require("../model/review/review");
+const Feedback = require("../model/feedback/feedback");
 
 // Report generation models
 const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
@@ -1770,6 +1771,41 @@ async function ensurePalmOrderColumns() {
   }
 }
 
+async function ensureFeedbackColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("feedback");
+    const operations = [];
+
+    if (!table.isSubmit && !table.is_submit) {
+      operations.push(
+        queryInterface.addColumn("feedback", "isSubmit", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    const reviewColumnName = table.review ? "review" : null;
+    if (reviewColumnName && table.review.allowNull === false) {
+      operations.push(
+        sequelize.query(
+          'ALTER TABLE "feedback" ALTER COLUMN "review" DROP NOT NULL'
+        )
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured feedback columns exist");
+    }
+  } catch (error) {
+    console.log("feedback table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureSupportTicketActorColumns() {
   const queryInterface = sequelize.getQueryInterface();
 
@@ -1936,6 +1972,7 @@ const initDB = (callback) => {
     .then(() => ensurePalmUploadColumns())
     .then(() => ensurePalmReportColumns())
     .then(() => ensurePalmOrderColumns())
+    .then(() => ensureFeedbackColumns())
     .then(() => ensureSupportTicketActorColumns())
     .then(() => ensureMatchingProfileColumns())
     .then(() => {

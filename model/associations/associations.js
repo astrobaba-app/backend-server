@@ -19,6 +19,7 @@ const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
 const Review = require("../review/review");
+const Feedback = require("../feedback/feedback");
 const ReportGenerationRequest = require("../report/reportGenerationRequest");
 const ReportPurchase = require("../report/reportPurchase");
 const ChatSession = require("../chat/chatSession");
@@ -394,6 +395,29 @@ const PalmOrder = require("../palm/palmOrder");
   });
 
   Review.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
+  // Feedback associations
+  User.hasMany(Feedback, {
+    foreignKey: "userId",
+    as: "feedbacks",
+    onDelete: "CASCADE",
+  });
+
+  Feedback.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Astrologer.hasMany(Feedback, {
+    foreignKey: "astrologerId",
+    as: "feedbacks",
+    onDelete: "CASCADE",
+  });
+
+  Feedback.belongsTo(Astrologer, {
     foreignKey: "astrologerId",
     as: "astrologer",
   });

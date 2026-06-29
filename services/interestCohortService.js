@@ -274,16 +274,16 @@ async function setCohortScore({
     { transaction }
   );
 
-  console.log("[Cohort] Set user cohort score", {
-    userId,
-    cohortType,
-    category,
-    previousScore,
-    nextScore,
-    cohortThreshold: COHORT_SCORE_THRESHOLD,
-    qualifiesForCohort: nextScore >= COHORT_SCORE_THRESHOLD,
-    intentResultId,
-  });
+  // console.log("[Cohort] Set user cohort score", {
+  //   userId,
+  //   cohortType,
+  //   category,
+  //   previousScore,
+  //   nextScore,
+  //   cohortThreshold: COHORT_SCORE_THRESHOLD,
+  //   qualifiesForCohort: nextScore >= COHORT_SCORE_THRESHOLD,
+  //   intentResultId,
+  // });
 
   return scoreRow;
 }
@@ -361,15 +361,15 @@ async function updateCohortForScore(scoreRow, transaction) {
     );
   }
 
-  console.log("[Cohort] Evaluated cohort membership", {
-    userId: scoreRow.userId,
-    cohortType: scoreRow.cohortType,
-    category: scoreRow.category,
-    score: Number(scoreRow.score || 0),
-    threshold: COHORT_SCORE_THRESHOLD,
-    isActive: active,
-    cohortId: cohort.id,
-  });
+  // console.log("[Cohort] Evaluated cohort membership", {
+  //   userId: scoreRow.userId,
+  //   cohortType: scoreRow.cohortType,
+  //   category: scoreRow.category,
+  //   score: Number(scoreRow.score || 0),
+  //   threshold: COHORT_SCORE_THRESHOLD,
+  //   isActive: active,
+  //   cohortId: cohort.id,
+  // });
 
   return cohort;
 }
