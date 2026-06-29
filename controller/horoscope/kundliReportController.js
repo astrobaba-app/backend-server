@@ -5,6 +5,7 @@ const WealthReport = require("../../model/horoscope/wealthReport");
 const SadeSatiReport = require("../../model/horoscope/sadeSatiReport");
 const HealthReport = require("../../model/horoscope/healthReport");
 const LoveRelationshipReport = require("../../model/horoscope/loveRelationshipReport");
+const CompatibilityReport = require("../../model/horoscope/compatibilityReport");
 const UserRequest = require("../../model/user/userRequest");
 const { generateKundliReportContent } = require("../../services/kundliReportAiService");
 const { generateKundliReportPDF: buildKundliReportPDF } = require("../../services/kundliReportPdfService");
@@ -45,6 +46,12 @@ const {
 const {
   generateLoveRelationshipReportPDF,
 } = require("../../services/loveRelationshipReportPdfService");
+const {
+  generateCompatibilityReport,
+} = require("../../services/compatibility-kundli-report");
+const {
+  generateCompatibilityReportPDF,
+} = require("../../services/compatibilityReportPdfService");
 // Note: dailyReportPdfService removed — PDF is now generated on the frontend via html2pdf.js
 
 const {
@@ -2386,6 +2393,229 @@ const deleteLoveRelationshipKundaliReport = async (req, res) => {
   }
 };
 
+const generateCompatibilityPdfInBackground = async (reportRecord, payload) => {
+  try {
+    console.log(`[Compatibility PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
+    const pdfBuffer = await generateCompatibilityReportPDF(reportRecord);
+
+    const safeBoyName = (reportRecord.boyName ?? "boy").replace(/\s+/g, "_");
+    const safeGirlName = (reportRecord.girlName ?? "girl").replace(/\s+/g, "_");
+    const fileName = `compatibility_report_${safeBoyName}_and_${safeGirlName}_${Date.now()}.pdf`;
+
+    console.log(`[Compatibility PDF Background] Uploading to Cloudinary...`);
+    const uploadResult = await uploadPdfBuffer({
+      buffer: pdfBuffer,
+      fileName,
+      folder: "graho/compatibility-reports",
+    });
+
+    console.log(`[Compatibility PDF Background] Saving pdfUrl in database...`);
+    await reportRecord.update({
+      pdfUrl: uploadResult.secure_url,
+      pdfPublicId: uploadResult.public_id,
+      pdfFileName: fileName,
+      pdfUploadedAt: new Date(),
+    });
+    console.log(`[Compatibility PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
+  } catch (error) {
+    console.error(`[Compatibility PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
+  }
+};
+
+const generateCompatibilityKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { boy, girl } = req.body;
+
+    if (!boy || !girl) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing boy or girl details in request payload",
+      });
+    }
+
+    const {
+      fullName: boyName,
+      dateOfbirth: boyDateOfBirth,
+      timeOfbirth: boyTimeOfBirth,
+      placeOfBirth: boyPlaceOfBirth,
+      latitude: boyLatitude,
+      longitude: boyLongitude,
+    } = boy;
+
+    const {
+      fullName: girlName,
+      dateOfbirth: girlDateOfBirth,
+      timeOfbirth: girlTimeOfBirth,
+      placeOfBirth: girlPlaceOfBirth,
+      latitude: girlLatitude,
+      longitude: girlLongitude,
+    } = girl;
+
+    const requiredFields = {
+      boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude,
+      girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude,
+    };
+
+    const missingFields = Object.entries(requiredFields)
+      .filter(([key, value]) => value === undefined || value === null)
+      .map(([key]) => key);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+    }
+
+    let reportRecord = await CompatibilityReport.findOne({
+      where: {
+        userId,
+        boyName,
+        boyDateOfBirth,
+        girlName,
+        girlDateOfBirth,
+      },
+    });
+
+    let finalResponseData;
+    if (reportRecord) {
+      finalResponseData = reportRecord.reportData;
+      console.log(`[CompatibilityController] Serving cached predictions`);
+      if (!reportRecord.pdfUrl) {
+        generateCompatibilityPdfInBackground(reportRecord, req.body);
+      }
+    } else {
+      const payload = {
+        boy: {
+          fullName: boyName,
+          dateOfbirth: boyDateOfBirth,
+          timeOfbirth: boyTimeOfBirth,
+          placeOfBirth: boyPlaceOfBirth,
+          latitude: parseFloat(boyLatitude),
+          longitude: parseFloat(boyLongitude)
+        },
+        girl: {
+          fullName: girlName,
+          dateOfbirth: girlDateOfBirth,
+          timeOfbirth: girlTimeOfBirth,
+          placeOfBirth: girlPlaceOfBirth,
+          latitude: parseFloat(girlLatitude),
+          longitude: parseFloat(girlLongitude)
+        }
+      };
+
+      finalResponseData = await generateCompatibilityReport(payload, { userId });
+
+      reportRecord = await CompatibilityReport.create({
+        userId,
+        boyName,
+        boyDateOfBirth,
+        boyTimeOfBirth,
+        boyPlaceOfBirth,
+        boyLatitude: parseFloat(boyLatitude),
+        boyLongitude: parseFloat(boyLongitude),
+        girlName,
+        girlDateOfBirth,
+        girlTimeOfBirth,
+        girlPlaceOfBirth,
+        girlLatitude: parseFloat(girlLatitude),
+        girlLongitude: parseFloat(girlLongitude),
+        reportData: finalResponseData,
+        generatedAt: new Date(),
+      });
+
+      generateCompatibilityPdfInBackground(reportRecord, req.body);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: finalResponseData,
+    });
+  } catch (error) {
+    console.error("Error in generateCompatibilityKundaliReport:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate Compatibility report",
+      error: error.message,
+    });
+  }
+};
+
+const getCompatibilityKundaliHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const reports = await CompatibilityReport.findAll({
+      where: { userId },
+      order: [["generatedAt", "DESC"]],
+    });
+
+    const formattedReports = reports.map((r) => ({
+      id: r.id,
+      status: r.pdfUrl ? "completed" : "generating",
+      boyName: r.boyName,
+      boyDateOfBirth: r.boyDateOfBirth,
+      girlName: r.girlName,
+      girlDateOfBirth: r.girlDateOfBirth,
+      createdAt: r.generatedAt,
+      pdfUrl: r.pdfUrl || null,
+      reportData: r.reportData || null,
+    }));
+
+    res.status(200).json({
+      success: true,
+      reports: formattedReports,
+    });
+  } catch (error) {
+    console.error("Error in getCompatibilityKundaliHistory:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch Compatibility report history",
+      error: error.message,
+    });
+  }
+};
+
+const deleteCompatibilityKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Report ID is required",
+      });
+    }
+
+    const reportRecord = await CompatibilityReport.findOne({
+      where: { id, userId },
+    });
+
+    if (!reportRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found or you do not have permission to delete it",
+      });
+    }
+
+    await reportRecord.destroy();
+
+    return res.status(200).json({
+      success: true,
+      message: "Report deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting Compatibility report:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getUserKundlisForReport,
   generateKundliReport,
@@ -2410,4 +2640,7 @@ module.exports = {
   generateLoveRelationshipKundaliReport,
   getLoveRelationshipKundaliHistory,
   deleteLoveRelationshipKundaliReport,
+  generateCompatibilityKundaliReport,
+  getCompatibilityKundaliHistory,
+  deleteCompatibilityKundaliReport,
 };

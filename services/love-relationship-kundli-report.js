@@ -396,6 +396,11 @@ CRITICAL WRITING INSTRUCTIONS:
 6. NO BOXES, NO GAUGES, NO SCORECARDS, NO BULLETS: Avoid using different colored boxes, emoji characters, checklists, progress bars, or structured cards. Use clean, flowing paragraphs to keep the document looking handcrafted and professional.
 7. Return STRICT JSON matching the expected structure. Do not wrap the JSON in markdown code blocks or add any text outside of the JSON object.
 8. Each narrative field must be divided into exactly 4 to 5 long, detailed, and beautifully written paragraphs separated by double newlines (\\n\\n) to ensure high readability.
+9. STRICTLY FOR ALL FAQ ANSWERS (faqMarriageType, faqPartnerMeetingTiming, faqMarriageDelays, faqPartnerDescription, faqHowWhereMeet, faqMarriageHappiness, faqRelationshipsBeforeMarriage, faqPartnerOrigin, faqFamilySupport, faqStrengthsWeaknessesFlags, faqFavorablePeriods, faqKarmicLessonsChanges):
+   - You MUST write answers strictly based on the native's Kundli.
+   - NO general or vague answers. Do not use phrases like "Vedic astrology has many factors" or "It depends on various planetary dynamics."
+   - Provide concrete answers by explicitly referencing specific planetary placements, signs, houses, or running dashas from the input data (e.g., "Because your 7th lord Venus is placed in the 9th house in Taurus...", "Your current Jupiter Mahadasha indicates...", "Saturn's aspect on your 7th house indicates...").
+   - Each answer must be between 2 and 4 sentences. Make them compact, direct, complete, and highly personalized.
 
 WORD COUNT TARGETS:
 - loveDNAEmotionalWiring: 700-850 words. Deepest psychological chapter. How Venus defines romantic expression, how the Moon governs emotional responses, how the Ascendant influences attraction, and how these combine to create a unique love identity. Cover romantic instincts, emotional energy, preferred love language, attachment tendencies, ideal partner qualities, and internal contradictions. Include practical everyday relationship examples.
@@ -417,6 +422,18 @@ WORD COUNT TARGETS:
 - marriedLife: 600-800 words. Describe daily married life, communication patterns, finances, intimacy, parenting tendencies, family dynamics, conflict resolution, emotional support, and long-term companionship.
 - spousePersonality: 600-800 words. Explore the destined spouse's personality, career, habits, emotional style, values, and lifestyle in rich detail.
 - loveSummary: 400-500 words. Synthesize the entire report into a single cohesive narrative about the native's complete love journey — past patterns, present state, and future direction.
+- faqMarriageType: 2-4 sentences. Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage? Provide a clear answer strictly based on the Kundli data (e.g. 5th, 7th, 9th houses and their lords).
+- faqPartnerMeetingTiming: 2-4 sentences. When Am I Most Likely to Meet My Life Partner and Get Married? Provide a timing forecast referencing the current or upcoming Vimshottari dasha/antardasha or major transits (Jupiter/Saturn).
+- faqMarriageDelays: 2-4 sentences. Will There Be Any Delays or Major Obstacles in My Marriage? Answer strictly based on the placements of Saturn, Rahu, Ketu, or retrogrades impacting the 7th house or its lord.
+- faqPartnerDescription: 2-4 sentences. What Kind of Person Will My Future Partner Be? Describe personality, values, career, and appearance traits based on the 7th house and D9 Navamsa placements.
+- faqHowWhereMeet: 2-4 sentences. How and Where Am I Most Likely to Meet My Future Partner? Give specific likely settings (workplace, social settings, travel, online, etc.) based on the 7th lord's house placement.
+- faqMarriageHappiness: 2-4 sentences. Will My Marriage Be Happy, Stable, and Emotionally Fulfilling? Evaluate the strength of the 7th house, Jupiter, Venus, and D9 dynamics.
+- faqRelationshipsBeforeMarriage: 2-4 sentences. Will I Have More Than One Serious Relationship Before Marriage? Answer based on the 5th house, Venus, and Rahu influences.
+- faqPartnerOrigin: 2-4 sentences. Will My Partner Be From My City, Another State, Abroad, or a Different Community? Evaluate using 7th, 9th, and 12th house placements.
+- faqFamilySupport: 2-4 sentences. Will My Family Support My Relationship and Marriage Decisions? Evaluate based on the 2nd and 4th houses and their lords.
+- faqStrengthsWeaknessesFlags: 2-4 sentences. What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For? Give specific Kundli-based advice.
+- faqFavorablePeriods: 2-4 sentences. What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage? Reference favorable transits and dasha phases.
+- faqKarmicLessonsChanges: 2-4 sentences. What Important Karmic Lessons and Life Changes Will My Marriage Bring? Discuss life-altering changes referencing Rahu, Ketu, or Saturn's connection to the 7th house or lord.
 
 EXPECTED JSON SCHEMA:
 {
@@ -438,7 +455,19 @@ EXPECTED JSON SCHEMA:
   "marriageDestiny": "string (500-650 words, Marriage Destiny pattern divided into 4-5 paragraphs)",
   "marriedLife": "string (600-800 words, Married Life daily dynamics divided into 4-5 paragraphs)",
   "spousePersonality": "string (600-800 words, Destined spouse detailed profile divided into 4-5 paragraphs)",
-  "loveSummary": "string (400-500 words, Complete Love Journey synthesis divided into 4-5 paragraphs)"
+  "loveSummary": "string (400-500 words, Complete Love Journey synthesis divided into 4-5 paragraphs)",
+  "faqMarriageType": "string (2-4 sentences, Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage?)",
+  "faqPartnerMeetingTiming": "string (2-4 sentences, When Am I Most Likely to Meet My Life Partner and Get Married?)",
+  "faqMarriageDelays": "string (2-4 sentences, Will There Be Any Delays or Major Obstacles in My Marriage?)",
+  "faqPartnerDescription": "string (2-4 sentences, What Kind of Person Will My Future Partner Be?)",
+  "faqHowWhereMeet": "string (2-4 sentences, How and Where Am I Most Likely to Meet My Future Partner?)",
+  "faqMarriageHappiness": "string (2-4 sentences, Will My Marriage Be Happy, Stable, and Emotionally Fulfilling?)",
+  "faqRelationshipsBeforeMarriage": "string (2-4 sentences, Will I Have More Than One Serious Relationship Before Marriage?)",
+  "faqPartnerOrigin": "string (2-4 sentences, Will My Partner Be From My City, Another State, Abroad, or a Different Community?)",
+  "faqFamilySupport": "string (2-4 sentences, Will My Family Support My Relationship and Marriage Decisions?)",
+  "faqStrengthsWeaknessesFlags": "string (2-4 sentences, What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For?)",
+  "faqFavorablePeriods": "string (2-4 sentences, What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage?)",
+  "faqKarmicLessonsChanges": "string (2-4 sentences, What Important Karmic Lessons and Life Changes Will My Marriage Bring?)"
 }
 `;
 

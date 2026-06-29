@@ -7,6 +7,7 @@ const WealthReport = require("../horoscope/wealthReport");
 const SadeSatiReport = require("../horoscope/sadeSatiReport");
 const HealthReport = require("../horoscope/healthReport");
 const LoveRelationshipReport = require("../horoscope/loveRelationshipReport");
+const CompatibilityReport = require("../horoscope/compatibilityReport");
 const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
@@ -225,6 +226,18 @@ const PalmOrder = require("../palm/palmOrder");
   });
 
   LoveRelationshipReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // User can have many Compatibility reports
+  User.hasMany(CompatibilityReport, {
+    foreignKey: "userId",
+    as: "compatibilityReports",
+    onDelete: "CASCADE",
+  });
+
+  CompatibilityReport.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

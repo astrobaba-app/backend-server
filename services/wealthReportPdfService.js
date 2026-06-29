@@ -102,13 +102,77 @@ const imageToDataUri = (fileName) => {
   }
 };
 
-const escapeHtml = (value) => {
-  return String(value ?? "")
+const splitLargeParagraph = (pText) => {
+  const sentences = pText.match(/[^.!?]+[.!?]+(\s|$)/g) || [pText];
+  if (sentences.length <= 4) {
+    return `<p style="margin-bottom:3.5mm; text-align:justify; font-size:13pt; line-height:1.45; color:var(--text-main);">${pText}</p>`;
+  }
+
+  const chunks = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    chunks.push(sentences.slice(i, i + 3).join("").trim());
+  }
+
+  return chunks.map(chunk =>
+    `<p style="margin-bottom:3.5mm; text-align:justify; font-size:13pt; line-height:1.45; color:var(--text-main);">${chunk}</p>`
+  ).join("\n");
+};
+
+const formatNarrativeText = (text) => {
+  if (!text) return "";
+  let html = safeString(text);
+
+  // Clean HTML characters first
+  html = html
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+  const paras = html.split(/\r?\n\s*\r?\n/);
+  html = paras.map(para => {
+    let p = para.trim();
+    if (!p) return "";
+
+    if (p.startsWith("### ")) {
+      const headingText = p.substring(4).trim();
+      return `<h3 style="font-size:13.5pt; font-weight:700; color:var(--gold-dark); margin-top:4mm; margin-bottom:2mm; text-transform:uppercase; letter-spacing:1px;">${headingText}</h3>`;
+    }
+    if (p.startsWith("## ")) {
+      const headingText = p.substring(3).trim();
+      return `<h3 style="font-size:14.5pt; font-weight:700; color:var(--gold-dark); margin-top:4mm; margin-bottom:2mm; text-transform:uppercase; letter-spacing:1px;">${headingText}</h3>`;
+    }
+
+    p = p.replace(/\*\*(.*?)\*\*/g, "$1");
+
+    if (p.startsWith("- ") || p.startsWith("* ")) {
+      const items = p.split(/\n[-*]\s+/).map(item => {
+        const cleanItem = item.replace(/^[-*]\s+/, "").trim();
+        return cleanItem ? `<li style="margin-bottom:1.5mm; font-size:13pt; line-height:1.45;">${cleanItem}</li>` : "";
+      }).filter(Boolean).join("");
+      return `<ul style="margin-left:6mm; margin-bottom:3.5mm; line-height:1.45; font-size:13pt; color:var(--text-main);">${items}</ul>`;
+    }
+
+    return splitLargeParagraph(p);
+  }).join("\n");
+
+  return html;
+};
+
+const escapeHtml = (value) => {
+  const str = String(value ?? "");
+  const escaped = str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  if (str.includes("\n") || str.includes("**") || str.length > 150) {
+    return formatNarrativeText(value);
+  }
+  return escaped;
 };
 
 const formatDegree = (decimalDegree) => {
@@ -300,6 +364,21 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
   const astro = reportData.astrologyBasics || {};
   const charts = reportData.horoscopeCharts || {};
 
+  const getVal = (key, fallback = "") => {
+    try {
+      return pred[key] || fallback;
+    } catch (e) { return fallback; }
+  };
+
+  const renderFaqBlock = (question, answerKey) => {
+    const answer = getVal(answerKey, "Analysis based on your planetary placements is being compiled.");
+    return `
+      <div style="margin-bottom: 4.5mm; padding-bottom: 3.5mm; border-bottom: 1px solid rgba(154, 120, 0, 0.15);">
+        <div style="font-size: 11pt; font-weight: 700; color: var(--gold-deep); margin-bottom: 1.8mm; line-height: 1.4;">Q: ${escapeHtml(question)}</div>
+        <p style="font-size: 10.5pt; line-height: 1.55; color: var(--text-main); text-align: justify; font-style: normal; margin-bottom: 0;">${escapeHtml(answer)}</p>
+      </div>`;
+  };
+
   // Load Cover & Dividers Base64 Data URIs
   const coverUri = imageToDataUri("frontpage_wealth.jpg");
   const endUri = imageToDataUri("daily_end.jpg");
@@ -373,16 +452,14 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     
     .page {
       width: 210mm;
-      height: 297mm;
+      min-height: 297mm;
       box-sizing: border-box;
       padding: 8mm 10mm 6mm 10mm;
       position: relative;
       page-break-after: always;
-      page-break-inside: avoid;
-      display: flex;
-      flex-direction: column;
+      page-break-inside: auto;
+      display: table !important;
       background-color: var(--white);
-      overflow: hidden;
       border: 1.5px solid rgba(245, 197, 24, 0.3);
     }
     
@@ -412,7 +489,8 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
 
     /* Standard Header styles */
     .header {
-      margin-bottom: 2mm;
+      display: table-header-group !important;
+      width: 100%;
     }
     
     .header-eyebrow {
@@ -455,21 +533,22 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
       height: 2.5px;
       background: linear-gradient(90deg, var(--gold) 0%, rgba(245, 197, 24, 0.2) 60%, transparent 100%);
       margin-top: 2mm;
+      margin-bottom: 8mm;
     }
 
     .footer {
-      margin-top: auto;
-      padding-top: 2.5mm;
+      display: table-footer-group !important;
+      width: 100%;
       border-top: 1.5px solid rgba(245, 197, 24, 0.2);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 8.5pt;
-      color: var(--text-muted);
     }
     
-    .footer-left { font-weight: 500; }
-    .footer-right { font-weight: 700; color: var(--gold-dark); }
+    .footer-left { float: left; font-weight: 500; font-size: 8.5pt; color: var(--text-muted); padding-top: 2.5mm; }
+    .footer-right { float: right; font-weight: 700; color: var(--gold-dark); font-size: 8.5pt; padding-top: 2.5mm; }
+
+    .page > div:not(.header):not(.footer) {
+      display: table-row-group !important;
+      width: 100%;
+    }
 
     .narrative-block {
       margin-bottom: 2mm;
@@ -1154,6 +1233,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         <div class="toc-row"><div class="toc-num">19.</div><div class="toc-title">Risk, Loss &amp; Debts</div><div class="toc-dots"></div><div class="toc-page">Page 42</div></div>
         <div class="toc-row"><div class="toc-num">20.</div><div class="toc-title">Property &amp; Long-Term Assets</div><div class="toc-dots"></div><div class="toc-page">Page 45</div></div>
         <div class="toc-row"><div class="toc-num">21.</div><div class="toc-title">Ceiling, Timings &amp; Action Plan</div><div class="toc-dots"></div><div class="toc-page">Page 48</div></div>
+        <div class="toc-row"><div class="toc-num">22.</div><div class="toc-title">Frequently Asked Wealth Questions</div><div class="toc-dots"></div><div class="toc-page">Page 52</div></div>
       </div>
     </div>
     <div class="footer">
@@ -2235,7 +2315,51 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     </div>
   </div>
 
-  <!-- PAGE 52: END CLOSING COVER -->
+  <!-- PAGE 52: FREQUENTLY ASKED WEALTH QUESTIONS - PART 1 -->
+  <div class="page">
+    <div class="header">
+      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Section 13</span></div>
+      <h1 class="header-title">Frequently Asked Wealth Questions — Part 1</h1>
+      <p class="header-subtitle">Direct answers to key financial queries from your Kundli</p>
+      <div class="header-gradient"></div>
+    </div>
+    <div style="flex:1; display:flex; flex-direction:column; gap:1mm; height:100%;">
+      ${renderFaqBlock("Will I Become Financially Rich in My Lifetime?", "faqFinanciallyRich")}
+      ${renderFaqBlock("What Is My Best Source of Wealth? (Job, Business, Freelancing, Investments, Family Business, etc.)", "faqBestWealthSource")}
+      ${renderFaqBlock("When Am I Most Likely to Experience Major Financial Growth?", "faqMajorGrowthTiming")}
+      ${renderFaqBlock("Will I Face Major Financial Struggles or Money Losses in Life?", "faqFinancialStrugglesLosses")}
+      ${renderFaqBlock("Am I More Likely to Build Wealth Quickly or Gradually Over Time?", "faqWealthBuildingSpeed")}
+      ${renderFaqBlock("Should I Focus More on Saving, Investing, or Expanding My Income?", "faqSavingInvestingExpanding")}
+    </div>
+    <div class="footer">
+      <span class="footer-left">Vedic Wealth Report · ${escapeHtml(fullName)}</span>
+      <span class="footer-right">Page 52</span>
+    </div>
+  </div>
+
+  <!-- PAGE 53: FREQUENTLY ASKED WEALTH QUESTIONS - PART 2 -->
+  <div class="page">
+    <div class="header">
+      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Section 13</span></div>
+      <h1 class="header-title">Frequently Asked Wealth Questions — Part 2</h1>
+      <p class="header-subtitle">Direct answers to key financial queries from your Kundli</p>
+      <div class="header-gradient"></div>
+    </div>
+    <div style="flex:1; display:flex; flex-direction:column; gap:1mm; height:100%;">
+      ${renderFaqBlock("Will I Own Property, Land, or Multiple Real Estate Assets?", "faqOwnRealEstate")}
+      ${renderFaqBlock("Is There Strong Potential for Wealth Through Foreign Countries or International Opportunities?", "faqForeignOpportunities")}
+      ${renderFaqBlock("What Are the Biggest Financial Mistakes I Should Avoid?", "faqFinancialMistakesAvoid")}
+      ${renderFaqBlock("Will I Receive Wealth Through Inheritance, Family Support, or Mostly Through My Own Efforts?", "faqEffortVsInheritance")}
+      ${renderFaqBlock("What Is the Best Age or Time Period to Make Major Financial Decisions or Investments?", "faqBestDecisionAge")}
+      ${renderFaqBlock("What Is My Ultimate Wealth Potential According to My Kundli?", "faqUltimatePotential")}
+    </div>
+    <div class="footer">
+      <span class="footer-left">Vedic Wealth Report · ${escapeHtml(fullName)}</span>
+      <span class="footer-right">Page 53</span>
+    </div>
+  </div>
+
+  <!-- PAGE 54: END CLOSING COVER -->
   <div class="img-page-bg bg-end"></div>
 
 </body>

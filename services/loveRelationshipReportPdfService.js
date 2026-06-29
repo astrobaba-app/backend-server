@@ -96,6 +96,22 @@ const safeString = (val, fallback = "--") => {
   return typeof val === "string" ? val : JSON.stringify(val);
 };
 
+const splitLargeParagraph = (pText) => {
+  const sentences = pText.match(/[^.!?]+[.!?]+(\s|$)/g) || [pText];
+  if (sentences.length <= 4) {
+    return `<p style="margin-bottom:3.5mm; text-align:justify; text-indent:0; font-size:11.5pt; line-height:1.6; color:var(--text-main);">${pText}</p>`;
+  }
+  
+  const chunks = [];
+  for (let i = 0; i < sentences.length; i += 3) {
+    chunks.push(sentences.slice(i, i + 3).join("").trim());
+  }
+  
+  return chunks.map(chunk => 
+    `<p style="margin-bottom:3.5mm; text-align:justify; text-indent:0; font-size:11.5pt; line-height:1.6; color:var(--text-main);">${chunk}</p>`
+  ).join("\n");
+};
+
 const formatNarrativeText = (text) => {
   if (!text) return "";
   let html = safeString(text);
@@ -104,7 +120,7 @@ const formatNarrativeText = (text) => {
   html = escapeHtml(html);
 
   // Process paragraphs and general formatting
-  const paras = html.split(/\n\n+/);
+  const paras = html.split(/\r?\n\s*\r?\n/);
   html = paras.map(para => {
     let p = para.trim();
     if (!p) return "";
@@ -118,7 +134,7 @@ const formatNarrativeText = (text) => {
       return `<h3 style="font-size:13pt; font-weight:700; color:var(--pink-deep); margin-top:3.5mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:1.5px;">${headingText}</h3>`;
     }
 
-    p = p.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    p = p.replace(/\*\*(.*?)\*\*/g, "$1");
 
     if (p.startsWith("- ") || p.startsWith("* ")) {
       const items = p.split(/\n[-*]\s+/).map(item => {
@@ -128,7 +144,7 @@ const formatNarrativeText = (text) => {
       return `<ul style="margin-left:5mm; margin-bottom:3.5mm; line-height:1.5; font-size:11pt; color:var(--text-main);">${items}</ul>`;
     }
 
-    return `<p style="margin-bottom:3.5mm; text-align:justify; text-indent:0; font-size:11.5pt; line-height:1.6; color:var(--text-main);">${p}</p>`;
+    return splitLargeParagraph(p);
   }).join("\n");
 
   return html;
@@ -281,6 +297,7 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
   const presentLoveImg = imageToDataUri("PRESENTLOVESTATE&READINESS.jpg");
   const futureLoveImg = imageToDataUri("FUTURELOVEDIRECTION.jpg");
   const summaryImg = imageToDataUri("summary.jpg");
+  const endingImg = imageToDataUri("lovereprotendingpage.jpg");
 
   const rasiChartSvg = renderChartSvg(charts.rasiChart, astro.ascendant, "Rasi Chart (D1)");
   const navamsaChartSvg = renderChartSvg(charts.navamsaChart, astro.ascendant, "Navamsa Chart (D9)");
@@ -367,59 +384,74 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
 
   // Page number calculations
   const startCh1 = 5 + numDashaPages;
-  const pgLoveDNA      = startCh1 + 1;
-  const pgExpressLove  = pgLoveDNA + 1;
-  const pgVuln         = pgExpressLove + 1;
-  const pgShadow       = pgVuln + 1;
-  const pgKarmic       = pgShadow + 1;
+  const pgLoveDNA = startCh1 + 1;
+  const pgExpressLove = pgLoveDNA + 1;
+  const pgVuln = pgExpressLove + 1;
+  const pgShadow = pgVuln + 1;
+  const pgKarmic = pgShadow + 1;
 
-  const startCh2       = pgKarmic + 1;
-  const pgFirstLove    = startCh2 + 1;
-  const pgAttachment   = pgFirstLove + 1;
+  const startCh2 = pgKarmic + 1;
+  const pgFirstLove = startCh2 + 1;
+  const pgAttachment = pgFirstLove + 1;
 
-  const startCh3       = pgAttachment + 1;
-  const pgReadiness    = startCh3 + 1;
-  const pgBlocks       = pgReadiness + 1;
-  const pgMeansNow     = pgBlocks + 1;
+  const startCh3 = pgAttachment + 1;
+  const pgReadiness = startCh3 + 1;
+  const pgBlocks = pgReadiness + 1;
+  const pgMeansNow = pgBlocks + 1;
 
-  const startCh4       = pgMeansNow + 1;
-  const pgSoulmate     = startCh4 + 1;
-  const pgWhereMeet    = pgSoulmate + 1;
-  const pgCompat       = pgWhereMeet + 1;
-  const pgGreenRed     = pgCompat + 1;
+  const startCh4 = pgMeansNow + 1;
+  const pgSoulmate = startCh4 + 1;
+  const pgWhereMeet = pgSoulmate + 1;
+  const pgCompat = pgWhereMeet + 1;
+  const pgGreenRed = pgCompat + 1;
 
-  const startCh5       = pgGreenRed + 1;
-  const pgMarriage     = startCh5 + 1;
-  const pgMarriedLife  = pgMarriage + 1;
-  const pgSpouse       = pgMarriedLife + 1;
-  const pgPlanetData   = pgSpouse + 1;
-  const pgSummaryPage  = pgPlanetData + 1;
+  const startCh5 = pgGreenRed + 1;
+  const pgMarriage = startCh5 + 1;
+  const pgMarriedLife = pgMarriage + 1;
+  const pgSpouse = pgMarriedLife + 1;
+  const pgPlanetData = pgSpouse + 1;
+  const pgSummaryPage = pgPlanetData + 1;
+  const pgFaq1 = pgSummaryPage + 1;
+  const pgFaq2 = pgFaq1 + 1;
 
-  const createStandardPage = (pageNumber, sectionTitle, eyebrowText, contentHtml, subtitle = "") => `
-    <div class="page">
-      <div class="header">
-        <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">${escapeHtml(eyebrowText)}</span></div>
-        <h1 class="header-title">${escapeHtml(sectionTitle)}</h1>
-        ${subtitle ? `<p class="header-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-        <div class="header-gradient"></div>
-      </div>
-      <div style="flex:1; overflow:hidden;">
-        ${contentHtml}
-      </div>
-      <div class="footer">
-        <span class="footer-left">Love &amp; Relationship Report · ${escapeHtml(fullName)}</span>
-        <span class="footer-right">Page ${pageNumber}</span>
-      </div>
-    </div>`;
-
-  const narrativePage = (pageNum, eyebrow, title, fieldKey, subtitle = "") => {
+  const narrativePage = (chId, eyebrow, title, fieldKey, subtitle = "") => {
     const text = formatNarrativeText(safeString(getVal(fieldKey, "Analysis not available for this section.")));
-    return createStandardPage(pageNum, title, eyebrow, `
-      <div class="narrative-block">
-        <div class="narrative-label">${escapeHtml(title)}</div>
+    return `
+      <div class="draft-chapter" data-id="${chId}" data-eyebrow="${escapeHtml(eyebrow)}" data-title="${escapeHtml(title)}" ${subtitle ? `data-subtitle="${escapeHtml(subtitle)}"` : ""}>
         <div class="narrative-text">${text}</div>
-      </div>`, subtitle);
+      </div>`;
   };
+
+  const renderFaqBlock = (question, answerKey) => {
+    const answer = getVal(answerKey, "Analysis based on your planetary placements is being compiled.");
+    return `
+      <div style="margin-bottom: 4.5mm; padding-bottom: 3.5mm; border-bottom: 1px solid rgba(219,39,119,0.12);">
+        <div style="font-size: 11pt; font-weight: 700; color: var(--pink-deep); margin-bottom: 1.8mm; line-height: 1.4;">Q: ${escapeHtml(question)}</div>
+        <p style="font-size: 10.5pt; line-height: 1.55; color: var(--text-main); text-align: justify; font-style: normal; margin-bottom: 0;">${escapeHtml(answer)}</p>
+      </div>`;
+  };
+
+  const faqPage1Content = `
+    <div style="display: flex; flex-direction: column; gap: 1mm; height: 100%;">
+      ${renderFaqBlock("Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage?", "faqMarriageType")}
+      ${renderFaqBlock("When Am I Most Likely to Meet My Life Partner and Get Married?", "faqPartnerMeetingTiming")}
+      ${renderFaqBlock("Will There Be Any Delays or Major Obstacles in My Marriage?", "faqMarriageDelays")}
+      ${renderFaqBlock("What Kind of Person Will My Future Partner Be? (Personality, values, career, lifestyle, appearance, etc.)", "faqPartnerDescription")}
+      ${renderFaqBlock("How and Where Am I Most Likely to Meet My Future Partner? (College, workplace, family, travel, online, another city, etc.)", "faqHowWhereMeet")}
+      ${renderFaqBlock("Will My Marriage Be Happy, Stable, and Emotionally Fulfilling?", "faqMarriageHappiness")}
+    </div>
+  `;
+
+  const faqPage2Content = `
+    <div style="display: flex; flex-direction: column; gap: 1mm; height: 100%;">
+      ${renderFaqBlock("Will I Have More Than One Serious Relationship Before Marriage?", "faqRelationshipsBeforeMarriage")}
+      ${renderFaqBlock("Will My Partner Be From My City, Another State, Abroad, or a Different Community? (Including long-distance/intercaste possibilities.)", "faqPartnerOrigin")}
+      ${renderFaqBlock("Will My Family Support My Relationship and Marriage Decisions?", "faqFamilySupport")}
+      ${renderFaqBlock("What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For?", "faqStrengthsWeaknessesFlags")}
+      ${renderFaqBlock("What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage?", "faqFavorablePeriods")}
+      ${renderFaqBlock("What Important Karmic Lessons and Life Changes Will My Marriage Bring? (Including its impact on personal growth, career, and finances.)", "faqKarmicLessonsChanges")}
+    </div>
+  `;
 
   return `<!DOCTYPE html>
 <html>
@@ -456,9 +488,9 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
     }
 
     .page {
-      width: 210mm;
-      height: 297mm;
-      padding: 15mm 16mm 12mm 16mm;
+      width: 794px;
+      height: 1122px;
+      padding: 90px 68px 75px 68px;
       background: var(--white);
       page-break-after: always;
       page-break-inside: avoid;
@@ -466,11 +498,13 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
       flex-direction: column;
       overflow: hidden;
       position: relative;
+      box-sizing: border-box;
     }
 
     .img-page-bg {
-      width: 210mm;
-      height: 297mm;
+      width: 794px;
+      height: 1122px;
+      box-sizing: border-box;
       page-break-after: always;
       page-break-inside: avoid;
       background-size: 100% 100%;
@@ -479,15 +513,57 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
       display: block;
     }
 
+    .img-page {
+      width: 794px;
+      height: 1122px;
+      page-break-after: always;
+      page-break-inside: avoid;
+      overflow: hidden;
+      display: block;
+      box-sizing: border-box;
+    }
+
+    .img-page img {
+      width: 794px;
+      height: 1122px;
+      object-fit: fill;
+      display: block;
+    }
+
+    @media print {
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .page {
+        width: 210mm;
+        height: 297mm;
+        padding: 24mm 18mm 20mm 18mm;
+      }
+      .img-page-bg {
+        width: 210mm;
+        height: 297mm;
+      }
+      .img-page {
+        width: 210mm;
+        height: 297mm;
+      }
+      .img-page img {
+        width: 210mm;
+        height: 297mm;
+      }
+    }
+
     .bg-cover       { background-image: url('${coverImg}'); }
     .bg-love-dna    { background-image: url('${loveDNAImg}'); }
     .bg-past-love   { background-image: url('${pastLoveImg}'); }
     .bg-present     { background-image: url('${presentLoveImg}'); }
     .bg-future      { background-image: url('${futureLoveImg}'); }
     .bg-summary     { background-image: url('${summaryImg}'); }
+    .bg-ending      { background-image: url('${endingImg}'); }
 
     /* ─── Header ─── */
-    .header { margin-bottom: 5mm; }
+    .header { margin-bottom: 8mm; }
     .header-eyebrow { display:flex; align-items:center; gap:3mm; margin-bottom:1.5mm; }
     .eyebrow-line { width:10mm; height:3px; background:var(--pink); border-radius:2px; }
     .eyebrow-text { font-size:8.5pt; font-weight:700; text-transform:uppercase; letter-spacing:2.5px; color:var(--pink-dark); }
@@ -569,17 +645,13 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
 </head>
 <body>
 
-  <!-- PAGE 1: COVER IMAGE -->
-  <div class="img-page-bg bg-cover"></div>
+  <!-- Hidden source of all pages/chapters before pagination -->
+  <div id="draft-source" style="display: none;">
+    <!-- PAGE 1: COVER IMAGE -->
+    <div class="draft-divider" data-img="${coverImg}"></div>
 
-  <!-- PAGE 2: DISCLAIMER -->
-  <div class="page">
-    <div class="header">
-      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Legal &amp; Guidance</span></div>
-      <h1 class="header-title">Disclaimer</h1>
-      <div class="header-gradient"></div>
-    </div>
-    <div style="flex:1; overflow:hidden;">
+    <!-- PAGE 2: DISCLAIMER -->
+    <div class="draft-static" data-eyebrow="Legal & Guidance" data-title="Disclaimer">
       <p style="font-size:13pt; line-height:1.75; color:var(--text-main); text-align:justify; margin-bottom:5mm;">
         This Love &amp; Relationship Report has been carefully prepared based on the timeless principles of Vedic Astrology (Jyotisha) — an ancient Indian system of understanding life through planetary alignments and cosmic influences. It is designed to offer meaningful insights into your emotional nature, relationship patterns, and romantic journey.
       </p>
@@ -593,51 +665,12 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
         Any recommendations, remedies, or guidance mentioned — such as gemstones, mantras, rituals, or lifestyle adjustments — are intended solely to promote emotional harmony and relationship well-being. These should never replace professional psychological, therapeutic, or medical advice.
       </p>
     </div>
-    <div class="footer">
-      <span class="footer-left">Love &amp; Relationship Report · ${escapeHtml(fullName)}</span>
-      <span class="footer-right">Page 2</span>
-    </div>
-  </div>
 
-  <!-- PAGE 3: TABLE OF CONTENTS -->
-  <div class="page">
-    <div class="header">
-      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Report Structure</span></div>
-      <h1 class="header-title">Table of Contents</h1>
-      <div class="header-gradient"></div>
-    </div>
-    <div style="flex:1; overflow:hidden;">
-      <div class="toc-row"><span class="toc-num">01</span><span class="toc-title">Personal Snapshot &amp; Relationship Charts</span><span class="toc-dots"></span><span class="toc-page">4</span></div>
-      <div class="toc-row"><span class="toc-num">02</span><span class="toc-title">Planetary Periods (Dashas)</span><span class="toc-dots"></span><span class="toc-page">5–${4 + numDashaPages}</span></div>
-      <div class="toc-row"><span class="toc-num">03</span><span class="toc-title">The Love DNA &amp; Emotional Wiring</span><span class="toc-dots"></span><span class="toc-page">${pgLoveDNA}</span></div>
-      <div class="toc-row"><span class="toc-num">04</span><span class="toc-title">How You Express Love</span><span class="toc-dots"></span><span class="toc-page">${pgExpressLove}</span></div>
-      <div class="toc-row"><span class="toc-num">05</span><span class="toc-title">Emotional Vulnerability</span><span class="toc-dots"></span><span class="toc-page">${pgVuln}</span></div>
-      <div class="toc-row"><span class="toc-num">06</span><span class="toc-title">Relationship Shadow</span><span class="toc-dots"></span><span class="toc-page">${pgShadow}</span></div>
-      <div class="toc-row"><span class="toc-num">07</span><span class="toc-title">Karmic Love Lessons</span><span class="toc-dots"></span><span class="toc-page">${pgKarmic}</span></div>
-      <div class="toc-row"><span class="toc-num">08</span><span class="toc-title">Past Love, Attachment &amp; Lessons</span><span class="toc-dots"></span><span class="toc-page">${pgFirstLove}</span></div>
-      <div class="toc-row"><span class="toc-num">09</span><span class="toc-title">Present Love State &amp; Readiness</span><span class="toc-dots"></span><span class="toc-page">${pgReadiness}</span></div>
-      <div class="toc-row"><span class="toc-num">10</span><span class="toc-title">Current Emotional Blocks</span><span class="toc-dots"></span><span class="toc-page">${pgBlocks}</span></div>
-      <div class="toc-row"><span class="toc-num">11</span><span class="toc-title">What Love Means To You Now</span><span class="toc-dots"></span><span class="toc-page">${pgMeansNow}</span></div>
-      <div class="toc-row"><span class="toc-num">12</span><span class="toc-title">Future Love Direction — Soulmate Profile</span><span class="toc-dots"></span><span class="toc-page">${pgSoulmate}</span></div>
-      <div class="toc-row"><span class="toc-num">13</span><span class="toc-title">Where You'll Meet · Compatibility · Green &amp; Red Flags</span><span class="toc-dots"></span><span class="toc-page">${pgWhereMeet}</span></div>
-      <div class="toc-row"><span class="toc-num">14</span><span class="toc-title">Marriage Destiny · Married Life · Spouse Personality</span><span class="toc-dots"></span><span class="toc-page">${pgMarriage}</span></div>
-      <div class="toc-row"><span class="toc-num">15</span><span class="toc-title">Planetary Positions &amp; Dignities</span><span class="toc-dots"></span><span class="toc-page">${pgPlanetData}</span></div>
-      <div class="toc-row"><span class="toc-num">16</span><span class="toc-title">Summary &amp; Your Complete Love Journey</span><span class="toc-dots"></span><span class="toc-page">${pgSummaryPage}</span></div>
-    </div>
-    <div class="footer">
-      <span class="footer-left">Love &amp; Relationship Report · ${escapeHtml(fullName)}</span>
-      <span class="footer-right">Page 3</span>
-    </div>
-  </div>
+    <!-- PAGE 3: TABLE OF CONTENTS -->
+    <div class="draft-static" data-is-toc="true"></div>
 
-  <!-- PAGE 4: SNAPSHOT & CHARTS -->
-  <div class="page">
-    <div class="header">
-      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Personal Snapshot</span></div>
-      <h1 class="header-title">Native Profile &amp; Relationship Charts</h1>
-      <div class="header-gradient"></div>
-    </div>
-    <div style="flex:1; overflow:hidden;">
+    <!-- PAGE 4: SNAPSHOT & CHARTS -->
+    <div class="draft-static" data-eyebrow="Personal Snapshot" data-title="Native Profile & Relationship Charts">
       <div class="grid-2" style="margin-bottom:4mm;">
         <div class="info-card">
           <div class="info-card-title">Birth Details</div>
@@ -668,99 +701,57 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
         </p>
       </div>
     </div>
-    <div class="footer">
-      <span class="footer-left">Love &amp; Relationship Report · ${escapeHtml(fullName)}</span>
-      <span class="footer-right">Page 4</span>
-    </div>
-  </div>
 
-  <!-- PAGES 5+: DASHA TABLES -->
-  ${dashaPagesHtml}
+    <!-- PAGES 5+: DASHA TABLES -->
+    ${dashaPagesHtml}
 
-  <!-- CHAPTER DIVIDER: THE LOVE DNA & EMOTIONAL WIRING -->
-  <div class="img-page-bg bg-love-dna"></div>
+    <!-- CHAPTER 1 -->
+    <div class="draft-divider" data-img="${loveDNAImg}"></div>
+    ${narrativePage("ch_lovedna", "Love DNA & Emotional Wiring", "Your Love DNA", "loveDNAEmotionalWiring")}
+    ${narrativePage("ch_expresslove", "Love DNA & Emotional Wiring", "How You Express Love", "howYouExpressLove")}
+    ${narrativePage("ch_vuln", "Love DNA & Emotional Wiring", "Emotional Vulnerability", "emotionalVulnerability")}
+    ${narrativePage("ch_shadow", "Love DNA & Emotional Wiring", "Relationship Shadow", "relationshipShadow")}
+    ${narrativePage("ch_karmic", "Love DNA & Emotional Wiring", "Karmic Love Lessons", "karmicLoveLessons")}
 
-  <!-- Love DNA Page -->
-  ${narrativePage(pgLoveDNA, "Love DNA & Emotional Wiring", "Your Love DNA", "loveDNAEmotionalWiring")}
+    <!-- CHAPTER 2 -->
+    <div class="draft-divider" data-img="${pastLoveImg}"></div>
+    ${narrativePage("ch_firstlove", "Past Love, Attachment & Lessons", "First Love Energy", "firstLoveEnergy")}
+    ${narrativePage("ch_attachment", "Past Love, Attachment & Lessons", "Your Attachment Style", "attachmentStyle")}
 
-  <!-- How You Express Love -->
-  ${narrativePage(pgExpressLove, "Love DNA & Emotional Wiring", "How You Express Love", "howYouExpressLove")}
+    <!-- CHAPTER 3 -->
+    <div class="draft-divider" data-img="${presentLoveImg}"></div>
+    ${narrativePage("ch_readiness", "Present Love State & Readiness", "Current Love Readiness", "currentLoveReadiness")}
+    ${narrativePage("ch_blocks", "Present Love State & Readiness", "Current Emotional Blocks", "currentEmotionalBlocks")}
+    ${narrativePage("ch_meansnow", "Present Love State & Readiness", "What Love Means To You Now", "whatLoveMeansNow")}
 
-  <!-- Emotional Vulnerability -->
-  ${narrativePage(pgVuln, "Love DNA & Emotional Wiring", "Emotional Vulnerability", "emotionalVulnerability")}
-
-  <!-- Relationship Shadow -->
-  ${narrativePage(pgShadow, "Love DNA & Emotional Wiring", "Relationship Shadow", "relationshipShadow")}
-
-  <!-- Karmic Love Lessons -->
-  ${narrativePage(pgKarmic, "Love DNA & Emotional Wiring", "Karmic Love Lessons", "karmicLoveLessons")}
-
-  <!-- CHAPTER DIVIDER: PAST LOVE, ATTACHMENT & LESSONS -->
-  <div class="img-page-bg bg-past-love"></div>
-
-  <!-- First Love Energy -->
-  ${narrativePage(pgFirstLove, "Past Love, Attachment & Lessons", "First Love Energy", "firstLoveEnergy")}
-
-  <!-- Attachment Style -->
-  ${narrativePage(pgAttachment, "Past Love, Attachment & Lessons", "Your Attachment Style", "attachmentStyle")}
-
-  <!-- CHAPTER DIVIDER: PRESENT LOVE STATE & READINESS -->
-  <div class="img-page-bg bg-present"></div>
-
-  <!-- Current Love Readiness -->
-  ${narrativePage(pgReadiness, "Present Love State & Readiness", "Current Love Readiness", "currentLoveReadiness")}
-
-  <!-- Current Emotional Blocks -->
-  ${narrativePage(pgBlocks, "Present Love State & Readiness", "Current Emotional Blocks", "currentEmotionalBlocks")}
-
-  <!-- What Love Means Now -->
-  ${narrativePage(pgMeansNow, "Present Love State & Readiness", "What Love Means To You Now", "whatLoveMeansNow")}
-
-  <!-- CHAPTER DIVIDER: FUTURE LOVE DIRECTION -->
-  <div class="img-page-bg bg-future"></div>
-
-  <!-- Soulmate Profile -->
-  ${narrativePage(pgSoulmate, "Future Love Direction", "Your Soulmate Profile", "soulmatProfile")}
-
-  <!-- Where You'll Meet -->
-  ${narrativePage(pgWhereMeet, "Future Love Direction", "Where You'll Meet Your Person", "whereYoullMeet")}
-
-  <!-- Soulmate Compatibility -->
-  ${narrativePage(pgCompat, "Future Love Direction", "Soulmate Compatibility", "soulmateCompatibility")}
-
-  <!-- Green & Red Flags -->
-  ${createStandardPage(pgGreenRed, "Green Flags & Red Flags", "Future Love Direction", `
-    <div class="grid-2" style="margin-top:2mm; height:100%;">
-      <div>
-        <div class="narrative-label" style="border-bottom-color:rgba(219,39,119,0.3);">Green Flags — Seek These</div>
-        <div class="narrative-text" style="margin-top:2mm;">${formatNarrativeText(safeString(getVal("greenFlags", "")))}</div>
+    <!-- CHAPTER 4 -->
+    <div class="draft-divider" data-img="${futureLoveImg}"></div>
+    ${narrativePage("ch_soulmate", "Future Love Direction", "Your Soulmate Profile", "soulmatProfile")}
+    ${narrativePage("ch_wheremeet", "Future Love Direction", "Where You'll Meet Your Person", "whereYoullMeet")}
+    ${narrativePage("ch_compat", "Future Love Direction", "Soulmate Compatibility", "soulmateCompatibility")}
+    
+    <!-- GREEN & RED FLAGS -->
+    <div class="draft-static" data-eyebrow="Future Love Direction" data-title="Green Flags & Red Flags">
+      <div class="grid-2" style="margin-top:2mm; height:100%;">
+        <div>
+          <div class="narrative-label" style="border-bottom-color:rgba(219,39,119,0.3);">Green Flags — Seek These</div>
+          <div class="narrative-text" style="margin-top:2mm;">${formatNarrativeText(safeString(getVal("greenFlags", "")))}</div>
+        </div>
+        <div>
+          <div class="narrative-label" style="border-bottom-color:rgba(219,39,119,0.3);">Red Flags — Proceed With Caution</div>
+          <div class="narrative-text" style="margin-top:2mm;">${formatNarrativeText(safeString(getVal("redFlags", "")))}</div>
+        </div>
       </div>
-      <div>
-        <div class="narrative-label" style="border-bottom-color:rgba(219,39,119,0.3);">Red Flags — Proceed With Caution</div>
-        <div class="narrative-text" style="margin-top:2mm;">${formatNarrativeText(safeString(getVal("redFlags", "")))}</div>
-      </div>
-    </div>`)}
-
-  <!-- CHAPTER DIVIDER: SUMMARY -->
-  <div class="img-page-bg bg-summary"></div>
-
-  <!-- Marriage Destiny -->
-  ${narrativePage(pgMarriage, "Summary & Guidance", "Marriage Destiny", "marriageDestiny")}
-
-  <!-- Married Life -->
-  ${narrativePage(pgMarriedLife, "Summary & Guidance", "Your Married Life", "marriedLife")}
-
-  <!-- Spouse Personality -->
-  ${narrativePage(pgSpouse, "Summary & Guidance", "Spouse Personality Profile", "spousePersonality")}
-
-  <!-- Planetary Positions Table -->
-  <div class="page">
-    <div class="header">
-      <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Astrological Data</span></div>
-      <h1 class="header-title">Planetary Positions &amp; Dignities</h1>
-      <div class="header-gradient"></div>
     </div>
-    <div style="flex:1; overflow:hidden;">
+
+    <!-- CHAPTER 5 -->
+    <div class="draft-divider" data-img="${summaryImg}"></div>
+    ${narrativePage("ch_marriage", "Summary & Guidance", "Marriage Destiny", "marriageDestiny")}
+    ${narrativePage("ch_marriedlife", "Summary & Guidance", "Your Married Life", "marriedLife")}
+    ${narrativePage("ch_spouse", "Summary & Guidance", "Spouse Personality Profile", "spousePersonality")}
+
+    <!-- PLANETARY POSITIONS TABLE -->
+    <div class="draft-static" data-id="ch_planetdata" data-eyebrow="Astrological Data" data-title="Planetary Positions & Dignities">
       <p style="font-size:11pt; color:var(--text-main); margin-bottom:3.5mm; line-height:1.6; text-align:justify;">
         The planetary positions in your birth chart form the foundation of your relationship dynamics. Special attention is given to <strong>Venus</strong> (planet of love and attraction), the <strong>Moon</strong> (emotions and mind), and the <strong>7th House</strong> configurations which govern commitment and marriage.
       </p>
@@ -801,15 +792,210 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
         </div>
       </div>
     </div>
-    <div class="footer">
-      <span class="footer-left">Love &amp; Relationship Report · ${escapeHtml(fullName)}</span>
-      <span class="footer-right">Page ${pgPlanetData}</span>
+
+    <!-- SUMMARY INTEGRATION -->
+    ${narrativePage("ch_summary", "Summary & Integration", "Your Complete Love Journey", "loveSummary")}
+
+    <!-- FAQ PAGES -->
+    <div class="draft-static" data-id="ch_faq1" data-eyebrow="Astrological Q&A" data-title="Frequently Asked Love & Marriage Questions — Part 1">
+      ${faqPage1Content}
     </div>
+    <div class="draft-static" data-id="ch_faq2" data-eyebrow="Astrological Q&A" data-title="Frequently Asked Love & Marriage Questions — Part 2">
+      ${faqPage2Content}
+    </div>
+
+    <!-- ENDING CLOSING COVER -->
+    <div class="draft-divider" data-img="${endingImg}"></div>
   </div>
 
-  <!-- Summary & Complete Love Journey -->
-  ${narrativePage(pgSummaryPage, "Summary & Integration", "Your Complete Love Journey", "loveSummary")}
+  <!-- Real Output Container where paginated elements will be rendered -->
+  <div id="output-container"></div>
 
+  <!-- Dynamic Pagination Script -->
+  <script>
+    function paginate() {
+      const source = document.getElementById("draft-source");
+      const dest = document.getElementById("output-container");
+      if (!source || !dest) return;
+
+      const maxContentHeight = 830; // Leave a safe margin for content block height in pixels
+
+      // Off-screen tester page
+      const tester = document.createElement("div");
+      tester.className = "page";
+      tester.style.position = "absolute";
+      tester.style.top = "-9999px";
+      tester.style.left = "-9999px";
+      tester.style.height = "auto";
+      document.body.appendChild(tester);
+
+      const testContent = document.createElement("div");
+      testContent.style.flex = "1";
+      testContent.style.display = "flex";
+      testContent.style.flexDirection = "column";
+      tester.appendChild(testContent);
+
+      let pageCounter = 1;
+      const chStarts = {};
+
+      const createPage = (contentHtml, pageNum, eyebrow = "", title = "", subtitle = "") => {
+        const hasHeader = eyebrow || title;
+        const headerHtml = hasHeader ? \`
+          <div class="header">
+            <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">\${eyebrow}</span></div>
+            <h1 class="header-title">\${title}</h1>
+            \${subtitle ? \`<p class="header-subtitle">\${subtitle}</p>\` : ""}
+            <div class="header-gradient" style="margin-bottom: 6mm;"></div>
+          </div>
+        \` : \`
+          <div class="header" style="margin-bottom: 4mm;">
+            <div style="font-size: 11pt; font-weight: 700; color: var(--pink-deep); text-transform: uppercase; letter-spacing: 0.5px;">\${title} (Continued)</div>
+            <div class="header-gradient" style="margin-top: 2mm; margin-bottom: 4mm;"></div>
+          </div>
+        \`;
+
+        return \`
+          <div class="page">
+            \${headerHtml}
+            <div style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+              \${contentHtml}
+            </div>
+            <div class="footer">
+              <span class="footer-left">Love &amp; Relationship Report · \${escapeHtml("${fullName}")}</span>
+              <span class="footer-right">Page \${pageNum}</span>
+            </div>
+          </div>
+        \`;
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      const draftNodes = Array.from(source.children);
+
+      draftNodes.forEach(node => {
+        if (node.classList.contains("draft-divider")) {
+          const imgUrl = node.getAttribute("data-img");
+          dest.innerHTML += \`
+            <div class="img-page">
+              <img src="\${imgUrl}" />
+            </div>
+          \`;
+          pageCounter++;
+        } else if (node.classList.contains("draft-static")) {
+          const eyebrow = node.getAttribute("data-eyebrow") || "";
+          const title = node.getAttribute("data-title") || "";
+          const isToc = node.getAttribute("data-is-toc") === "true";
+          const nodeId = node.getAttribute("data-id");
+          
+          if (nodeId) {
+            chStarts[nodeId] = pageCounter;
+          }
+          
+          if (isToc) {
+            dest.innerHTML += \`
+              <div class="page" id="toc-page-container">
+                <div class="header">
+                  <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Report Structure</span></div>
+                  <h1 class="header-title">Table of Contents</h1>
+                  <div class="header-gradient" style="margin-bottom: 6mm;"></div>
+                </div>
+                <div style="flex:1;">
+                  <div class="toc-row"><span class="toc-num">03</span><span class="toc-title">The Love DNA &amp; Emotional Wiring</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgLoveDNA"></span></div>
+                  <div class="toc-row"><span class="toc-num">04</span><span class="toc-title">How You Express Love</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgExpressLove"></span></div>
+                  <div class="toc-row"><span class="toc-num">05</span><span class="toc-title">Emotional Vulnerability</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgVuln"></span></div>
+                  <div class="toc-row"><span class="toc-num">06</span><span class="toc-title">Relationship Shadow</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgShadow"></span></div>
+                  <div class="toc-row"><span class="toc-num">07</span><span class="toc-title">Karmic Love Lessons</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgKarmic"></span></div>
+                  <div class="toc-row"><span class="toc-num">08</span><span class="toc-title">Past Love, Attachment &amp; Lessons</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgFirstLove"></span></div>
+                  <div class="toc-row"><span class="toc-num">09</span><span class="toc-title">Present Love State &amp; Readiness</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgReadiness"></span></div>
+                  <div class="toc-row"><span class="toc-num">10</span><span class="toc-title">Current Emotional Blocks</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgBlocks"></span></div>
+                  <div class="toc-row"><span class="toc-num">11</span><span class="toc-title">What Love Means To You Now</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgMeansNow"></span></div>
+                  <div class="toc-row"><span class="toc-num">12</span><span class="toc-title">Future Love Direction — Soulmate Profile</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgSoulmate"></span></div>
+                  <div class="toc-row"><span class="toc-num">13</span><span class="toc-title">Where You'll Meet · Compatibility · Green &amp; Red Flags</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgWhereMeet"></span></div>
+                  <div class="toc-row"><span class="toc-num">14</span><span class="toc-title">Marriage Destiny · Married Life · Spouse Personality</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgMarriage"></span></div>
+                  <div class="toc-row"><span class="toc-num">15</span><span class="toc-title">Planetary Positions &amp; Dignities</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgPlanetData"></span></div>
+                  <div class="toc-row"><span class="toc-num">16</span><span class="toc-title">Summary &amp; Your Complete Love Journey</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgSummaryPage"></span></div>
+                  <div class="toc-row"><span class="toc-num">17</span><span class="toc-title">Frequently Asked Love &amp; Marriage Questions</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgFaq1"></span></div>
+                </div>
+                <div class="footer">
+                  <span class="footer-left">Love &amp; Relationship Report · \${escapeHtml("${fullName}")}</span>
+                  <span class="footer-right">Page 3</span>
+                </div>
+              </div>
+            \`;
+          } else {
+            dest.innerHTML += createPage(node.innerHTML, pageCounter, eyebrow, title);
+          }
+          pageCounter++;
+        } else if (node.classList.contains("draft-chapter")) {
+          const chId = node.getAttribute("data-id");
+          const eyebrow = node.getAttribute("data-eyebrow") || "";
+          const title = node.getAttribute("data-title") || "";
+          const subtitle = node.getAttribute("data-subtitle") || "";
+          chStarts[chId] = pageCounter;
+
+          const wrapper = node.querySelector(".narrative-text") || node;
+          const blocks = Array.from(wrapper.children);
+          
+          let pageHtml = "";
+          testContent.innerHTML = "";
+
+          blocks.forEach((block, index) => {
+            const clone = block.cloneNode(true);
+            testContent.appendChild(clone);
+            
+            if (testContent.offsetHeight > maxContentHeight && index > 0) {
+              const isFirstPage = (chStarts[chId] === pageCounter);
+              dest.innerHTML += createPage(pageHtml, pageCounter, isFirstPage ? eyebrow : "", isFirstPage ? title : "", subtitle);
+              pageCounter++;
+
+              testContent.innerHTML = "";
+              testContent.appendChild(clone);
+            }
+            pageHtml = testContent.innerHTML;
+          });
+
+          if (pageHtml) {
+            const isFirstPage = (chStarts[chId] === pageCounter);
+            dest.innerHTML += createPage(pageHtml, pageCounter, isFirstPage ? eyebrow : "", isFirstPage ? title : "", subtitle);
+            pageCounter++;
+          }
+        }
+      });
+
+      // Populate TOC page starting numbers dynamically
+      const setTocPage = (id, pageNum) => {
+        const el = dest.querySelector("#" + id);
+        if (el) el.textContent = pageNum;
+      };
+      
+      setTocPage("toc-pgLoveDNA", chStarts.ch_lovedna || "");
+      setTocPage("toc-pgExpressLove", chStarts.ch_expresslove || "");
+      setTocPage("toc-pgVuln", chStarts.ch_vuln || "");
+      setTocPage("toc-pgShadow", chStarts.ch_shadow || "");
+      setTocPage("toc-pgKarmic", chStarts.ch_karmic || "");
+      setTocPage("toc-pgFirstLove", chStarts.ch_firstlove || "");
+      setTocPage("toc-pgReadiness", chStarts.ch_readiness || "");
+      setTocPage("toc-pgBlocks", chStarts.ch_blocks || "");
+      setTocPage("toc-pgMeansNow", chStarts.ch_meansnow || "");
+      setTocPage("toc-pgSoulmate", chStarts.ch_soulmate || "");
+      setTocPage("toc-pgWhereMeet", chStarts.ch_wheremeet || "");
+      setTocPage("toc-pgMarriage", chStarts.ch_marriage || "");
+      setTocPage("toc-pgPlanetData", chStarts.ch_planetdata || "");
+      setTocPage("toc-pgSummaryPage", chStarts.ch_summary || "");
+      setTocPage("toc-pgFaq1", chStarts.ch_faq1 || chStarts.ch_faq2 || "");
+
+      // Cleanup
+      tester.remove();
+      source.remove();
+    }
+  </script>
 </body>
 </html>`;
 }
@@ -858,7 +1044,13 @@ async function generateLoveRelationshipReportPDF(reportData, userRequest) {
     const page = await browser.newPage();
 
     console.log("[Love PDF Service] Setting page content...");
-    await page.setContent(htmlContent, { waitUntil: "load", timeout: 120000 });
+    await page.setContent(htmlContent, { waitUntil: "networkidle0", timeout: 120000 });
+
+    await page.evaluate(() => {
+      if (typeof paginate === "function") {
+        paginate();
+      }
+    });
 
     console.log("[Love PDF Service] Printing to PDF...");
     const pdfBuffer = await page.pdf({

@@ -24,6 +24,9 @@ const {
   generateLoveRelationshipKundaliReport,
   getLoveRelationshipKundaliHistory,
   deleteLoveRelationshipKundaliReport,
+  generateCompatibilityKundaliReport,
+  getCompatibilityKundaliHistory,
+  deleteCompatibilityKundaliReport,
 } = require("../../controller/horoscope/kundliReportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
@@ -83,5 +86,12 @@ router.get("/love-relationship-kundali", checkForAuthenticationCookie(), getLove
 
 // Delete a love relationship report record
 router.delete("/love-relationship-kundali/:id", checkForAuthenticationCookie(), deleteLoveRelationshipKundaliReport);
+
+// Compatibility endpoints
+router.post("/compatibility-kundali", checkForAuthenticationCookie(), generateCompatibilityKundaliReport);
+router.get("/compatibility-kundali", checkForAuthenticationCookie(), getCompatibilityKundaliHistory);
+
+// Delete a compatibility report record
+router.delete("/compatibility-kundali/:id", checkForAuthenticationCookie(), deleteCompatibilityKundaliReport);
 
 module.exports = router;

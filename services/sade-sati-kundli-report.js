@@ -281,6 +281,7 @@ CRITICAL WRITING INSTRUCTIONS:
 3. Reference the native's actual moon sign, ascendant, nakshatra, and Saturn placement details in the descriptions.
 4. NO emojis under any circumstance.
 5. Return STRICT JSON matching the expected structure. No markdown formatting or extra text outside the JSON.
+6. In 'faqAnswers', generate highly personalized and specific answers to each of the 12 FAQ questions. Do NOT use generic sentences. Use the native's birth chart details (such as their natal Moon sign, Ascendant/Lagna, Nakshatra, Saturn sign, Saturn strength, house position, Ashtakavarga scores, transit timeline, and current Dasha/Bhukti) to provide clear, astrologically-justified explanations for *why* these effects, cycles, challenge levels, or remedies apply to them specifically. Answer each question with a concise, personalized paragraph of 2-3 sentences (around 30-40 words) to ensure they are deeply customized but fit within the JSON output limit.
 
 EXPECTED JSON SCHEMA:
 {
@@ -490,6 +491,20 @@ EXPECTED JSON SCHEMA:
   "appendix": {
     "glossaryTerms": "string",
     "remedyReference": "string"
+  },
+  "faqAnswers": {
+    "currentlyUnderInfluence": "string",
+    "nextBeginAndEnd": "string",
+    "mostChallengingPhase": "string",
+    "mostAffectedAreas": "string",
+    "careerBusinessChallenges": "string",
+    "relationshipsFamilyInfluence": "string",
+    "financialLossesExpenses": "string",
+    "lessonsSaturnTeaches": "string",
+    "mistakesToAvoid": "string",
+    "effectiveRemedies": "string",
+    "reliefAndPositiveResults": "string",
+    "personalGrowthSuccess": "string"
   }
 }`;
 }
@@ -525,7 +540,7 @@ async function generateSadeSatiReportContent(reportInput, userId) {
         }
       ],
       temperature: 0.7,
-      max_tokens: 16000,
+      max_completion_tokens: 16000,
       response_format: { type: "json_object" }
     },
     { feature: "sadesati_report_generation_full", userId }

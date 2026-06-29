@@ -221,6 +221,7 @@ function mergeFinalResponse(basicDetails, dailyForecast, dasha, disclaimer) {
       hiddenOpportunity: dailyForecast?.hiddenOpportunity || null,
       actionGuide: dailyForecast?.actionGuide || null,
       smartTimeWindows: dailyForecast?.smartTimeWindows || [],
+      faqAnswers: dailyForecast?.faqAnswers || null,
     },
     disclaimer,
   };
@@ -311,7 +312,8 @@ CRITICAL INSTRUCTIONS:
    - "actionGuide.relationships": Exactly 3-4 sentences with house/planet influence, conversational approach, conflict-avoidance technique, beneficial activity type.
    - "actionGuide.healthAndEnergy": Exactly 3-4 sentences with 1st/6th house influence, vulnerable body system, aligned wellness practice, energy management advice.
    - Each smartTimeWindow: "favourableActivities" must be 1-2 sentences including the astrological reason. "areasForCaution" must be 1 specific sentence.
-6. STRICT JSON OUTPUT: Return only raw valid JSON. No markdown, no prose outside the JSON.
+6. In 'faqAnswers', generate highly personalized and specific answers to each of the 6 Daily FAQ questions. Do NOT use generic sentences. Use the user's birth details, active dasha, and today's planetary transits to provide clear, astrologically-justified explanations for *why* these recommendations and influences apply to them today. Answer each question with a concise, personalized paragraph of 2-3 sentences (around 30-40 words).
+7. STRICT JSON OUTPUT: Return only raw valid JSON. No markdown, no prose outside the JSON.
 
 EXPECTED JSON SCHEMA:
 {
@@ -359,7 +361,15 @@ EXPECTED JSON SCHEMA:
     { "timeWindow": "09:12 PM – 10:14 PM", "favourableActivities": "...", "areasForCaution": "..." },
     { "timeWindow": "10:15 PM – 11:27 PM", "favourableActivities": "...", "areasForCaution": "..." },
     { "timeWindow": "11:28 PM – 11:59 PM", "favourableActivities": "...", "areasForCaution": "..." }
-  ]
+  ],
+  "faqAnswers": {
+    "focusToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit.",
+    "bestTimeToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit.",
+    "avoidTimeToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit.",
+    "planetaryInfluenceToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit.",
+    "luckiestColorNumberItemToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit.",
+    "simpleActionsToday": "Concise, personalized paragraph of 2-3 sentences based on their chart/transit."
+  }
 }`;
 }
 
@@ -383,7 +393,7 @@ async function generateDailyReport(payload, userRequest) {
         { role: "user", content: prompt },
       ],
       temperature: 0.7,
-      max_tokens: 4000,
+      max_completion_tokens: 4000,
       response_format: { type: "json_object" },
     },
     { feature: "daily_kundali_report", userId: userRequest?.userId }

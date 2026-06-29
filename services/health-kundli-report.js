@@ -340,6 +340,7 @@ WRITING REQUIREMENTS:
 9. Do not invent medical facts. Astrology should guide interpretation, not replace medicine.
 10. When a section has many subpoints, give each subpoint its own depth instead of compressing everything.
 11. Write in an expansive, highly descriptive narrative style. Do not summarize or use short placeholder sentences; instead, explain the underlying astrological dynamics and practical wellness reasoning in complete, rich, detailed paragraphs.
+12. In 'faqAnswers', generate highly personalized and specific answers to each of the 12 Health FAQ questions. Do NOT use generic sentences. Use the user's birth details, ascendant, Moon sign, planetary positions, active dasha, and transits to provide clear, astrologically-justified explanations for *why* these recommendations and tendencies apply to them. Answer each question with a concise, personalized paragraph of 2-3 sentences (around 30-40 words).
 
 DEPTH TARGETS:
 
@@ -452,7 +453,21 @@ EXPECTED JSON SCHEMA:
     "string (4-5 sentences, therapeutic affirmation)",
     "string (4-5 sentences, therapeutic affirmation)",
     "string (4-5 sentences, therapeutic affirmation)"
-  ]
+  ],
+  "faqAnswers": {
+    "strongestHealthTraits": "string (2-3 sentences, personalized to chart)",
+    "attentionRequiredAreas": "string (2-3 sentences, personalized to chart)",
+    "bodySystemsSensitivity": "string (2-3 sentences, personalized to chart)",
+    "elementalConstitutionInfluence": "string (2-3 sentences, personalized to chart)",
+    "digestionMetabolismIndicator": "string (2-3 sentences, personalized to chart)",
+    "stressEmotionalWellBeing": "string (2-3 sentences, personalized to chart)",
+    "sleepQualityRecovery": "string (2-3 sentences, personalized to chart)",
+    "habitsLifestylePatterns": "string (2-3 sentences, personalized to chart)",
+    "favorablePeriodsHealth": "string (2-3 sentences, personalized to chart)",
+    "longTermWellnessHabits": "string (2-3 sentences, personalized to chart)",
+    "astrologicalRemediesMaintenance": "string (2-3 sentences, personalized to chart)",
+    "preventiveMeasuresStrengths": "string (2-3 sentences, personalized to chart)"
+  }
 }
 
 STYLE NOTES:
@@ -501,7 +516,7 @@ async function generateHealthReportContent(reportInput, userId) {
         }
       ],
       temperature: 0.72,
-      max_tokens: 16000,
+      max_completion_tokens: 16000,
       response_format: { type: "json_object" }
     },
     { feature: "health_report_generation_full", userId }

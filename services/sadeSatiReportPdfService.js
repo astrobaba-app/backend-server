@@ -1043,6 +1043,12 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
         <span class="toc-dots"></span>
         <span class="toc-page">Pages 40-47</span>
       </div>
+      <div class="toc-row">
+        <span class="toc-num">10</span>
+        <span class="toc-title">Frequently Asked Questions (Personalized FAQ)</span>
+        <span class="toc-dots"></span>
+        <span class="toc-page">Pages 48-49</span>
+      </div>
     </div>
   `)}
 
@@ -2511,7 +2517,87 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
     </div>
   `)}
 
-  <!-- PAGE 40: ENDING PAGE -->
+  <!-- PAGE 48: FAQ PART 1 -->
+  ${createStandardPage(48, "Frequently Asked Questions About Sade Sati - Part 1", "Personalised FAQ", `
+    <div class="info-card" style="margin-top: 2mm;">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Am I Currently Under the Influence of Sade Sati?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.currentlyUnderInfluence", "Based on your astrological placements and current planetary transits, the influence of Saturn on your natal Moon can be determined. Please consult the cycles section of this report to check active transit windows."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">When Will My Next Sade Sati Begin and End?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.nextBeginAndEnd", "The timeline of your Saturn transits is calculated based on the orbital speed of Saturn. Your personal transit table shows the exact entry and exit dates for your upcoming cycles."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Which Phase of Sade Sati Is the Most Challenging for Me?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.mostChallengingPhase", "For most individuals, the peak phase (second transit phase) when Saturn conjuncts the natal Moon tends to bring the most intense emotional and structural tests, though this varies based on your natal Saturn strength."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Which Areas of My Life Will Be Most Affected During Sade Sati?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.mostAffectedAreas", "Saturn systematically audits multiple domains including career stability, domestic harmony, financial savings, and mental peace. The specific house placement of Saturn in your chart guides the exact focus of these tests."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Will My Career or Business Face Major Challenges During This Period?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.careerBusinessChallenges", "Career paths often experience restructuring, increased workloads, or delayed rewards. Maintaining consistency, skill upgrades, and avoiding impulsive changes is the recommended path."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">How Will Sade Sati Influence My Relationships and Family Life?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.relationshipsFamilyInfluence", "Domestic duties and commitments are tested, encouraging the establishment of healthy boundaries and detached service. Clear communication prevents misunderstandings with family members."))}
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 49: FAQ PART 2 -->
+  ${createStandardPage(49, "Frequently Asked Questions About Sade Sati - Part 2", "Personalised FAQ", `
+    <div class="info-card" style="margin-top: 2mm;">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Can Sade Sati Cause Financial Losses or Unexpected Expenses?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.financialLossesExpenses", "Saturn audits your spending habits, requiring strict budgeting and resource conservation. Speculative investments should be avoided to prevent unexpected financial stress."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">What Lessons Is Saturn Trying to Teach Me Through This Transit?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.lessonsSaturnTeaches", "Saturn acts as a cosmic teacher, guiding you toward emotional maturity, self-reliance, ethical behavior, and the value of persistent, disciplined effort over quick shortcuts."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">What Are the Biggest Mistakes I Should Avoid During Sade Sati?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.mistakesToAvoid", "Avoid impulsive relocations, reactive conflicts, taking on excessive consumer debt, or seeking escapes from structural responsibilities."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Which Remedies Will Be Most Effective for Reducing the Effects of Sade Sati?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.effectiveRemedies", "Remedies like Hanuman Chalisa recitation, regular spiritual discipline, selfless service (Seva) to the elderly and working class, and body grounding routines are highly effective."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">When Can I Expect Relief and Positive Results During or After Sade Sati?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.reliefAndPositiveResults", "As Saturn transits into the final phase (the setting phase) and eventually leaves your 2nd house, the intense pressure lifts, and the rewards of your disciplined patience manifest as stable, long-term success."))}
+      </p>
+    </div>
+    <div class="info-card">
+      <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">How Can I Turn Sade Sati Into a Period of Personal Growth and Success?</div>
+      <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
+        ${escapeHtml(getVal("faqAnswers.personalGrowthSuccess", "By accepting Saturn's lessons with humility, developing consistent routines, upgrading your professional skills, and serving others, you forge a resilient character ready for lifetime stability."))}
+      </p>
+    </div>
+  `)}
+
+  <!-- PAGE 50: ENDING PAGE -->
   <div class="img-page-bg bg-end"></div>
 
 </body>

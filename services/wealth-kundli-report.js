@@ -422,6 +422,11 @@ CRITICAL WRITING INSTRUCTIONS:
 3. Reference the native's actual chart details (signs, houses, planet placements) in the descriptions.
 4. NO emojis under any circumstance.
 5. Return STRICT JSON matching the expected structure. No markdown formatting or extra text.
+6. STRICTLY FOR ALL FAQ ANSWERS (faqFinanciallyRich, faqBestWealthSource, faqMajorGrowthTiming, faqFinancialStrugglesLosses, faqWealthBuildingSpeed, faqSavingInvestingExpanding, faqOwnRealEstate, faqForeignOpportunities, faqFinancialMistakesAvoid, faqEffortVsInheritance, faqBestDecisionAge, faqUltimatePotential):
+   - You MUST write answers strictly based on the native's Kundli.
+   - NO general or vague answers. Do not use phrases like "Vedic astrology has many factors" or "It depends on various planetary dynamics."
+   - Provide concrete answers by explicitly referencing specific planetary placements, signs, houses, or running dashas from the input data (e.g., "Because your 2nd lord Jupiter is placed in the 11th house in Cancer...", "Your current Saturn Mahadasha indicates...", "Rahu in the 12th house indicates a risk of...").
+   - Each answer must be between 2 and 4 sentences. Make them compact, direct, complete, and highly personalized.
 
 EXPECTED JSON SCHEMA OUTLINES:
 {
@@ -551,8 +556,36 @@ EXPECTED JSON SCHEMA OUTLINES:
     "plan30Days": "string (exactly 10-12 detailed sentences on 30-day tactical asset moves)",
     "plan1Year": "string (exactly 10-12 detailed sentences on 1-year strategic growth action plan)",
     "oneLineVerdict": "string"
-  }
+  },
+  "faqFinanciallyRich": "string (2-4 sentences, Will I Become Financially Rich in My Lifetime? Answer strictly based on the Kundli data, e.g. 2nd, 11th houses and their lords)",
+  "faqBestWealthSource": "string (2-4 sentences, What Is My Best Source of Wealth? (Job, Business, Freelancing, Investments, Family Business, etc.) Answer based on placements in 2nd, 10th, and 11th houses)",
+  "faqMajorGrowthTiming": "string (2-4 sentences, When Am I Most Likely to Experience Major Financial Growth? Specify timing periods referencing dasha cycles or Jupiter transits)",
+  "faqFinancialStrugglesLosses": "string (2-4 sentences, Will I Face Major Financial Struggles or Money Losses in Life? Address negative placements, e.g. 6th, 8th, 12th houses or Saturn/Rahu/Ketu aspects)",
+  "faqWealthBuildingSpeed": "string (2-4 sentences, Am I More Likely to Build Wealth Quickly or Gradually Over Time? Explain using planet speed or Saturn/Rahu influences)",
+  "faqSavingInvestingExpanding": "string (2-4 sentences, Should I Focus More on Saving, Investing, or Expanding My Income? Suggest based on 2nd vs 11th houses)",
+  "faqOwnRealEstate": "string (2-4 sentences, Will I Own Property, Land, or Multiple Real Estate Assets? Evaluate based on the 4th house, Mars, and D4 chart)",
+  "faqForeignOpportunities": "string (2-4 sentences, Is There Strong Potential for Wealth Through Foreign Countries or International Opportunities? Evaluate using 9th, 12th, or Rahu placements)",
+  "faqFinancialMistakesAvoid": "string (2-4 sentences, What Are the Biggest Financial Mistakes I Should Avoid? Mention specific chart-based cautions)",
+  "faqEffortVsInheritance": "string (2-4 sentences, Will I Receive Wealth Through Inheritance, Family Support, or Mostly Through My Own Efforts? Evaluate 8th house vs 3rd house and Lagna lord)",
+  "faqBestDecisionAge": "string (2-4 sentences, What Is the Best Age or Time Period to Make Major Financial Decisions or Investments? Reference transits or ages of planetary maturity)",
+  "faqUltimatePotential": "string (2-4 sentences, What Is My Ultimate Wealth Potential According to My Kundli? Synthesize based on overall chart strength)"
 }`;
+}
+
+function cleanJsonResponse(rawText) {
+  if (!rawText) return "";
+  let cleaned = rawText.trim();
+
+  const startIdx = cleaned.indexOf("{");
+  const endIdx = cleaned.lastIndexOf("}");
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    cleaned = cleaned.substring(startIdx, endIdx + 1);
+  } else {
+    if (cleaned.startsWith("```json")) cleaned = cleaned.substring(7);
+    else if (cleaned.startsWith("```")) cleaned = cleaned.substring(3);
+    if (cleaned.endsWith("```")) cleaned = cleaned.substring(0, cleaned.length - 3);
+  }
+  return cleaned.trim();
 }
 
 /**
@@ -591,15 +624,17 @@ async function generateWealthReportContent(reportInput, userId) {
     throw new Error("No wealth report response returned from OpenAI Client");
   }
 
+  const cleanedContent = cleanJsonResponse(content);
+
   try {
     // console.log("[WealthReportService] Raw LLM response content:\n", content);
     console.log(`[WealthReportService] LLM response received successfully. Time taken: ${duration} ms`);
-    const data = JSON.parse(content);
+    const data = JSON.parse(cleanedContent);
     console.log("[WealthReportService] OpenAI parsed response successfully");
     return data;
   } catch (err) {
     console.error("[WealthReportService] Failed to parse GPT response:", content);
-    throw new Error("Invalid JSON returned by OpenAI model");
+    throw new Error(`Invalid JSON returned by OpenAI model: ${err.message}`);
   }
 }
 

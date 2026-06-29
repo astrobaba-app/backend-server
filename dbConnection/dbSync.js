@@ -56,6 +56,7 @@ const WealthReport = require("../model/horoscope/wealthReport");
 const SadeSatiReport = require("../model/horoscope/sadeSatiReport");
 const HealthReport = require("../model/horoscope/healthReport");
 const LoveRelationshipReport = require("../model/horoscope/loveRelationshipReport");
+const CompatibilityReport = require("../model/horoscope/compatibilityReport");
 const DailyInsightPayload = require("../model/horoscope/dailyInsightPayload");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
