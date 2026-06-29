@@ -52,6 +52,7 @@ const ANDROID_SMS_RETRIEVER_HASH = String(
 const MSG91_MOBILE_OTP_TEMPLATE_ID = String(
   process.env.MSG91_MOBILE_OTP_TEMPLATE_ID || ""
 ).trim();
+const DUMMY_ASTROLOGER_PHONE = "8112590071";
 
 let workerStarted = false;
 let processing = false;
@@ -98,6 +99,9 @@ const getVerifyAttemptsKey = ({ actorType, mobile }) =>
 const getVerifyLimitKey = ({ actorType, mobile, window }) =>
   `${actorType}:otp:verify:${window}:${mobile}`;
 
+const isUnlimitedDummyAstrologerOtp = ({ actorType, mobile }) =>
+  actorType === "astrologer" && mobile === DUMMY_ASTROLOGER_PHONE;
+
 const incrementWindowLimit = async ({ key, ttlSeconds, limit, message }) => {
   const requestCount = await redis.incr(key);
 
@@ -113,6 +117,10 @@ const incrementWindowLimit = async ({ key, ttlSeconds, limit, message }) => {
 };
 
 const checkOtpSendLimits = async ({ actorType, mobile }) => {
+  if (isUnlimitedDummyAstrologerOtp({ actorType, mobile })) {
+    return;
+  }
+
   await incrementWindowLimit({
     key: getSendLimitKey({ actorType, mobile, window: "hour" }),
     ttlSeconds: 60 * 60,
@@ -136,6 +144,10 @@ const checkOtpSendLimits = async ({ actorType, mobile }) => {
 };
 
 const checkOtpVerifyLimits = async ({ actorType, mobile }) => {
+  if (isUnlimitedDummyAstrologerOtp({ actorType, mobile })) {
+    return;
+  }
+
   await incrementWindowLimit({
     key: getVerifyAttemptsKey({ actorType, mobile }),
     ttlSeconds: OTP_TTL_SECONDS,
@@ -190,6 +202,17 @@ const createAndQueueOtp = async ({ actorType, mobile, templateId, includeAppHash
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
 
   await enqueueOtp({ actorType, mobile, otp, templateId, includeAppHash });
+};
+
+const createStoredOtp = async ({ actorType, mobile, otp }) => {
+  await checkOtpSendLimits({ actorType, mobile });
+
+  await redis.setex(getOtpKey({ actorType, mobile }), OTP_TTL_SECONDS, {
+    otp,
+    mobile,
+    createdAt: Date.now(),
+  });
+  await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
 };
 
 const createAndQueueMobileOtp = async ({ actorType, mobile }) => {
@@ -314,6 +337,7 @@ module.exports = {
   TOO_MANY_VERIFY_ATTEMPTS_MESSAGE,
   createAndQueueOtp,
   createAndQueueMobileOtp,
+  createStoredOtp,
   verifyQueuedOtp,
   startOtpQueueWorker,
 };
