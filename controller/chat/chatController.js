@@ -210,8 +210,9 @@ const startChatSession = async (req, res) => {
 
     const wallet = await Wallet.findOne({ where: { userId } });
     const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+    const requiredBalance = parseFloat(astrologer.pricePerMinute || 0);
 
-    if (walletBreakdown.rechargeBalance <= 0) {
+    if (walletBreakdown.rechargeBalance < requiredBalance) {
       return res.status(402).json({
         success: false,
         message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
@@ -221,6 +222,7 @@ const startChatSession = async (req, res) => {
           balance: walletBreakdown.balance,
           signupBonusBalance: walletBreakdown.signupBonusBalance,
           humanChatBalance: walletBreakdown.rechargeBalance,
+          required: requiredBalance,
         },
       });
     }
@@ -1783,3 +1785,4 @@ module.exports = {
   approveChatRequest,
   rejectChatRequest,
 };
+
