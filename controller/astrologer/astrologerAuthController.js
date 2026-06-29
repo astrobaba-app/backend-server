@@ -16,10 +16,13 @@ const {
 } = require("../../services/phoneNumberService");
 const {
   createAndQueueOtp,
+  createStoredOtp,
   verifyQueuedOtp,
 } = require("../../services/otpQueueService");
 
 const REGISTRATION_VERIFIED_TTL_SECONDS = 20 * 60;
+const DUMMY_ASTROLOGER_PHONE = "8112590071";
+const DUMMY_ASTROLOGER_OTP = "1111";
 
 const normalizeEmail = (value) => (value || "").trim().toLowerCase();
 
@@ -48,16 +51,27 @@ const sendRegistrationOTP = async (req, res) => {
       });
     }
 
-    await createAndQueueOtp({
-      actorType: "astrologer",
-      mobile: normalizedPhoneNumber,
-    });
+    if (normalizedPhoneNumber === DUMMY_ASTROLOGER_PHONE) {
+      await createStoredOtp({
+        actorType: "astrologer",
+        mobile: normalizedPhoneNumber,
+        otp: DUMMY_ASTROLOGER_OTP,
+      });
+    } else {
+      await createAndQueueOtp({
+        actorType: "astrologer",
+        mobile: normalizedPhoneNumber,
+      });
+    }
 
     res.status(200).json({
       success: true,
       accountExists: Boolean(astrologer),
       isApproved: astrologer ? astrologer.isApproved : false,
-      message: "OTP sent successfully",
+      message:
+        normalizedPhoneNumber === DUMMY_ASTROLOGER_PHONE
+          ? "Dummy OTP prepared successfully"
+          : "OTP sent successfully",
       phoneNumber: normalizedPhoneNumber,
     });
   } catch (error) {
