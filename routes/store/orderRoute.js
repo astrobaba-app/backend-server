@@ -8,6 +8,7 @@ const {
   getOrderDetails,
   trackOrder,
   cancelOrder,
+  cancelOrderItem,
   getAllOrders,
   updateOrderStatus,
   getOrderStatistics,
@@ -23,6 +24,7 @@ router.post("/orders/verify-and-create", checkForAuthenticationCookie(), verifyA
 router.get("/orders", checkForAuthenticationCookie(), getMyOrders);
 router.get("/orders/:orderNumber", checkForAuthenticationCookie(), getOrderDetails);
 router.get("/orders/:orderNumber/track", checkForAuthenticationCookie(), trackOrder);
+router.post("/orders/:orderNumber/items/:productId/cancel", checkForAuthenticationCookie(), cancelOrderItem);
 router.post("/orders/:orderNumber/cancel", checkForAuthenticationCookie(), cancelOrder);
 
 
