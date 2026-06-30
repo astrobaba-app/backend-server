@@ -287,7 +287,7 @@ function generateHealthReportHtml(reportData, userRequest) {
 
   const faqNb = (label, text) => `
     <div class="narrative-block" style="margin-bottom: 3.8mm;">
-      <div class="narrative-label" style="margin-bottom: 1.2mm; padding-bottom: 0.3mm; font-size: 11.5pt; border-bottom: 1.8px solid var(--theme-lavender);">${escapeHtml(label)}</div>
+      <div class="narrative-label" style="margin-bottom: 1.2mm; padding-bottom: 0.3mm; font-size: 12.5pt; border-bottom: 1.8px solid var(--theme-lavender);">${escapeHtml(label)}</div>
       <div class="narrative-text" style="font-size: 12.2pt; line-height: 1.5;">${escapeHtml(text)}</div>
     </div>`;
 
@@ -453,8 +453,7 @@ function generateHealthReportHtml(reportData, userRequest) {
         ${tocRow("36", "Wellness Affirmations — Pt. 1", "40")}
         ${tocRow("37", "Wellness Affirmations — Pt. 2", "41")}
         ${tocRow("38", "Personal Timing Guidance", "42")}
-        ${tocRow("39", "Frequently Asked Questions", "43")}
-        ${tocRow("40", "Frequently Asked Questions", "44")}
+        ${tocRow("39", "Health Report Insights", "43")}
       </div>
     </div>`);
 
@@ -829,7 +828,7 @@ function generateHealthReportHtml(reportData, userRequest) {
     </div>
   `);
 
-  const page45 = createFaqPage(43, "Frequently Asked Questions (Part 1)", "Health FAQs", `
+  const page45 = createFaqPage(43, "Health Report Insights (Part 1)", "Health Insights", `
     ${faqNb("What are the strongest health traits shown in my birth chart?", getVal("faqAnswers.strongestHealthTraits", "Your chart indicates natural constitutional strengths and strong recovery factors."))}
     ${faqNb("Which areas of my health require the most attention according to my chart?", getVal("faqAnswers.attentionRequiredAreas", "Certain planetary placements point to areas requiring conscious protective focus."))}
     ${faqNb("Which body systems are naturally stronger, and which are more sensitive?", getVal("faqAnswers.bodySystemsSensitivity", "Your physical mapping shows structural systems with varied sensitivity scores."))}
@@ -838,7 +837,7 @@ function generateHealthReportHtml(reportData, userRequest) {
     ${faqNb("How do planetary influences affect my stress levels and emotional well-being?", getVal("faqAnswers.stressEmotionalWellBeing", "Moon and emotional houses govern mental calm, sleep, and stress response."))}
   `);
 
-  const page46 = createFaqPage(44, "Frequently Asked Questions (Part 2)", "Health FAQs", `
+  const page46 = createFaqPage(44, "Health Report Insights (Part 2)", "Health Insights", `
     ${faqNb("What does my chart indicate about my sleep quality and recovery patterns?", getVal("faqAnswers.sleepQualityRecovery", "Sleep quality is tied to the 12th house and lunar balance in your chart."))}
     ${faqNb("Are there any recurring health patterns or lifestyle habits I should be mindful of?", getVal("faqAnswers.habitsLifestylePatterns", "Your natal trends show routine-based patterns that affect chronic resilience."))}
     ${faqNb("Which periods of life are astrologically more favorable for improving my health?", getVal("faqAnswers.favorablePeriodsHealth", "Active Dashas and auspicious transits mark periods of physical regeneration."))}
@@ -876,6 +875,7 @@ function generateHealthReportHtml(reportData, userRequest) {
       flex-direction: column;
       background-color: var(--white);
       overflow: hidden;
+      border: 1.5px solid rgba(122, 96, 160, 0.25);
     }
     .img-page-bg {
       width: 210mm; height: 297mm;

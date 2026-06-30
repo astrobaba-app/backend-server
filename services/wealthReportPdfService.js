@@ -452,15 +452,17 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     
     .page {
       width: 210mm;
-      min-height: 297mm;
+      height: 297mm;
       box-sizing: border-box;
-      padding: 8mm 10mm 6mm 10mm;
+      padding: 10mm 12mm 8mm 12mm;
       position: relative;
       page-break-after: always;
-      page-break-inside: auto;
-      display: table !important;
+      page-break-inside: avoid;
+      display: flex;
+      flex-direction: column;
       background-color: var(--white);
       border: 1.5px solid rgba(245, 197, 24, 0.3);
+      overflow: hidden;
     }
     
     .img-page-bg {
@@ -489,8 +491,8 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
 
     /* Standard Header styles */
     .header {
-      display: table-header-group !important;
       width: 100%;
+      margin-bottom: 3.5mm;
     }
     
     .header-eyebrow {
@@ -537,17 +539,25 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     }
 
     .footer {
-      display: table-footer-group !important;
+      margin-top: auto;
       width: 100%;
       border-top: 1.5px solid rgba(245, 197, 24, 0.2);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 2.5mm;
     }
     
-    .footer-left { float: left; font-weight: 500; font-size: 8.5pt; color: var(--text-muted); padding-top: 2.5mm; }
-    .footer-right { float: right; font-weight: 700; color: var(--gold-dark); font-size: 8.5pt; padding-top: 2.5mm; }
+    .footer-left { font-weight: 500; font-size: 8.5pt; color: var(--text-muted); }
+    .footer-right { font-weight: 700; color: var(--gold-dark); font-size: 8.5pt; }
 
     .page > div:not(.header):not(.footer) {
-      display: table-row-group !important;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
       width: 100%;
+      overflow: hidden;
     }
 
     .narrative-block {
@@ -566,9 +576,9 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
     }
     
     .narrative-text {
-      font-size: 13pt;
+      font-size: 11.5pt;
       color: var(--text-main);
-      line-height: 1.4;
+      line-height: 1.45;
       text-align: justify;
     }
 
@@ -827,9 +837,8 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
 
     .archetype-box-value {
       font-size: 13.5pt;
-      font-weight: 800;
+      font-weight: 500;
       color: var(--dark-blue);
-      text-transform: uppercase;
       margin-top: 0.8mm;
     }
 
@@ -1233,7 +1242,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         <div class="toc-row"><div class="toc-num">19.</div><div class="toc-title">Risk, Loss &amp; Debts</div><div class="toc-dots"></div><div class="toc-page">Page 42</div></div>
         <div class="toc-row"><div class="toc-num">20.</div><div class="toc-title">Property &amp; Long-Term Assets</div><div class="toc-dots"></div><div class="toc-page">Page 45</div></div>
         <div class="toc-row"><div class="toc-num">21.</div><div class="toc-title">Ceiling, Timings &amp; Action Plan</div><div class="toc-dots"></div><div class="toc-page">Page 48</div></div>
-        <div class="toc-row"><div class="toc-num">22.</div><div class="toc-title">Frequently Asked Wealth Questions</div><div class="toc-dots"></div><div class="toc-page">Page 52</div></div>
+        <div class="toc-row"><div class="toc-num">22.</div><div class="toc-title">Wealth Report Insights</div><div class="toc-dots"></div><div class="toc-page">Page 52</div></div>
       </div>
     </div>
     <div class="footer">
@@ -1244,7 +1253,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
 
   <!-- PAGE 10: COSMIC SNAPSHOT -->
   <div class="page">
-    <div style="text-align: center; margin-top: 10mm; margin-bottom: 5mm;">
+    <div class="header" style="text-align: center; margin-top: 2mm; margin-bottom: 4mm;">
       <div style="display: flex; align-items: center; justify-content: center; gap: 6mm;">
         <!-- Left Ornament -->
         <svg width="80" height="24" viewBox="0 0 80 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1267,7 +1276,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
       <div style="height: 1.5px; background: linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%); margin-top: 5mm; width: 90%; margin-left: auto; margin-right: auto;"></div>
     </div>
     
-    <div style="flex: 1; display: flex; flex-direction: column; gap: 6mm; margin-top: 5mm; margin-bottom: 5mm; padding: 0 8mm;">
+    <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6mm; margin-top: 2mm; margin-bottom: 2mm; padding: 0 8mm;">
       <!-- Card 1: Personal Information -->
       <div style="border: 1px solid rgba(207, 168, 81, 0.4); background: #FCFBF7; border-radius: 8px; padding: 5mm 6mm; box-shadow: 0 2px 8px rgba(0,0,0,0.03);">
         <div style="font-size: 11pt; font-weight: bold; color: var(--gold-dark); text-transform: capitalize; margin-bottom: 2mm; font-family: 'Roboto', sans-serif;">Personal Information</div>
@@ -1594,7 +1603,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
   </div>
 
   <!-- PAGE 29: HOW YOU EARN BEST - SKILLS & SUITABILITY -->
-  <div class="page">
+  <div class="page tight-page">
     <div class="header">
       <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Section 05</span></div>
       <h1 class="header-title">Work Style &amp; Environments</h1>
@@ -1653,9 +1662,9 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
       
-      <div class="info-card" style="margin-top:6mm;">
-        <div class="info-card-title">Top Career &amp; Business Pathways</div>
-        <div style="font-size:10pt; color:var(--text-main); line-height:1.5;">
+      <div style="margin-top:4mm;">
+        <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Top Career &amp; Business Pathways</div>
+        <div style="font-size:11.5pt; color:var(--text-main); line-height:1.45;">
           <strong>Top Career Paths:</strong> ${(pred.howYouEarnBest?.topCareerPaths || []).join(" · ")}
           <br/><br/>
           <strong>Best Business Types:</strong> ${(pred.howYouEarnBest?.bestBusinessTypes || []).join(" · ")}
@@ -1737,13 +1746,13 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
       
-      <div class="narrative-block" style="margin-top:6mm;">
+      <div class="narrative-block" style="margin-top:4mm;">
         <div class="narrative-label">Prudent Fluctuations &amp; Management Advice</div>
         <div class="narrative-text">${escapeHtml(pred.incomeStability?.fluctuations)}</div>
       </div>
-      <div class="info-card">
-        <div class="info-card-title">Money Management Box</div>
-        <div style="font-size:11.5pt; line-height:1.65; color:var(--text-main); font-style:italic;">
+      <div class="narrative-block">
+        <div class="narrative-label">Money Management Guidance</div>
+        <div class="narrative-text" style="font-style:italic;">
           ${escapeHtml(pred.incomeStability?.managementAdvice)}
         </div>
       </div>
@@ -1828,29 +1837,29 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         <div class="narrative-label">Planets Summary (Venus, Jupiter, Mercury)</div>
         <div class="narrative-text">${escapeHtml(pred.housePlanetsSummary?.keyPlanetSummary)}</div>
       </div>
-      <div class="grid-2" style="margin-bottom:2mm;">
-        <div class="info-card">
-          <div class="info-card-title">Strongest House</div>
-          <p style="font-size:11.5pt; line-height:1.55; color:var(--text-main); margin:0;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6mm; margin-bottom:4mm;">
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Strongest House</div>
+          <p style="font-size:11.5pt; line-height:1.45; color:var(--text-main); margin:0; text-align:justify;">
             ${escapeHtml(pred.housePlanetsSummary?.strongestHouse)}
           </p>
         </div>
-        <div class="info-card">
-          <div class="info-card-title">Weak House (Requires Protection)</div>
-          <p style="font-size:11.5pt; line-height:1.55; color:var(--text-main); margin:0;">
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Weak House (Requires Protection)</div>
+          <p style="font-size:11.5pt; line-height:1.45; color:var(--text-main); margin:0; text-align:justify;">
             ${escapeHtml(pred.housePlanetsSummary?.weakHouse)}
           </p>
         </div>
       </div>
-      <div class="grid-2">
-        <div class="info-card">
-          <div class="info-card-title">Top 3 Lifting Factors</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6mm;">
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Top 3 Lifting Factors</div>
           <ul class="bullet-list" style="margin:0; padding-left:4mm; font-size:11.5pt; color:var(--text-main);">
             ${(pred.housePlanetsSummary?.liftingFactors || []).map(lf => `<li>${escapeHtml(lf)}</li>`).join("")}
           </ul>
         </div>
-        <div class="info-card">
-          <div class="info-card-title">Top 3 Blocking Factors</div>
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Top 3 Blocking Factors</div>
           <ul class="bullet-list" style="margin:0; padding-left:4mm; font-size:11.5pt; color:var(--text-main);">
             ${(pred.housePlanetsSummary?.blockingFactors || []).map(bf => `<li>${escapeHtml(bf)}</li>`).join("")}
           </ul>
@@ -1898,20 +1907,17 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
       
-      <div style="font-size:10pt; line-height:1.5; color:var(--text-main); display:grid; grid-template-columns:1fr 1fr; gap:4mm;">
-        <div class="info-card">
-          <div class="info-card-title">Mantra &amp; Daily Habits</div>
-          <strong>Mantras:</strong> ${escapeHtml(pred.blocksRemedies?.mantras)}
-          <br/><br/>
-          <strong>Habits:</strong> ${escapeHtml(pred.blocksRemedies?.dailyHabits)}
+      <div style="font-size:10pt; line-height:1.45; color:var(--text-main); display:grid; grid-template-columns:1fr 1fr; gap:6mm; margin-top:2mm;">
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Mantra &amp; Daily Habits</div>
+          <p style="margin-bottom:1.5mm;"><strong>Mantras:</strong> ${escapeHtml(pred.blocksRemedies?.mantras)}</p>
+          <p><strong>Habits:</strong> ${escapeHtml(pred.blocksRemedies?.dailyHabits)}</p>
         </div>
-        <div class="info-card">
-          <div class="info-card-title">Spiritual &amp; Practical Advice</div>
-          <strong>Spiritual:</strong> ${escapeHtml(pred.blocksRemedies?.spiritualRemedies)}
-          <br/><br/>
-          <strong>Behavior:</strong> ${escapeHtml(pred.blocksRemedies?.behaviorCorrections)}
-          <br/><br/>
-          <strong>Practical:</strong> ${escapeHtml(pred.blocksRemedies?.practicalRemedies)}
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Spiritual &amp; Practical Advice</div>
+          <p style="margin-bottom:1.5mm;"><strong>Spiritual:</strong> ${escapeHtml(pred.blocksRemedies?.spiritualRemedies)}</p>
+          <p style="margin-bottom:1.5mm;"><strong>Behavior:</strong> ${escapeHtml(pred.blocksRemedies?.behaviorCorrections)}</p>
+          <p><strong>Practical:</strong> ${escapeHtml(pred.blocksRemedies?.practicalRemedies)}</p>
         </div>
       </div>
     </div>
@@ -2060,15 +2066,15 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
       
-      <div class="grid-2" style="margin-top:2mm;">
-        <div class="info-card">
-          <div class="info-card-title">Investment Style</div>
-          <p style="font-size:11.5pt; line-height:1.55; color:var(--text-main); margin:0;">
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6mm; margin-top:4mm;">
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Investment Style</div>
+          <p style="font-size:11.5pt; line-height:1.45; color:var(--text-main); margin:0; text-align:justify;">
             ${escapeHtml(pred.riskLossDebts?.investmentStyle)}
           </p>
         </div>
-        <div class="info-card">
-          <div class="info-card-title">Financial Discipline Checklist</div>
+        <div>
+          <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Financial Discipline Checklist</div>
           <ul class="bullet-list" style="margin:0; padding-left:4mm; font-size:11.5pt; color:var(--text-main);">
             ${(pred.riskLossDebts?.disciplineChecklist || []).map(item => `<li>${escapeHtml(item)}</li>`).join("")}
           </ul>
@@ -2140,12 +2146,12 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
         </table>
       </div>
       
-      <div class="info-card" style="margin-top:2mm;">
-        <div class="info-card-title">Likely Best Asset Type</div>
-        <p style="font-size:11pt; color:var(--gold-dark); font-weight:700; margin:0 0 2mm 0;">
+      <div style="margin-top:4mm;">
+        <div class="narrative-label" style="font-size:9pt; margin-bottom:1.5mm;">Likely Best Asset Type &amp; Advice</div>
+        <p style="font-size:11.5pt; color:var(--gold-dark); font-weight:700; margin:0 0 1.5mm 0;">
           ${escapeHtml(pred.propertyAssets?.bestAssetType)}
         </p>
-        <p style="font-size:11.5pt; color:var(--text-main); margin:0; line-height:1.55;">
+        <p style="font-size:11.5pt; color:var(--text-main); margin:0; line-height:1.45; text-align:justify;">
           ${escapeHtml(pred.propertyAssets?.holdingAdvice)}
         </p>
       </div>
@@ -2319,7 +2325,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
   <div class="page">
     <div class="header">
       <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Section 13</span></div>
-      <h1 class="header-title">Frequently Asked Wealth Questions — Part 1</h1>
+      <h1 class="header-title">Wealth Report Insights — Part 1</h1>
       <p class="header-subtitle">Direct answers to key financial queries from your Kundli</p>
       <div class="header-gradient"></div>
     </div>
@@ -2341,7 +2347,7 @@ function generateWealthHtmlTemplate(reportData, userRequest) {
   <div class="page">
     <div class="header">
       <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">Section 13</span></div>
-      <h1 class="header-title">Frequently Asked Wealth Questions — Part 2</h1>
+      <h1 class="header-title">Wealth Report Insights — Part 2</h1>
       <p class="header-subtitle">Direct answers to key financial queries from your Kundli</p>
       <div class="header-gradient"></div>
     </div>

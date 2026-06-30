@@ -344,83 +344,83 @@ WRITING REQUIREMENTS:
 
 DEPTH TARGETS:
 
-- executiveSummary fields: 8 to 10 detailed, highly descriptive narrative sentences each.
-- major analysis fields: 8 to 10 detailed, highly descriptive narrative sentences each.
-- deepDive fields: 10 to 12 detailed, highly descriptive narrative sentences each.
-- remedy and plan fields: 8 to 10 detailed, highly descriptive narrative sentences each.
-- finalSummary fields: 8 to 10 detailed, highly descriptive narrative sentences each.
-- affirmationsList: each affirmation in this list must be a detailed, deeply therapeutic narrative passage of 4 to 5 sentences (about 60 to 80 words), tailored to the native's chart.
+- executiveSummary fields: 4 to 6 detailed, highly descriptive narrative sentences each.
+- major analysis fields: 4 to 6 detailed, highly descriptive narrative sentences each.
+- deepDive fields: 5 to 7 detailed, highly descriptive narrative sentences each.
+- remedy and plan fields: 4 to 6 detailed, highly descriptive narrative sentences each.
+- finalSummary fields: 4 to 6 detailed, highly descriptive narrative sentences each.
+- affirmationsList: each affirmation in this list must be a therapeutic narrative passage of 2 to 3 sentences (about 30 to 45 words), tailored to the native's chart.
 
 EXPECTED JSON SCHEMA:
 
 {
   "executiveSummary": {
-    "snapshotInterpretation": "string (8-10 sentences)",
-    "topStrengths": "string (8-10 sentences)",
-    "topWatchouts": "string (8-10 sentences)",
-    "constitutionOverview": "string (8-10 sentences)",
-    "currentPhaseHealth": "string (8-10 sentences)"
+    "snapshotInterpretation": "string (4-6 sentences)",
+    "topStrengths": "string (4-6 sentences)",
+    "topWatchouts": "string (4-6 sentences)",
+    "constitutionOverview": "string (4-6 sentences)",
+    "currentPhaseHealth": "string (4-6 sentences)"
   },
   "elementalConstitution": {
-    "overallBalance": "string (8-10 sentences)",
-    "fireElementAnalysis": "string (8-10 sentences)",
-    "waterElementAnalysis": "string (8-10 sentences)",
-    "airElementAnalysis": "string (8-10 sentences)",
-    "earthElementAnalysis": "string (8-10 sentences)",
-    "spaceElementAnalysis": "string (8-10 sentences)",
-    "dailyImbalancePattern": "string (8-10 sentences)"
+    "overallBalance": "string (4-6 sentences)",
+    "fireElementAnalysis": "string (4-6 sentences)",
+    "waterElementAnalysis": "string (4-6 sentences)",
+    "airElementAnalysis": "string (4-6 sentences)",
+    "earthElementAnalysis": "string (4-6 sentences)",
+    "spaceElementAnalysis": "string (4-6 sentences)",
+    "dailyImbalancePattern": "string (4-6 sentences)"
   },
   "kalpurushAnatomy": {
-    "ascendantBodyMap": "string (8-10 sentences)",
-    "headBrainAnalysis": "string (8-10 sentences)",
-    "heartCirculationAnalysis": "string (8-10 sentences)",
-    "digestiveSystemAnalysis": "string (8-10 sentences)",
-    "bonesJointsPostureAnalysis": "string (8-10 sentences)",
-    "skinImmunityRecoveryAnalysis": "string (8-10 sentences)",
-    "nervousSystemAnalysis": "string (8-10 sentences)"
+    "ascendantBodyMap": "string (4-6 sentences)",
+    "headBrainAnalysis": "string (4-6 sentences)",
+    "heartCirculationAnalysis": "string (4-6 sentences)",
+    "digestiveSystemAnalysis": "string (4-6 sentences)",
+    "bonesJointsPostureAnalysis": "string (4-6 sentences)",
+    "skinImmunityRecoveryAnalysis": "string (4-6 sentences)",
+    "nervousSystemAnalysis": "string (4-6 sentences)"
   },
   "deepDiveDiagnosis": {
-    "top5HealthThemesSummary": "string (10-12 sentences)",
-    "digestiveMetabolicDeepDive": "string (10-12 sentences)",
-    "sleepRestorativeDeepDive": "string (10-12 sentences)",
-    "stressAnxietyDeepDive": "string (10-12 sentences)",
-    "circulationCardiacDeepDive": "string (10-12 sentences)",
-    "jointsBonePostureDeepDive": "string (10-12 sentences)",
-    "skinDetoxDeepDive": "string (10-12 sentences)",
-    "recoveryResilienceDeepDive": "string (10-12 sentences)"
+    "top5HealthThemesSummary": "string (5-7 sentences)",
+    "digestiveMetabolicDeepDive": "string (5-7 sentences)",
+    "sleepRestorativeDeepDive": "string (5-7 sentences)",
+    "stressAnxietyDeepDive": "string (5-7 sentences)",
+    "circulationCardiacDeepDive": "string (5-7 sentences)",
+    "jointsBonePostureDeepDive": "string (5-7 sentences)",
+    "skinDetoxDeepDive": "string (5-7 sentences)",
+    "recoveryResilienceDeepDive": "string (5-7 sentences)"
   },
   "sleepPsychologicalAnalysis": {
-    "sleepProfileOverview": "string (8-10 sentences)",
-    "mindActivityStressResponse": "string (8-10 sentences)",
-    "emotionalRegulationPattern": "string (8-10 sentences)",
-    "eveningRoutineDesign": "string (8-10 sentences)",
-    "psychologicalStrengths": "string (8-10 sentences)",
-    "sleepImprovementPlan": "string (8-10 sentences)"
+    "sleepProfileOverview": "string (4-6 sentences)",
+    "mindActivityStressResponse": "string (4-6 sentences)",
+    "emotionalRegulationPattern": "string (4-6 sentences)",
+    "eveningRoutineDesign": "string (4-6 sentences)",
+    "psychologicalStrengths": "string (4-6 sentences)",
+    "sleepImprovementPlan": "string (4-6 sentences)"
   },
   "timingManifestation": {
-    "currentPeriodHealthSummary": "string (8-10 sentences)",
-    "goodTimingWindowsForHealth": "string (8-10 sentences)",
-    "cautionPeriodsForHealth": "string (8-10 sentences)",
-    "longTermLifeRhythm": "string (8-10 sentences)",
-    "manifestationThroughHabits": "string (8-10 sentences)",
-    "personalTimingGuidance": "string (8-10 sentences)"
+    "currentPeriodHealthSummary": "string (4-6 sentences)",
+    "goodTimingWindowsForHealth": "string (4-6 sentences)",
+    "cautionPeriodsForHealth": "string (4-6 sentences)",
+    "longTermLifeRhythm": "string (4-6 sentences)",
+    "manifestationThroughHabits": "string (4-6 sentences)",
+    "personalTimingGuidance": "string (4-6 sentences)"
   },
   "prescribedRemedies": {
-    "remedyPhilosophy": "string (8-10 sentences)",
-    "dailyRemedyRoutine": "string (8-10 sentences)",
-    "weeklyRemedies": "string (8-10 sentences)",
-    "dietLifestyleRemedies": "string (8-10 sentences)",
-    "mantrasAndSpiritualRemedies": "string (8-10 sentences)",
-    "remedyMatrix": "string (8-10 sentences)"
+    "remedyPhilosophy": "string (4-6 sentences)",
+    "dailyRemedyRoutine": "string (4-6 sentences)",
+    "weeklyRemedies": "string (4-6 sentences)",
+    "dietLifestyleRemedies": "string (4-6 sentences)",
+    "mantrasAndSpiritualRemedies": "string (4-6 sentences)",
+    "remedyMatrix": "string (4-6 sentences)"
   },
   "wellnessPlan": {
-    "thirtyDayPlanOverview": "string (8-10 sentences)",
-    "week1Focus": "string (8-10 sentences)",
-    "week2Focus": "string (8-10 sentences)",
-    "week3Focus": "string (8-10 sentences)",
-    "week4Focus": "string (8-10 sentences)",
-    "dailyHealthChecklist": "string (8-10 sentences)",
-    "weeklyHealthChecklist": "string (8-10 sentences)"
+    "thirtyDayPlanOverview": "string (4-6 sentences)",
+    "week1Focus": "string (4-6 sentences)",
+    "week2Focus": "string (4-6 sentences)",
+    "week3Focus": "string (4-6 sentences)",
+    "week4Focus": "string (4-6 sentences)",
+    "dailyHealthChecklist": "string (4-6 sentences)",
+    "weeklyHealthChecklist": "string (4-6 sentences)"
   },
   "bodyRiskScores": {
     "digestiveScore": "string (score e.g. 8/10)",
@@ -430,29 +430,29 @@ EXPECTED JSON SCHEMA:
     "jointsScore": "string (score e.g. 8/10)",
     "skinScore": "string (score e.g. 8/10)",
     "recoveryScore": "string (score e.g. 8/10)",
-    "scoresInterpretation": "string (8-10 sentences)"
+    "scoresInterpretation": "string (4-6 sentences)"
   },
   "redFlagsAndCare": {
-    "whatAstrologyCanSuggest": "string (8-10 sentences)",
-    "medicalCheckupGuidance": "string (8-10 sentences)",
-    "whenToSeeADoctor": "string (8-10 sentences)",
-    "responsibleDisclaimer": "string (8-10 sentences)"
+    "whatAstrologyCanSuggest": "string (4-6 sentences)",
+    "medicalCheckupGuidance": "string (4-6 sentences)",
+    "whenToSeeADoctor": "string (4-6 sentences)",
+    "responsibleDisclaimer": "string (4-6 sentences)"
   },
   "finalSummary": {
-    "top5Strengths": "string (8-10 sentences)",
-    "top5Watchouts": "string (8-10 sentences)",
-    "top5HabitsToStart": "string (8-10 sentences)",
-    "closingInsight": "string (8-10 sentences)",
-    "upliftingClosingMessage": "string (8-10 sentences)"
+    "top5Strengths": "string (4-6 sentences)",
+    "top5Watchouts": "string (4-6 sentences)",
+    "top5HabitsToStart": "string (4-6 sentences)",
+    "closingInsight": "string (4-6 sentences)",
+    "upliftingClosingMessage": "string (4-6 sentences)"
   },
   "affirmationsList": [
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)",
-    "string (4-5 sentences, therapeutic affirmation)"
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)",
+    "string (2-3 sentences, therapeutic affirmation)"
   ],
   "faqAnswers": {
     "strongestHealthTraits": "string (2-3 sentences, personalized to chart)",
@@ -508,7 +508,7 @@ async function generateHealthReportContent(reportInput, userId) {
       messages: [
         {
           role: "system",
-          content: "You are an elite Vedic health astrologer. Generate deeply personalized health astrology reports as strict JSON. Every narrative field must be a detailed, rich narrative matching the target sentence count (typically 8 to 10 sentences for standard sections and 10 to 12 sentences for deep dives). Every affirmation in the affirmationsList must be a detailed, therapeutic narrative of 4 to 5 sentences (60-80 words). Reference actual chart placements — ascendant, Moon sign, nakshatra, planetary positions. Never write literal double quotes inside JSON string values; if you need to write a quote, use single quotes instead. No generic content. No emojis. No markdown wrappers."
+          content: "You are an elite Vedic health astrologer. Generate deeply personalized health astrology reports as strict JSON. Every narrative field must be a detailed, rich narrative matching the target sentence count (typically 4 to 6 sentences for standard sections and 5 to 7 sentences for deep dives). Every affirmation in the affirmationsList must be a therapeutic narrative of 2 to 3 sentences (30-45 words). Reference actual chart placements — ascendant, Moon sign, nakshatra, planetary positions. Never write literal double quotes inside JSON string values; if you need to write a quote, use single quotes instead. No generic content. No emojis. No markdown wrappers."
         },
         {
           role: "user",

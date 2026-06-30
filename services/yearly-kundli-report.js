@@ -550,6 +550,113 @@ async function generateMonthlyPredictions(monthlyPayload, userId) {
 }
 
 // ---------------------------------------------------------------------------
+// HELPER: build FAQ prompt for 36 universal questions
+// ---------------------------------------------------------------------------
+function buildFaqPrompt(year, ctx) {
+  const dataJson = JSON.stringify(ctx);
+  return `You are an elite Vedic and KP astrologer. Generate highly personalised, accurate answers to the following 36 FAQ questions for the year ${year}.
+  
+ASTROLOGICAL CONTEXT (JSON):
+${dataJson}
+
+QUESTIONS TO ANSWER:
+1. What is the overall theme and energy of my year?
+2. Which major planetary influences will shape my life this year?
+3. Which active Dasha and Antardasha will have the greatest impact during this year?
+4. What are the strongest and weakest areas of my life this year?
+5. Which months are likely to be the most favorable and the most challenging?
+6. What does this year indicate about my career or professional growth?
+7. What opportunities for advancement, recognition, or new responsibilities may arise?
+8. What career-related challenges or obstacles should I prepare for?
+9. Which months are most favorable for important professional decisions?
+10. What actions can help maximize career success this year?
+11. What is my overall financial outlook for the year?
+12. What are the best periods for earning, saving, or making financial decisions?
+13. Which financial risks or unnecessary expenses should I avoid?
+14. How stable is my financial growth throughout the year?
+15. What astrological factors will influence my wealth this year?
+16. What does my chart indicate about my physical health this year?
+17. Which health areas require extra attention or preventive care?
+18. During which periods should I be more cautious about my health?
+19. What habits can improve my physical and mental well-being this year?
+20. Which planetary influences are most relevant to my health?
+21. What is the overall outlook for my relationships this year?
+22. How will my communication and emotional connections evolve?
+23. Which periods are favorable for strengthening relationships?
+24. What interpersonal challenges may arise, and how can I manage them?
+25. What planetary influences will affect my relationships this year?
+26. What personal strengths can I develop this year?
+27. Which skills or areas of learning are especially supported?
+28. What limiting patterns or habits should I work to overcome?
+29. How can I make the best use of this year's planetary energies?
+30. What spiritual lessons or karmic themes are active this year?
+31. How will my current Dasha influence my life journey and decisions?
+32. Which planetary transits will create major turning points this year?
+33. Which Yogas or planetary combinations will be especially significant?
+34. Which periods are most auspicious for important life decisions and new beginnings?
+35. Which Vedic remedies, mantras, charities, or spiritual practices are most beneficial for me this year?
+36. What is the final astrological guidance for making the most of this year?
+
+WRITING RULES:
+1. NO emojis under any circumstance.
+2. Every answer: EXACTLY 2-3 complete sentences.
+3. Keep answers strictly grounded in the supplied Kundli data. Reference specific planets, houses, signs, active dasha lords, and ashtakavarga scores to justify your answers. Avoid generic statements or boilerplate advice.
+4. Return STRICT JSON only — no markdown wrappers, no text before/after.
+
+REQUIRED JSON OUTPUT:
+{
+  "answers": [
+    "Answer to Q1 (2-3 sentences)...",
+    "Answer to Q2 (2-3 sentences)...",
+    ...
+    "Answer to Q36 (2-3 sentences)..."
+  ]
+}`;
+}
+
+async function generateFaqAnswers(year, faqContext, userId) {
+  const prompt = buildFaqPrompt(year, faqContext);
+
+  console.log(`[YearlyReportService] Calling OpenAI for 36 FAQ answers...`);
+  const startTime = Date.now();
+  const response = await createChatCompletion(
+    {
+      model: CHAT_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: "You are an elite Vedic and KP astrologer. Return strict JSON containing answers to the 36 questions in an array of strings under key 'answers'. No emojis. No markdown wrappers."
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 4000,
+      response_format: { type: "json_object" }
+    },
+    { feature: "yearly_kundali_report_faq", userId }
+  );
+
+  const duration = Date.now() - startTime;
+  const content = response?.choices?.[0]?.message?.content?.trim();
+  if (!content) {
+    throw new Error(`No FAQ answers response returned from OpenAI`);
+  }
+
+  console.log(`[YearlyReportService] LLM FAQ response received successfully. Time taken: ${duration} ms`);
+
+  try {
+    const parsed = JSON.parse(content);
+    return parsed.answers || [];
+  } catch (err) {
+    console.error(`[YearlyReportService] Failed to parse FAQ GPT response:`, content);
+    throw new Error(`Invalid JSON returned by GPT model for FAQ`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 4. generateYearlyReport()
 //    Runs 12 concurrent OpenAI completions to assemble the entire yearly report.
 // ---------------------------------------------------------------------------
@@ -563,26 +670,12 @@ async function generateYearlyReport(kundli, year, timezone, lat, lng, userReques
     )
   );
 
-  // Run 12 parallel OpenAI API calls
-  const predictions = await Promise.all(
-    monthlyPayloads.map(payload =>
-      generateMonthlyPredictions(payload, userRequest.userId)
-    )
-  );
-
-  // Map predictions and timing data to their respective months
-  const monthlyPredictions = {};
-  const monthlyTimingData = {};
-  MONTHS.forEach((monthName, idx) => {
-    monthlyPredictions[monthName] = predictions[idx];
-    monthlyTimingData[monthName] = monthlyPayloads[idx].timingData;
-  });
-
-  // ── Extract base kundli details ─────────────────────────────────────────
-  const moonSign = kundli?.basicDetails?.moon_sign || kundli?.horoscope?.moon_sign || null;
+  // Extract base details for FAQ context
   let ascendant = kundli?.basicDetails?.ascendant?.sign || kundli?.basicDetails?.ascendant || null;
   if (typeof ascendant === "object" && ascendant !== null) ascendant = ascendant.sign;
   if (!ascendant) ascendant = kundli?.astroDetails?.ascendant?.sign || null;
+
+  const moonSign = kundli?.basicDetails?.moon_sign || kundli?.horoscope?.moon_sign || null;
 
   const dashaObj = kundli.dasha || {};
   const moonPlanet = kundli.planetary?.planets?.Moon || {};
@@ -609,6 +702,99 @@ async function generateYearlyReport(kundli, year, timezone, lat, lng, userReques
     nakshatraPada = panchangObj.nakshatra.pada;
   }
 
+  const currentDasha = extractDashaData(kundli, `${year}-01-01`);
+
+  // Build enhanced placements for FAQ context
+  const bPlanets = kundli.planetary || {};
+  const sunPl = getKeyPlanetPlacement(bPlanets, "Sun");
+  const sunL = sunPl ? getAbsoluteLongitude(sunPl, "Sun") : null;
+  const PLANET_NAMES = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"];
+  
+  const getEnhancedPlacementForFaq = (name) => {
+    const p = getKeyPlanetPlacement(bPlanets, name);
+    p.absoluteLongitude = getAbsoluteLongitude(p, name);
+    p.status = getPlanetaryStatus(name, p, sunL);
+    return p;
+  };
+
+  const bpFaq = {
+    Sun: getEnhancedPlacementForFaq("Sun"),
+    Moon: getEnhancedPlacementForFaq("Moon"),
+    Mars: getEnhancedPlacementForFaq("Mars"),
+    Mercury: getEnhancedPlacementForFaq("Mercury"),
+    Jupiter: getEnhancedPlacementForFaq("Jupiter"),
+    Venus: getEnhancedPlacementForFaq("Venus"),
+    Saturn: getEnhancedPlacementForFaq("Saturn"),
+    Rahu: getEnhancedPlacementForFaq("Rahu"),
+    Ketu: getEnhancedPlacementForFaq("Ketu"),
+  };
+
+  const houseScores = getHouseScores(kundli.ashtakavarga?.sav, ascendant);
+
+  const faqContext = {
+    native: {
+      name: userRequest.fullName,
+      dob: userRequest.dateOfbirth ? new Date(userRequest.dateOfbirth).toISOString().slice(0, 10) : null,
+      tob: userRequest.timeOfbirth,
+      pob: userRequest.placeOfBirth,
+      gender: userRequest.gender,
+    },
+    kundli: {
+      asc: ascendant,
+      moon: moonSign,
+      sun: kundli?.basicDetails?.sun_sign || null,
+      nakshatra: nakshatra,
+      nakshatraLord: nakshatraLord,
+    },
+    dasha: {
+      maha: currentDasha.mahadasha,
+      antar: currentDasha.antardasha,
+      pratya: currentDasha.pratyantardasha ?? null,
+    },
+    birthPlanets: {
+      Sun: { s: bpFaq.Sun.sign, h: bpFaq.Sun.house, status: bpFaq.Sun.status },
+      Moon: { s: bpFaq.Moon.sign, h: bpFaq.Moon.house, status: bpFaq.Moon.status },
+      Mars: { s: bpFaq.Mars.sign, h: bpFaq.Mars.house, status: bpFaq.Mars.status },
+      Mercury: { s: bpFaq.Mercury.sign, h: bpFaq.Mercury.house, status: bpFaq.Mercury.status },
+      Jupiter: { s: bpFaq.Jupiter.sign, h: bpFaq.Jupiter.house, status: bpFaq.Jupiter.status },
+      Venus: { s: bpFaq.Venus.sign, h: bpFaq.Venus.house, status: bpFaq.Venus.status },
+      Saturn: { s: bpFaq.Saturn.sign, h: bpFaq.Saturn.house, status: bpFaq.Saturn.status },
+      Rahu: { s: bpFaq.Rahu.sign, h: bpFaq.Rahu.house, status: bpFaq.Rahu.status },
+      Ketu: { s: bpFaq.Ketu.sign, h: bpFaq.Ketu.house, status: bpFaq.Ketu.status },
+    },
+    houses: houseScores,
+    yogas: (Array.isArray(kundli.yogas) ? kundli.yogas : []).slice(0, 5).map(y => ({ name: y.name, effect: y.effects || y.description || "" })),
+  };
+
+  const faqPromise = generateFaqAnswers(year, faqContext, userRequest.userId);
+
+  // Run 12 parallel OpenAI API calls and FAQ answers in parallel
+  const [predictions, rawFaqAnswers] = await Promise.all([
+    Promise.all(
+      monthlyPayloads.map(payload =>
+        generateMonthlyPredictions(payload, userRequest.userId)
+      )
+    ),
+    faqPromise.catch(err => {
+      console.error("[YearlyReportService] FAQ Generation failed, falling back:", err);
+      return [];
+    })
+  ]);
+
+  let faqAnswers = Array.isArray(rawFaqAnswers) ? rawFaqAnswers : [];
+  while (faqAnswers.length < 36) {
+    faqAnswers.push("Astrological analysis for this area indicates standard trends based on your chart coordinates.");
+  }
+
+  // Map predictions and timing data to their respective months
+  const monthlyPredictions = {};
+  const monthlyTimingData = {};
+  MONTHS.forEach((monthName, idx) => {
+    monthlyPredictions[monthName] = predictions[idx];
+    monthlyTimingData[monthName] = monthlyPayloads[idx].timingData;
+  });
+
+  // ── Extract base kundli details ─────────────────────────────────────────
   const astrologicalDetails = {
     ascendant,
     moonSign,
@@ -642,13 +828,7 @@ async function generateYearlyReport(kundli, year, timezone, lat, lng, userReques
     dasamsaChart: kundli.charts?.D10 || null,
   };
 
-  const currentDasha = extractDashaData(kundli, `${year}-01-01`);
-
   // ── Birth Planetary Table (all 9 planets for PDF page 10) ───────────────
-  const bPlanets = kundli.planetary || {};
-  const sunPl = getKeyPlanetPlacement(bPlanets, "Sun");
-  const sunL = sunPl ? getAbsoluteLongitude(sunPl, "Sun") : null;
-  const PLANET_NAMES = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"];
   const birthPlanetaryTable = PLANET_NAMES.map(name => {
     const p = getKeyPlanetPlacement(bPlanets, name);
     p.absoluteLongitude = getAbsoluteLongitude(p, name);
@@ -747,6 +927,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
     monthlyTimingData,
     introContent,
     disclaimer,
+    faqAnswers,
   };
 }
 

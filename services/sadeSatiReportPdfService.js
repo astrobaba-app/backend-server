@@ -1045,7 +1045,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
       </div>
       <div class="toc-row">
         <span class="toc-num">10</span>
-        <span class="toc-title">Frequently Asked Questions (Personalized FAQ)</span>
+        <span class="toc-title">Sade Sati Insights</span>
         <span class="toc-dots"></span>
         <span class="toc-page">Pages 48-49</span>
       </div>
@@ -2518,7 +2518,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   `)}
 
   <!-- PAGE 48: FAQ PART 1 -->
-  ${createStandardPage(48, "Frequently Asked Questions About Sade Sati - Part 1", "Personalised FAQ", `
+  ${createStandardPage(48, "Sade Sati Insights — Part 1", "Sade Sati Insights", `
     <div class="info-card" style="margin-top: 2mm;">
       <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Am I Currently Under the Influence of Sade Sati?</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">
@@ -2558,7 +2558,7 @@ function generateSadeSatiHtmlTemplate(reportData, userRequest) {
   `)}
 
   <!-- PAGE 49: FAQ PART 2 -->
-  ${createStandardPage(49, "Frequently Asked Questions About Sade Sati - Part 2", "Personalised FAQ", `
+  ${createStandardPage(49, "Sade Sati Insights — Part 2", "Sade Sati Insights", `
     <div class="info-card" style="margin-top: 2mm;">
       <div class="info-card-title" style="color: var(--navy); font-size: 10.5pt; margin-bottom: 1.5mm;">Can Sade Sati Cause Financial Losses or Unexpected Expenses?</div>
       <p style="font-size: 9.8pt; line-height: 1.45; color: var(--text-main); text-align: justify; margin-bottom: 0;">

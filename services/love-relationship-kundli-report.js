@@ -422,18 +422,18 @@ WORD COUNT TARGETS:
 - marriedLife: 600-800 words. Describe daily married life, communication patterns, finances, intimacy, parenting tendencies, family dynamics, conflict resolution, emotional support, and long-term companionship.
 - spousePersonality: 600-800 words. Explore the destined spouse's personality, career, habits, emotional style, values, and lifestyle in rich detail.
 - loveSummary: 400-500 words. Synthesize the entire report into a single cohesive narrative about the native's complete love journey — past patterns, present state, and future direction.
-- faqMarriageType: 2-4 sentences. Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage? Provide a clear answer strictly based on the Kundli data (e.g. 5th, 7th, 9th houses and their lords).
-- faqPartnerMeetingTiming: 2-4 sentences. When Am I Most Likely to Meet My Life Partner and Get Married? Provide a timing forecast referencing the current or upcoming Vimshottari dasha/antardasha or major transits (Jupiter/Saturn).
-- faqMarriageDelays: 2-4 sentences. Will There Be Any Delays or Major Obstacles in My Marriage? Answer strictly based on the placements of Saturn, Rahu, Ketu, or retrogrades impacting the 7th house or its lord.
-- faqPartnerDescription: 2-4 sentences. What Kind of Person Will My Future Partner Be? Describe personality, values, career, and appearance traits based on the 7th house and D9 Navamsa placements.
-- faqHowWhereMeet: 2-4 sentences. How and Where Am I Most Likely to Meet My Future Partner? Give specific likely settings (workplace, social settings, travel, online, etc.) based on the 7th lord's house placement.
-- faqMarriageHappiness: 2-4 sentences. Will My Marriage Be Happy, Stable, and Emotionally Fulfilling? Evaluate the strength of the 7th house, Jupiter, Venus, and D9 dynamics.
-- faqRelationshipsBeforeMarriage: 2-4 sentences. Will I Have More Than One Serious Relationship Before Marriage? Answer based on the 5th house, Venus, and Rahu influences.
-- faqPartnerOrigin: 2-4 sentences. Will My Partner Be From My City, Another State, Abroad, or a Different Community? Evaluate using 7th, 9th, and 12th house placements.
-- faqFamilySupport: 2-4 sentences. Will My Family Support My Relationship and Marriage Decisions? Evaluate based on the 2nd and 4th houses and their lords.
-- faqStrengthsWeaknessesFlags: 2-4 sentences. What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For? Give specific Kundli-based advice.
-- faqFavorablePeriods: 2-4 sentences. What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage? Reference favorable transits and dasha phases.
-- faqKarmicLessonsChanges: 2-4 sentences. What Important Karmic Lessons and Life Changes Will My Marriage Bring? Discuss life-altering changes referencing Rahu, Ketu, or Saturn's connection to the 7th house or lord.
+- faqMarriageType: 2-4 sentences. What does my birth chart reveal about my overall love and relationship journey? Provide a clear answer strictly based on the Kundli data (e.g. 5th, 7th, 9th houses and their lords).
+- faqPartnerMeetingTiming: 2-4 sentences. How do I naturally express love, affection, and emotional commitment? Answer referencing Venus placements, Moon, or specific house lords.
+- faqMarriageDelays: 2-4 sentences. What are my greatest strengths and biggest challenges in relationships? Answer strictly based on placements of planets, aspects, or houses.
+- faqPartnerDescription: 2-4 sentences. What type of relationship dynamic is most compatible with my personality? Address this based on the 7th house and D9 Navamsa placements.
+- faqHowWhereMeet: 2-4 sentences. What qualities should I seek—and avoid—in meaningful relationships? Base this on the 7th lord and benefic/malefic aspects.
+- faqMarriageHappiness: 2-4 sentences. How do I typically handle trust, communication, and emotional conflicts? Evaluate using Moon, Mercury, and the 2nd/4th/8th house dynamics.
+- faqRelationshipsBeforeMarriage: 2-4 sentences. What relationship patterns or emotional habits should I be mindful of? Answer based on the 5th/7th/8th houses, Venus, or Rahu/Ketu.
+- faqPartnerOrigin: 2-4 sentences. Which planetary influences are shaping my relationships during this phase of life? Discuss dasha lords, transits, or progressions.
+- faqFamilySupport: 2-4 sentences. Which time periods are most favorable for strengthening relationships and making important relationship decisions? Reference favorable transits and dasha phases.
+- faqStrengthsWeaknessesFlags: 2-4 sentences. What karmic lessons and personal growth does my birth chart indicate through relationships? Discuss lessons referencing Saturn, Rahu, Ketu, or the 7th house.
+- faqFavorablePeriods: 2-4 sentences. How can I build deeper, healthier, and more fulfilling relationships according to my chart? Provide specific chart-grounded remedies or actions.
+- faqKarmicLessonsChanges: 2-4 sentences. What is the overall astrological guidance for my love and relationship life? Provide a final synthesizing statement based on the chart.
 
 EXPECTED JSON SCHEMA:
 {
@@ -456,18 +456,18 @@ EXPECTED JSON SCHEMA:
   "marriedLife": "string (600-800 words, Married Life daily dynamics divided into 4-5 paragraphs)",
   "spousePersonality": "string (600-800 words, Destined spouse detailed profile divided into 4-5 paragraphs)",
   "loveSummary": "string (400-500 words, Complete Love Journey synthesis divided into 4-5 paragraphs)",
-  "faqMarriageType": "string (2-4 sentences, Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage?)",
-  "faqPartnerMeetingTiming": "string (2-4 sentences, When Am I Most Likely to Meet My Life Partner and Get Married?)",
-  "faqMarriageDelays": "string (2-4 sentences, Will There Be Any Delays or Major Obstacles in My Marriage?)",
-  "faqPartnerDescription": "string (2-4 sentences, What Kind of Person Will My Future Partner Be?)",
-  "faqHowWhereMeet": "string (2-4 sentences, How and Where Am I Most Likely to Meet My Future Partner?)",
-  "faqMarriageHappiness": "string (2-4 sentences, Will My Marriage Be Happy, Stable, and Emotionally Fulfilling?)",
-  "faqRelationshipsBeforeMarriage": "string (2-4 sentences, Will I Have More Than One Serious Relationship Before Marriage?)",
-  "faqPartnerOrigin": "string (2-4 sentences, Will My Partner Be From My City, Another State, Abroad, or a Different Community?)",
-  "faqFamilySupport": "string (2-4 sentences, Will My Family Support My Relationship and Marriage Decisions?)",
-  "faqStrengthsWeaknessesFlags": "string (2-4 sentences, What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For?)",
-  "faqFavorablePeriods": "string (2-4 sentences, What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage?)",
-  "faqKarmicLessonsChanges": "string (2-4 sentences, What Important Karmic Lessons and Life Changes Will My Marriage Bring?)"
+  "faqMarriageType": "string (2-4 sentences, What does my birth chart reveal about my overall love and relationship journey?)",
+  "faqPartnerMeetingTiming": "string (2-4 sentences, How do I naturally express love, affection, and emotional commitment?)",
+  "faqMarriageDelays": "string (2-4 sentences, What are my greatest strengths and biggest challenges in relationships?)",
+  "faqPartnerDescription": "string (2-4 sentences, What type of relationship dynamic is most compatible with my personality?)",
+  "faqHowWhereMeet": "string (2-4 sentences, What qualities should I seek—and avoid—in meaningful relationships?)",
+  "faqMarriageHappiness": "string (2-4 sentences, How do I typically handle trust, communication, and emotional conflicts?)",
+  "faqRelationshipsBeforeMarriage": "string (2-4 sentences, What relationship patterns or emotional habits should I be mindful of?)",
+  "faqPartnerOrigin": "string (2-4 sentences, Which planetary influences are shaping my relationships during this phase of life?)",
+  "faqFamilySupport": "string (2-4 sentences, Which time periods are most favorable for strengthening relationships and making important relationship decisions?)",
+  "faqStrengthsWeaknessesFlags": "string (2-4 sentences, What karmic lessons and personal growth does my birth chart indicate through relationships?)",
+  "faqFavorablePeriods": "string (2-4 sentences, How can I build deeper, healthier, and more fulfilling relationships according to my chart?)",
+  "faqKarmicLessonsChanges": "string (2-4 sentences, What is the overall astrological guidance for my love and relationship life?)"
 }
 `;
 

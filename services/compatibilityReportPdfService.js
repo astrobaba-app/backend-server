@@ -420,6 +420,7 @@ function generateHTMLTemplate(reportRecord) {
       overflow: hidden;
       position: relative;
       box-sizing: border-box;
+      border: 1.5px solid rgba(244, 63, 94, 0.25);
     }
 
     .img-page {
@@ -831,49 +832,68 @@ function generateHTMLTemplate(reportRecord) {
       <div class="narrative-text">${formatNarrativeText(aiData.compatibilityHeatmapText)}</div>
     </div>
 
-    <!-- CHAPTER 22: FAQS (Part 1) -->
-    <div class="draft-chapter" data-id="ch22" data-title="Chapter 22: Frequently Asked Questions" data-subtitle="Personalized answers to common relationship doubts and rules">
+    <!-- CHAPTER 22: FAQS -->
+    <div class="draft-chapter" data-id="ch22" data-title="Compatibility Insights" data-subtitle="Personalized answers to common relationship doubts and rules">
       <div class="narrative-text">
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What is our overall marriage compatibility according to Vedic astrology?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.marriageCompatibility || "Compatibility analysis details based on your Moon sign alignments and planetary configurations."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What is our overall marriage compatibility according to Vedic astrology?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.marriageCompatibility || "Compatibility analysis details based on your Moon sign alignments and planetary configurations."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What are the strongest strengths of our relationship based on our Kundlis?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.relationshipStrengths || "Key strengths indicated by positive planetary configurations and Guna scores."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What are the strongest strengths of our relationship based on our Kundlis?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.relationshipStrengths || "Key strengths indicated by positive planetary configurations and Guna scores."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">Which areas of our relationship may require extra understanding and effort?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.areasForEffort || "Sectors requiring conscious adjustment due to specific planetary imbalances."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">Which areas of our relationship may require extra understanding and effort?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.areasForEffort || "Sectors requiring conscious adjustment due to specific planetary imbalances."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How compatible are we emotionally and mentally as life partners?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.emotionalMentalCompatibility || "Emotional alignment and empathy governed by mutual Moon sign interactions."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How compatible are we emotionally and mentally as life partners?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.emotionalMentalCompatibility || "Emotional alignment and empathy governed by mutual Moon sign interactions."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How well do our communication styles and conflict-handling approaches match?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.communicationConflictStyles || "Communication patterns and mutual conflict resolution influenced by Mercury placements."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How well do our communication styles and conflict-handling approaches match?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.communicationConflictStyles || "Communication patterns and mutual conflict resolution influenced by Mercury placements."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What does our Kundli reveal about long-term married life and relationship stability?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.relationshipStability || "Stability parameters and indicators of relationship duration from the 7th and 8th houses."))}</p>
-      </div>
-    </div>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What does our Kundli reveal about long-term married life and relationship stability?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.relationshipStability || "Stability parameters and indicators of relationship duration from the 7th and 8th houses."))}</p>
+        </div>
 
-    <!-- CHAPTER 22 PART 2: FAQS (Part 2) -->
-    <div class="draft-chapter" data-id="ch22_2" data-title="Chapter 22: Frequently Asked Questions" data-subtitle="Personalized answers to common relationship doubts and rules">
-      <div class="narrative-text">
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How compatible are we in terms of financial goals, spending habits, and wealth management?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.financialCompatibility || "Wealth management approaches and spend/save values based on the 2nd and 11th houses."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How compatible are we in terms of financial goals, spending habits, and wealth management?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.financialCompatibility || "Wealth management approaches and spend/save values based on the 2nd and 11th houses."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What does our Kundli indicate about physical attraction, intimacy, and emotional bonding?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.physicalAttractionIntimacy || "Venus-Mars physics and intimacy indicators governing chemical attraction."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What does our Kundli indicate about physical attraction, intimacy, and emotional bonding?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.physicalAttractionIntimacy || "Venus-Mars physics and intimacy indicators governing chemical attraction."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How well are our family values, parenting approach, and in-law dynamics aligned?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.familyParentingDynamics || "Family bounds, domestic roles, and raising children patterns mapped by key houses."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">How well are our family values, parenting approach, and in-law dynamics aligned?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.familyParentingDynamics || "Family bounds, domestic roles, and raising children patterns mapped by key houses."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">Which Ashtakoot (Guna Milan) factors have the greatest impact on our compatibility score?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.gunaMilanFactors || "Vedic parameters like Nadi, Bhakoot, or Graha Maitri having critical impact on your score."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">Which Ashtakoot (Guna Milan) factors have the greatest impact on our compatibility score?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.gunaMilanFactors || "Vedic parameters like Nadi, Bhakoot, or Graha Maitri having critical impact on your score."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What practical remedies and lifestyle changes can strengthen our relationship harmony?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.remediesLifestyleChanges || "Actionable lifestyle routines, behavioral upgrades, and Vedic remedies to enhance bond."))}</p>
+        <div style="margin-bottom: 4.5mm; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What practical remedies and lifestyle changes can strengthen our relationship harmony?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.remediesLifestyleChanges || "Actionable lifestyle routines, behavioral upgrades, and Vedic remedies to enhance bond."))}</p>
+        </div>
         
-        <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What is the final astrological verdict, and what should we keep in mind before marriage?</h3>
-        <p style="margin-bottom:3mm; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.finalVerdictAdvice || "The direct Vedic summation and protective recommendations before taking marriage steps."))}</p>
+        <div style="margin-bottom: 0; page-break-inside: avoid;">
+          <h3 style="font-size:12.5pt; font-weight:700; color:var(--rose-deep); margin-top:3mm; margin-bottom:1.5mm; text-transform:uppercase; letter-spacing:0.5px;">What is the final astrological verdict, and what should we keep in mind before marriage?</h3>
+          <p style="margin-bottom:0; text-align:justify; font-size:11.5pt; line-height:1.55; color:var(--text-main);">${escapeHtml(safeString(aiData.faqAnswers?.finalVerdictAdvice || "The direct Vedic summation and protective recommendations before taking marriage steps."))}</p>
+        </div>
       </div>
     </div>
 
@@ -1052,8 +1072,7 @@ function generateHTMLTemplate(reportRecord) {
             <div class="toc-item"><span class="toc-chapter">Chapter 19: Relationship Growth Roadmap</span><span class="toc-dots"></span><span>Page \${chStarts.ch19 || 44}</span></div>
             <div class="toc-item"><span class="toc-chapter">Chapter 20: Red Flags &amp; Green Flags</span><span class="toc-dots"></span><span>Page \${chStarts.ch20 || 46}</span></div>
             <div class="toc-item"><span class="toc-chapter">Chapter 21: Compatibility Matrix Summary</span><span class="toc-dots"></span><span>Page \${chStarts.ch21 || 48}</span></div>
-            <div class="toc-item"><span class="toc-chapter">Chapter 22: Frequently Asked Questions</span><span class="toc-dots"></span><span>Page \${chStarts.ch22 || 50}</span></div>
-            <div class="toc-item"><span class="toc-chapter">Chapter 22: Frequently Asked Questions</span><span class="toc-dots"></span><span>Page \${chStarts.ch22_2 || 51}</span></div>
+            <div class="toc-item"><span class="toc-chapter">Compatibility Insights</span><span class="toc-dots"></span><span>Page \${chStarts.ch22 || 50}</span></div>
             <div class="toc-item"><span class="toc-chapter">Chapter 23: The Astrological Verdict</span><span class="toc-dots"></span><span>Page \${chStarts.ch23 || 52}</span></div>
           </div>
         \`;

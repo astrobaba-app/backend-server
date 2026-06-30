@@ -297,7 +297,6 @@ function generateHTMLTemplate(reportData, userRequest) {
   const healthImg = imageToDataUri("health.jpg");
   const relationImg = imageToDataUri("relationship.jpg");
   const remediesImg = imageToDataUri("remedies.jpg");
-  const summaryImg = imageToDataUri("summary.jpg");
 
   const MONTHS = [
     "January", "February", "March", "April", "May", "June",
@@ -610,12 +609,7 @@ function generateHTMLTemplate(reportData, userRequest) {
         `;
     pageNum++;
 
-    // Topic 9: Monthly Summary Cover Page (pageNum)
-    monthsHtml += `
-        <!-- Page ${pageNum}: Monthly Summary Cover -->
-        <div class="img-page-bg bg-summary"></div>
-        `;
-    pageNum++;
+
 
     // Topic 9: Monthly Summary Content (pageNum)
     monthsHtml += `
@@ -704,7 +698,8 @@ function generateHTMLTemplate(reportData, userRequest) {
     .page {
       width: 210mm;
       height: 297mm;
-      padding: 15mm 16mm 12mm 16mm;
+      box-sizing: border-box;
+      padding: 10mm 12mm 8mm 12mm;
       background: #FFFFFF;
       page-break-after: always;
       page-break-inside: avoid;
@@ -712,6 +707,7 @@ function generateHTMLTemplate(reportData, userRequest) {
       flex-direction: column;
       overflow: hidden;
       position: relative;
+      border: 1.5px solid rgba(245, 197, 24, 0.3);
     }
     
     .img-page {
@@ -751,7 +747,6 @@ function generateHTMLTemplate(reportData, userRequest) {
     .bg-health { background-image: url('${healthImg}'); }
     .bg-relation { background-image: url('${relationImg}'); }
     .bg-remedies { background-image: url('${remediesImg}'); }
-    .bg-summary { background-image: url('${summaryImg}'); }
     ${monthCoversCssRules}
     
     .header {
@@ -801,7 +796,7 @@ function generateHTMLTemplate(reportData, userRequest) {
     }
     
     .narrative-block {
-      margin-bottom: 3.5mm;
+      margin-bottom: 2mm;
     }
     
     .narrative-label {
@@ -827,7 +822,7 @@ function generateHTMLTemplate(reportData, userRequest) {
       border: 1.5px solid var(--gold);
       border-radius: 8px;
       padding: 3.5mm 4.5mm;
-      margin-top: 4mm;
+      margin-top: 2mm;
     }
     
     .tldr-label {
@@ -978,7 +973,7 @@ function generateHTMLTemplate(reportData, userRequest) {
       background: linear-gradient(135deg, rgba(245, 197, 24, 0.15) 0%, var(--gold-light) 100%);
       border-radius: 8px;
       padding: 4mm 5mm;
-      margin-bottom: 5mm;
+      margin-bottom: 3mm;
       border: 1.5px solid var(--gold);
       display: flex;
       justify-content: space-between;
@@ -1436,17 +1431,18 @@ function generateHTMLTemplate(reportData, userRequest) {
       </div>
       <div>
         <div class="toc-row"><div class="toc-num">13.</div><div class="toc-title">January ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 16</div></div>
-        <div class="toc-row"><div class="toc-num">14.</div><div class="toc-title">February ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 35</div></div>
-        <div class="toc-row"><div class="toc-num">15.</div><div class="toc-title">March ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 54</div></div>
-        <div class="toc-row"><div class="toc-num">16.</div><div class="toc-title">April ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 73</div></div>
-        <div class="toc-row"><div class="toc-num">17.</div><div class="toc-title">May ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 92</div></div>
-        <div class="toc-row"><div class="toc-num">18.</div><div class="toc-title">June ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 111</div></div>
-        <div class="toc-row"><div class="toc-num">19.</div><div class="toc-title">July ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 130</div></div>
-        <div class="toc-row"><div class="toc-num">20.</div><div class="toc-title">August ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 149</div></div>
-        <div class="toc-row"><div class="toc-num">21.</div><div class="toc-title">September ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 168</div></div>
-        <div class="toc-row"><div class="toc-num">22.</div><div class="toc-title">October ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 187</div></div>
-        <div class="toc-row"><div class="toc-num">23.</div><div class="toc-title">November ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 206</div></div>
-        <div class="toc-row"><div class="toc-num">24.</div><div class="toc-title">December ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 225</div></div>
+        <div class="toc-row"><div class="toc-num">14.</div><div class="toc-title">February ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 34</div></div>
+        <div class="toc-row"><div class="toc-num">15.</div><div class="toc-title">March ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 52</div></div>
+        <div class="toc-row"><div class="toc-num">16.</div><div class="toc-title">April ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 70</div></div>
+        <div class="toc-row"><div class="toc-num">17.</div><div class="toc-title">May ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 88</div></div>
+        <div class="toc-row"><div class="toc-num">18.</div><div class="toc-title">June ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 106</div></div>
+        <div class="toc-row"><div class="toc-num">19.</div><div class="toc-title">July ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 124</div></div>
+        <div class="toc-row"><div class="toc-num">20.</div><div class="toc-title">August ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 142</div></div>
+        <div class="toc-row"><div class="toc-num">21.</div><div class="toc-title">September ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 160</div></div>
+        <div class="toc-row"><div class="toc-num">22.</div><div class="toc-title">October ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 178</div></div>
+        <div class="toc-row"><div class="toc-num">23.</div><div class="toc-title">November ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 196</div></div>
+        <div class="toc-row"><div class="toc-num">24.</div><div class="toc-title">December ${year} Predictions</div><div class="toc-dots"></div><div class="toc-page">Page 214</div></div>
+        <div class="toc-row"><div class="toc-num">25.</div><div class="toc-title">Yearly Report Insights</div><div class="toc-dots"></div><div class="toc-page">Page 232</div></div>
       </div>
     </div>
     <div class="footer">
@@ -1740,7 +1736,91 @@ function generateHTMLTemplate(reportData, userRequest) {
   <!-- PAGES 16 to 243: 12 MONTHS PREDICTIONS -->
   ${monthsHtml}
 
-  <!-- PAGE 244: CLOSING END COVER -->
+  <!-- PAGES 244 to 249: 36 UNIVERSAL FAQ QUESTIONS -->
+  ${(() => {
+    const FAQ_QUESTIONS = [
+      "What is the overall theme and energy of my year?",
+      "Which major planetary influences will shape my life this year?",
+      "Which active Dasha and Antardasha will have the greatest impact during this year?",
+      "What are the strongest and weakest areas of my life this year?",
+      "Which months are likely to be the most favorable and the most challenging?",
+      "What does this year indicate about my career or professional growth?",
+      "What opportunities for advancement, recognition, or new responsibilities may arise?",
+      "What career-related challenges or obstacles should I prepare for?",
+      "Which months are most favorable for important professional decisions?",
+      "What actions can help maximize career success this year?",
+      "What is my overall financial outlook for the year?",
+      "What are the best periods for earning, saving, or making financial decisions?",
+      "Which financial risks or unnecessary expenses should I avoid?",
+      "How stable is my financial growth throughout the year?",
+      "What astrological factors will influence my wealth this year?",
+      "What does my chart indicate about my physical health this year?",
+      "Which health areas require extra attention or preventive care?",
+      "During which periods should I be more cautious about my health?",
+      "What habits can improve my physical and mental well-being this year?",
+      "Which planetary influences are most relevant to my health?",
+      "What is the overall outlook for my relationships this year?",
+      "How will my communication and emotional connections evolve?",
+      "Which periods are favorable for strengthening relationships?",
+      "What interpersonal challenges may arise, and how can I manage them?",
+      "What planetary influences will affect my relationships this year?",
+      "What personal strengths can I develop this year?",
+      "Which skills or areas of learning are especially supported?",
+      "What limiting patterns or habits should I work to overcome?",
+      "How can I make the best use of this year's planetary energies?",
+      "What spiritual lessons or karmic themes are active this year?",
+      "How will my current Dasha influence my life journey and decisions?",
+      "Which planetary transits will create major turning points this year?",
+      "Which Yogas or planetary combinations will be especially significant?",
+      "Which periods are most auspicious for important life decisions and new beginnings?",
+      "Which Vedic remedies, mantras, charities, or spiritual practices are most beneficial for me this year?",
+      "What is the final astrological guidance for making the most of this year?"
+    ];
+
+    let faqHtml = "";
+    const faqAnswers = reportData.faqAnswers || [];
+    
+    for (let pageIdx = 0; pageIdx < 6; pageIdx++) {
+      const startQ = pageIdx * 6;
+      const endQ = startQ + 6;
+      const pageQs = FAQ_QUESTIONS.slice(startQ, endQ);
+      
+      faqHtml += `
+        <!-- Page ${pageNum}: Universal FAQ Part ${pageIdx + 1} -->
+        <div class="page">
+          <div class="header">
+            <div class="header-eyebrow">
+              <div class="eyebrow-line"></div>
+              <span class="eyebrow-text">Yearly Insights</span>
+            </div>
+            <h1 class="header-title">Yearly Report Insights</h1>
+            <p class="header-subtitle">Part ${pageIdx + 1} of 6 — Answers to your yearly celestial questions</p>
+            <div class="header-gradient"></div>
+          </div>
+          <div style="flex:1; display:flex; flex-direction:column; gap:2mm; justify-content:flex-start;">
+            ${pageQs.map((q, idx) => {
+              const qNum = startQ + idx + 1;
+              const ans = faqAnswers[startQ + idx] || "Astrological analysis for this area indicates standard trends based on your chart coordinates.";
+              return `
+                <div style="background:#FFFFFF; border:1px solid #E5E7EB; border-radius:8px; padding:3.5mm 4.0mm; margin-bottom:2mm;">
+                  <div style="font-size:10pt; font-weight:700; color:var(--dark-blue); margin-bottom:1.5mm;">${qNum}. ${escapeHtml(q)}</div>
+                  <div style="font-size:9.5pt; color:#374151; line-height:1.55; text-align:justify;">${escapeHtml(ans)}</div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div class="footer">
+            <span class="footer-left">Vedic Astrology Roadmap ${year} · ${escapeHtml(fullName)}</span>
+            <span class="footer-right">Page ${pageNum}</span>
+          </div>
+        </div>
+      `;
+      pageNum++;
+    }
+    return faqHtml;
+  })()}
+
+  <!-- PAGE ${pageNum}: CLOSING END COVER -->
   <div class="img-page-bg bg-end" style="page-break-after: avoid;"></div>
 
 </body>

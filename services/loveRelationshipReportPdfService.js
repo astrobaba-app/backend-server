@@ -290,6 +290,52 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
     } catch (e) { return fallback; }
   };
 
+  const getSentenceFallback = (text, numSentences = 2) => {
+    if (!text) return "";
+    const clean = text.replace(/<[^>]*>/g, "").replace(/\n/g, " ").trim();
+    const sentences = clean.match(/[^.!?]+[.!?]+(\s|$)/g) || [clean];
+    return sentences.slice(0, numSentences).join(" ").trim();
+  };
+
+  const getFaqVal = (key, questionNum, fallbackText = "") => {
+    const val = getVal(key, "").trim();
+    if (val && val.length > 10) {
+      return val;
+    }
+
+    switch (questionNum) {
+      case 1:
+        return getSentenceFallback(getVal("loveSummary") || getVal("marriageDestiny"), 3);
+      case 2:
+        return getSentenceFallback(getVal("howYouExpressLove") || getVal("loveDNAEmotionalWiring"), 3);
+      case 3:
+        return getSentenceFallback(getVal("relationshipShadow") || getVal("currentEmotionalBlocks"), 3);
+      case 4:
+        return getSentenceFallback(getVal("soulmatProfile") || getVal("loveDNAEmotionalWiring"), 3);
+      case 5: {
+        const seek = getSentenceFallback(getVal("greenFlags"), 2);
+        const avoid = getSentenceFallback(getVal("redFlags"), 2);
+        return (seek + " " + avoid).trim() || "Seek partners who align with your core values, communication style, and emotional readiness. Avoid relationships with partners who show high emotional volatility.";
+      }
+      case 6:
+        return getSentenceFallback(getVal("howYouExpressLove") || getVal("loveSummary"), 3);
+      case 7:
+        return getSentenceFallback(getVal("relationshipShadow") || getVal("karmicLoveLessons"), 3);
+      case 8:
+        return `Your relationships in this phase are shaped by the running dasha of ${escapeHtml(astro.mahadasha || "the primary dasha lord")} and sub-dasha of ${escapeHtml(astro.antardasha || "the antardasha lord")}. These planetary cycles focus your awareness on Venus and 7th house dynamics, encouraging you to seek balance and commitment.`;
+      case 9:
+        return `Favorable windows for strengthening relationships are indicated during the auspicious transits of Jupiter and Venus over your natal houses. The current dasha phase under ${escapeHtml(astro.mahadasha || "the dasha lord")} provides favorable periods for deep emotional commitment.`;
+      case 10:
+        return getSentenceFallback(getVal("karmicLoveLessons") || getVal("relationshipShadow"), 3);
+      case 11:
+        return getSentenceFallback(getVal("loveSummary") || getVal("loveDNAEmotionalWiring"), 3);
+      case 12:
+        return getSentenceFallback(getVal("loveSummary") || getVal("marriageDestiny"), 3);
+      default:
+        return fallbackText;
+    }
+  };
+
   // Load images
   const coverImg = imageToDataUri("lovereportfirstpage.jpg");
   const loveDNAImg = imageToDataUri("THELOVEDNA&EMOTIONALWIRING.jpg");
@@ -422,34 +468,34 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
       </div>`;
   };
 
-  const renderFaqBlock = (question, answerKey) => {
-    const answer = getVal(answerKey, "Analysis based on your planetary placements is being compiled.");
+  const renderFaqBlock = (question, answerKey, questionNum) => {
+    const answer = getFaqVal(answerKey, questionNum, "Analysis based on your planetary placements is being compiled.");
     return `
-      <div style="margin-bottom: 4.5mm; padding-bottom: 3.5mm; border-bottom: 1px solid rgba(219,39,119,0.12);">
-        <div style="font-size: 11pt; font-weight: 700; color: var(--pink-deep); margin-bottom: 1.8mm; line-height: 1.4;">Q: ${escapeHtml(question)}</div>
-        <p style="font-size: 10.5pt; line-height: 1.55; color: var(--text-main); text-align: justify; font-style: normal; margin-bottom: 0;">${escapeHtml(answer)}</p>
+      <div style="margin-bottom: 3.5mm; padding-bottom: 2.5mm; border-bottom: 1px solid rgba(219,39,119,0.12); page-break-inside: avoid;">
+        <div style="font-size: 11pt; font-weight: 700; color: var(--pink-deep); margin-bottom: 1.5mm; line-height: 1.4;">Q: ${escapeHtml(question)}</div>
+        <p style="font-size: 10pt; line-height: 1.5; color: var(--text-main); text-align: justify; font-style: normal; margin-bottom: 0;">${escapeHtml(answer)}</p>
       </div>`;
   };
 
   const faqPage1Content = `
     <div style="display: flex; flex-direction: column; gap: 1mm; height: 100%;">
-      ${renderFaqBlock("Will I Have a Love Marriage, Arranged Marriage, or Love-Cum-Arranged Marriage?", "faqMarriageType")}
-      ${renderFaqBlock("When Am I Most Likely to Meet My Life Partner and Get Married?", "faqPartnerMeetingTiming")}
-      ${renderFaqBlock("Will There Be Any Delays or Major Obstacles in My Marriage?", "faqMarriageDelays")}
-      ${renderFaqBlock("What Kind of Person Will My Future Partner Be? (Personality, values, career, lifestyle, appearance, etc.)", "faqPartnerDescription")}
-      ${renderFaqBlock("How and Where Am I Most Likely to Meet My Future Partner? (College, workplace, family, travel, online, another city, etc.)", "faqHowWhereMeet")}
-      ${renderFaqBlock("Will My Marriage Be Happy, Stable, and Emotionally Fulfilling?", "faqMarriageHappiness")}
+      ${renderFaqBlock("What does my birth chart reveal about my overall love and relationship journey?", "faqMarriageType", 1)}
+      ${renderFaqBlock("How do I naturally express love, affection, and emotional commitment?", "faqPartnerMeetingTiming", 2)}
+      ${renderFaqBlock("What are my greatest strengths and biggest challenges in relationships?", "faqMarriageDelays", 3)}
+      ${renderFaqBlock("What type of relationship dynamic is most compatible with my personality?", "faqPartnerDescription", 4)}
+      ${renderFaqBlock("What qualities should I seek—and avoid—in meaningful relationships?", "faqHowWhereMeet", 5)}
+      ${renderFaqBlock("How do I typically handle trust, communication, and emotional conflicts?", "faqMarriageHappiness", 6)}
     </div>
   `;
 
   const faqPage2Content = `
     <div style="display: flex; flex-direction: column; gap: 1mm; height: 100%;">
-      ${renderFaqBlock("Will I Have More Than One Serious Relationship Before Marriage?", "faqRelationshipsBeforeMarriage")}
-      ${renderFaqBlock("Will My Partner Be From My City, Another State, Abroad, or a Different Community? (Including long-distance/intercaste possibilities.)", "faqPartnerOrigin")}
-      ${renderFaqBlock("Will My Family Support My Relationship and Marriage Decisions?", "faqFamilySupport")}
-      ${renderFaqBlock("What Are My Biggest Relationship Strengths, Weaknesses, and the Green & Red Flags I Should Watch For?", "faqStrengthsWeaknessesFlags")}
-      ${renderFaqBlock("What Are the Most Favorable Time Periods for Love, Commitment, Engagement, and Marriage?", "faqFavorablePeriods")}
-      ${renderFaqBlock("What Important Karmic Lessons and Life Changes Will My Marriage Bring? (Including its impact on personal growth, career, and finances.)", "faqKarmicLessonsChanges")}
+      ${renderFaqBlock("What relationship patterns or emotional habits should I be mindful of?", "faqRelationshipsBeforeMarriage", 7)}
+      ${renderFaqBlock("Which planetary influences are shaping my relationships during this phase of life?", "faqPartnerOrigin", 8)}
+      ${renderFaqBlock("Which time periods are most favorable for strengthening relationships and making important relationship decisions?", "faqFamilySupport", 9)}
+      ${renderFaqBlock("What karmic lessons and personal growth does my birth chart indicate through relationships?", "faqStrengthsWeaknessesFlags", 10)}
+      ${renderFaqBlock("How can I build deeper, healthier, and more fulfilling relationships according to my chart?", "faqFavorablePeriods", 11)}
+      ${renderFaqBlock("What is the overall astrological guidance for my love and relationship life?", "faqKarmicLessonsChanges", 12)}
     </div>
   `;
 
@@ -499,6 +545,7 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
       overflow: hidden;
       position: relative;
       box-sizing: border-box;
+      border: 1.5px solid rgba(219, 39, 119, 0.25);
     }
 
     .img-page-bg {
@@ -797,10 +844,10 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
     ${narrativePage("ch_summary", "Summary & Integration", "Your Complete Love Journey", "loveSummary")}
 
     <!-- FAQ PAGES -->
-    <div class="draft-static" data-id="ch_faq1" data-eyebrow="Astrological Q&A" data-title="Frequently Asked Love & Marriage Questions — Part 1">
+    <div class="draft-static" data-id="ch_faq1" data-eyebrow="Relationship Insights" data-title="Love & Relationship Insights — Part 1">
       ${faqPage1Content}
     </div>
-    <div class="draft-static" data-id="ch_faq2" data-eyebrow="Astrological Q&A" data-title="Frequently Asked Love & Marriage Questions — Part 2">
+    <div class="draft-static" data-id="ch_faq2" data-eyebrow="Relationship Insights" data-title="Love & Relationship Insights — Part 2">
       ${faqPage2Content}
     </div>
 
@@ -840,12 +887,13 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
 
       const createPage = (contentHtml, pageNum, eyebrow = "", title = "", subtitle = "") => {
         const hasHeader = eyebrow || title;
+        const isFaqPage2 = title.indexOf("Part 2") !== -1;
         const headerHtml = hasHeader ? \`
           <div class="header">
             <div class="header-eyebrow"><div class="eyebrow-line"></div><span class="eyebrow-text">\${eyebrow}</span></div>
             <h1 class="header-title">\${title}</h1>
             \${subtitle ? \`<p class="header-subtitle">\${subtitle}</p>\` : ""}
-            <div class="header-gradient" style="margin-bottom: 6mm;"></div>
+            <div class="header-gradient" style="margin-bottom: \${isFaqPage2 ? '3.5mm' : '6mm'};"></div>
           </div>
         \` : \`
           <div class="header" style="margin-bottom: 4mm;">
@@ -921,7 +969,7 @@ function generateLoveRelationshipHtmlTemplate(reportData, userRequest) {
                   <div class="toc-row"><span class="toc-num">14</span><span class="toc-title">Marriage Destiny · Married Life · Spouse Personality</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgMarriage"></span></div>
                   <div class="toc-row"><span class="toc-num">15</span><span class="toc-title">Planetary Positions &amp; Dignities</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgPlanetData"></span></div>
                   <div class="toc-row"><span class="toc-num">16</span><span class="toc-title">Summary &amp; Your Complete Love Journey</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgSummaryPage"></span></div>
-                  <div class="toc-row"><span class="toc-num">17</span><span class="toc-title">Frequently Asked Love &amp; Marriage Questions</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgFaq1"></span></div>
+                  <div class="toc-row"><span class="toc-num">17</span><span class="toc-title">Love &amp; Relationship Insights</span><span class="toc-dots"></span><span class="toc-page" id="toc-pgFaq1"></span></div>
                 </div>
                 <div class="footer">
                   <span class="footer-left">Love &amp; Relationship Report · \${escapeHtml("${fullName}")}</span>
