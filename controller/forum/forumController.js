@@ -74,6 +74,30 @@ const normalizeTags = (value) => {
   return [...new Set(rawTags.map((tag) => String(tag).trim()).filter(Boolean))].slice(0, 8);
 };
 
+const normalizeImages = (value) => {
+  if (typeof value === "undefined" || value === null) {
+    return null;
+  }
+
+  let rawImages = value;
+  if (typeof rawImages === "string") {
+    try {
+      rawImages = JSON.parse(rawImages);
+    } catch {
+      rawImages = [rawImages];
+    }
+  }
+
+  if (!Array.isArray(rawImages)) {
+    return [];
+  }
+
+  return rawImages
+    .map((image) => String(image || "").trim())
+    .filter(Boolean)
+    .slice(0, 5);
+};
+
 const createSegment = (sortOrder) => String(sortOrder).padStart(6, "0");
 
 const formatPost = (post, likedPostIds = new Set()) => {
@@ -916,6 +940,8 @@ const updateForumPost = async (req, res) => {
     const { postId } = req.params;
     const { title, description } = req.body;
     const tags = normalizeTags(req.body.tags);
+    const existingImages = normalizeImages(req.body.existingImages);
+    const uploadedImages = req.fileUrls && req.fileUrls.length > 0 ? req.fileUrls : [];
     const normalizedTitle = String(title || "").trim();
     const normalizedDescription = String(description || "").trim();
 
@@ -952,10 +978,17 @@ const updateForumPost = async (req, res) => {
       description: normalizedDescription,
     });
 
+    const nextImages =
+      existingImages !== null || uploadedImages.length > 0
+        ? [...(existingImages || []), ...uploadedImages].slice(0, 5)
+        : post.images || [];
+
     await post.update({
       title: normalizedTitle,
       description: normalizedDescription,
       tags,
+      image: nextImages[0] || null,
+      images: nextImages,
       contentFingerprint: fingerprint.hash,
       titleNormalized: fingerprint.normalizedTitle,
       contentEmbedding: null,

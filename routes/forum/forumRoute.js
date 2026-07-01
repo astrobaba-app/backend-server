@@ -24,7 +24,7 @@ const { array } = require("../../config/uploadConfig/supabaseUpload");
 router.get("/posts", optionalAuthentication(), getForumPosts);
 router.get("/my-posts", checkForAuthenticationCookie(), getMyForumPosts);
 router.post("/posts", checkForAuthenticationCookie(), ...array("images", 5), createForumPost);
-router.put("/posts/:postId", checkForAuthenticationCookie(), updateForumPost);
+router.put("/posts/:postId", checkForAuthenticationCookie(), ...array("images", 5), updateForumPost);
 router.delete("/posts/:postId", checkForAuthenticationCookie(), deleteForumPost);
 router.get("/posts/:postId", optionalAuthentication(), getForumPostById);
 router.post("/posts/:postId/like", checkForAuthenticationCookie(), toggleForumPostLike);

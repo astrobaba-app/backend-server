@@ -8,10 +8,10 @@ const createReview = async (req, res) => {
     const userId = req.user.id;
     const { astrologerId, rating, review } = req.body;
 
-    if (!astrologerId || !rating || !review) {
+    if (!astrologerId || !rating) {
       return res.status(400).json({
         success: false,
-        message: "Astrologer ID, rating, and review are required",
+        message: "Astrologer ID and rating are required",
       });
     }
 
@@ -47,7 +47,7 @@ const createReview = async (req, res) => {
       userId,
       astrologerId,
       rating,
-      review,
+      review: typeof review === "string" ? review : "",
     });
 
     // Update astrologer's average rating
@@ -268,7 +268,9 @@ const updateReview = async (req, res) => {
       }
       updateData.rating = rating;
     }
-    if (review) updateData.review = review;
+    if (review !== undefined) {
+      updateData.review = typeof review === "string" ? review : "";
+    }
 
     await existingReview.update(updateData);
 

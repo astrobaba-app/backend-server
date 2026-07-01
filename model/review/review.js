@@ -41,7 +41,7 @@ const Review = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: false,
       validate: {
-        len: [10, 1000],
+        len: [0, 1000],
       },
     },
     reply: {
