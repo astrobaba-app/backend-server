@@ -1,5 +1,6 @@
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
+const User = require("../../model/user/userAuth");
 const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
 const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
@@ -30,10 +31,21 @@ console.log('[Razorpay] Initialization status:', {
   keyIdPrefix: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 8) + '...' : 'NOT SET'
 });
 
+const PAYMENT_DEBUG_LOGS = process.env.PAYMENT_DEBUG_LOGS === "true";
+const paymentDebug = (...args) => {
+  if (PAYMENT_DEBUG_LOGS) {
+    console.log(...args);
+  }
+};
+
 const toAmount = (value) => {
   const parsed = parseFloat(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+const WALLET_RECHARGE_GST_RATE = 0.18;
+
+const roundMoney = (value) => Math.round(toAmount(value) * 100) / 100;
 
 const toEnvPrice = (value, fallback) => {
   const parsed = parseFloat(value);
@@ -95,22 +107,37 @@ const getWalletBalance = async (req, res) => {
 const createRechargeOrder = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { amount, couponCode } = req.body;
+    const { amount, couponCode, billingState } = req.body;
+    const rechargeAmount = roundMoney(amount);
 
-    console.log('=== CREATE RECHARGE ORDER START ===');
-    console.log('User ID:', userId);
-    console.log('Amount:', amount);
-    console.log('Coupon Code:', couponCode);
+    paymentDebug('=== CREATE RECHARGE ORDER START ===');
+    paymentDebug('User ID:', userId);
+    paymentDebug('Amount:', amount);
+    paymentDebug('Coupon Code:', couponCode);
 
-    if (!amount || amount < 1) {
-      console.log('ERROR: Invalid amount', amount);
+    if (!rechargeAmount || rechargeAmount < 1) {
+      paymentDebug('ERROR: Invalid amount', amount);
       return res.status(400).json({
         success: false,
         message: "Amount must be at least ₹1",
       });
     }
 
-    let finalAmount = parseFloat(amount);
+    const user = await User.findByPk(userId, { attributes: ["id"] });
+
+    if (!user) {
+      console.warn("[Wallet] Recharge attempted with stale user token", {
+        userId,
+        orderAmount: rechargeAmount,
+      });
+
+      return res.status(401).json({
+        success: false,
+        message: "Your session has expired. Please login again before recharging your wallet.",
+      });
+    }
+
+    let finalAmount = rechargeAmount;
     let discountAmount = 0;
     let appliedCoupon = null;
 
@@ -146,7 +173,7 @@ const createRechargeOrder = async (req, res) => {
       }
 
       // Check minimum recharge amount
-      if (amount < parseFloat(coupon.minRechargeAmount)) {
+      if (rechargeAmount < parseFloat(coupon.minRechargeAmount)) {
         return res.status(400).json({
           success: false,
           message: `Minimum recharge amount is ₹${coupon.minRechargeAmount} for this coupon`,
@@ -179,7 +206,7 @@ const createRechargeOrder = async (req, res) => {
 
       // Calculate discount
       if (coupon.discountType === "percentage") {
-        discountAmount = (amount * parseFloat(coupon.discountValue)) / 100;
+        discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
         if (coupon.maxDiscount) {
           discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
         }
@@ -187,8 +214,8 @@ const createRechargeOrder = async (req, res) => {
         discountAmount = parseFloat(coupon.discountValue);
       }
 
-      discountAmount = Math.min(discountAmount, amount);
-      finalAmount = amount - discountAmount;
+      discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
+      finalAmount = roundMoney(rechargeAmount - discountAmount);
 
       appliedCoupon = {
         id: coupon.id,
@@ -203,6 +230,13 @@ const createRechargeOrder = async (req, res) => {
       wallet = await Wallet.create({ userId });
     }
 
+    const gstAmount = roundMoney(finalAmount * WALLET_RECHARGE_GST_RATE);
+    const payableAmount = roundMoney(finalAmount + gstAmount);
+    const normalizedBillingState =
+      typeof billingState === "string" && billingState.trim()
+        ? billingState.trim()
+        : null;
+
     // Create Razorpay order with final amount
     const timestamp = Date.now().toString().slice(-8);
     const userIdShort = userId.toString().length > 10 ? 
@@ -211,22 +245,32 @@ const createRechargeOrder = async (req, res) => {
     const receipt = `rcpt_${userIdShort}_${timestamp}`;
     
     const options = {
-      amount: Math.round(finalAmount * 100), // Final amount in paise
+      amount: Math.round(payableAmount * 100), // Payable amount in paise, including GST
       currency: "INR",
       receipt: receipt,
       notes: {
         userId,
         walletId: wallet.id,
         purpose: "wallet_recharge",
-        originalAmount: amount,
+        originalAmount: rechargeAmount,
         discountAmount: discountAmount,
+        walletCreditAmount: finalAmount,
+        gstRate: WALLET_RECHARGE_GST_RATE,
+        gstAmount,
+        payableAmount,
+        billingState: normalizedBillingState,
         couponCode: couponCode || null,
       },
     };
 
-    console.log('Creating Razorpay order with options:', JSON.stringify(options, null, 2));
+    paymentDebug('Creating Razorpay order:', {
+      amount: options.amount,
+      currency: options.currency,
+      receipt: options.receipt,
+      userId,
+    });
     const razorpayOrder = await razorpay.orders.create(options);
-    console.log('Razorpay order created successfully:', razorpayOrder.id);
+    paymentDebug('Razorpay order created successfully:', razorpayOrder.id);
 
     // Create pending transaction
     const transaction = await WalletTransaction.create({
@@ -240,6 +284,15 @@ const createRechargeOrder = async (req, res) => {
       description: couponCode 
         ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
         : `Wallet recharge of ₹${amount}`,
+      metadata: {
+        originalAmount: rechargeAmount,
+        discountAmount,
+        walletCreditAmount: finalAmount,
+        gstRate: WALLET_RECHARGE_GST_RATE,
+        gstAmount,
+        payableAmount,
+        billingState: normalizedBillingState,
+      },
       balanceBefore: wallet.balance,
     });
 
@@ -248,25 +301,28 @@ const createRechargeOrder = async (req, res) => {
       await CouponUsage.create({
         couponId: appliedCoupon.id,
         userId,
-        rechargeAmount: amount,
+        rechargeAmount,
         discountAmount,
-        finalAmount,
+        finalAmount: payableAmount,
         orderId: razorpayOrder.id,
         status: "pending",
       });
     }
 
-    console.log('Transaction created in DB:', transaction.id);
-    console.log('=== CREATE RECHARGE ORDER SUCCESS ===');
+    paymentDebug('Transaction created in DB:', transaction.id);
+    paymentDebug('=== CREATE RECHARGE ORDER SUCCESS ===');
 
     res.status(201).json({
       success: true,
       message: "Recharge order created successfully",
       data: {
         orderId: razorpayOrder.id,
-        originalAmount: parseFloat(amount),
+        originalAmount: rechargeAmount,
         discountAmount: parseFloat(discountAmount),
         finalAmount: parseFloat(finalAmount),
+        gstRate: WALLET_RECHARGE_GST_RATE,
+        gstAmount: parseFloat(gstAmount),
+        payableAmount: parseFloat(payableAmount),
         amountInPaise: razorpayOrder.amount,
         currency: razorpayOrder.currency,
         transactionId: transaction.id,
@@ -294,14 +350,14 @@ const verifyRecharge = async (req, res) => {
     const userId = req.user.id;
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
-    console.log('=== VERIFY RECHARGE START ===');
-    console.log('User ID:', userId);
-    console.log('Order ID:', razorpay_order_id);
-    console.log('Payment ID:', razorpay_payment_id);
-    console.log('Signature received:', razorpay_signature ? 'Yes' : 'No');
+    paymentDebug('=== VERIFY RECHARGE START ===');
+    paymentDebug('User ID:', userId);
+    paymentDebug('Order ID:', razorpay_order_id);
+    paymentDebug('Payment ID:', razorpay_payment_id);
+    paymentDebug('Signature received:', razorpay_signature ? 'Yes' : 'No');
 
     if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      console.log('ERROR: Missing verification parameters');
+      paymentDebug('ERROR: Missing verification parameters');
       return res.status(400).json({
         success: false,
         message: "Missing payment verification parameters",
@@ -309,15 +365,15 @@ const verifyRecharge = async (req, res) => {
     }
 
     // Verify signature
-    console.log('Verifying signature...');
+    paymentDebug('Verifying signature...');
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
 
-    console.log('Generated signature:', generatedSignature.substring(0, 10) + '...');
-    console.log('Received signature:', razorpay_signature.substring(0, 10) + '...');
-    console.log('Signatures match:', generatedSignature === razorpay_signature);
+    paymentDebug('Generated signature:', generatedSignature.substring(0, 10) + '...');
+    paymentDebug('Received signature:', razorpay_signature.substring(0, 10) + '...');
+    paymentDebug('Signatures match:', generatedSignature === razorpay_signature);
 
     if (generatedSignature !== razorpay_signature) {
       // Log invalid signature attempt
@@ -333,7 +389,7 @@ const verifyRecharge = async (req, res) => {
       });
     }
 
-    console.log('✓ Signature verified successfully');
+    paymentDebug('Signature verified successfully');
 
     // Find transaction
     const transaction = await WalletTransaction.findOne({
@@ -432,7 +488,7 @@ const verifyRecharge = async (req, res) => {
         }
       }
 
-      console.log("Wallet recharge verified successfully", {
+      paymentDebug("Wallet recharge verified successfully", {
         userId,
         transactionId: transaction.id,
         amount: transaction.amount,
