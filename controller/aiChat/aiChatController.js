@@ -25,8 +25,47 @@ const {
 } = require("../../services/aiChatInterestService");
 const {
   generateAiChatEngineResponse,
+  upsertAiChatEngineKundliCache,
+  clearAiChatEngineKundliCache,
 } = require("../../services/aiChatEngineClient");
 
+const AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS = new Set();
+
+const cacheAiChatKundliContext = async (sessionId, kundli, userRequest) => {
+  if (!sessionId || (!kundli && !userRequest)) return null;
+
+  try {
+    return await upsertAiChatEngineKundliCache(sessionId, {
+      kundli: kundli?.toJSON ? kundli.toJSON() : kundli,
+      user_request: userRequest?.toJSON ? userRequest.toJSON() : userRequest,
+    });
+  } catch (error) {
+    const status = error?.response?.status;
+    if (status === 404) {
+      AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.add(sessionId);
+      console.warn(
+        `AI chat engine Kundli cache endpoint not available for session ${sessionId}; using per-request Kundli fallback until engine restarts.`
+      );
+    } else {
+      console.error("AI chat engine Kundli cache upsert failed:", error?.message || error);
+    }
+    return null;
+  }
+};
+
+const clearAiChatKundliContext = async (sessionId) => {
+  if (!sessionId) return;
+
+  AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.delete(sessionId);
+
+  try {
+    await clearAiChatEngineKundliCache(sessionId);
+  } catch (error) {
+    if (error?.response?.status !== 404) {
+      console.error("AI chat engine Kundli cache clear failed:", error?.message || error);
+    }
+  }
+};
 const CHAT_MODEL = process.env.OPENAI_CHAT_MODEL || "gpt-4o-mini";
 const AI_CHAT_ENGINE_MAX_BUBBLES = (() => {
   const parsed = Number(process.env.AI_CHAT_ENGINE_MAX_BUBBLES || 5);
@@ -228,6 +267,7 @@ const completeAiChatSessionWithBilling = async (
 
     await dbTransaction.commit();
     committed = true;
+    await clearAiChatKundliContext(lockedSession.id);
 
     return {
       session: lockedSession,
@@ -2001,6 +2041,7 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
   }
 
   await session.update({ isActive: false });
+  await clearAiChatKundliContext(sessionId);
   console.log("[InterestCohort][AI] AI chat session ended", {
     userId,
     sessionId,
@@ -2573,6 +2614,10 @@ const createAiGreetingMessages = async ({
   const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
   let engineResponse = null;
 
+  if (kundli || userRequest) {
+    await cacheAiChatKundliContext(session.id, kundli, userRequest);
+  }
+
   try {
     engineResponse = await generateAiChatEngineResponse({
       session_id: session.id,
@@ -2589,8 +2634,12 @@ const createAiGreetingMessages = async ({
         name: userName || null,
       },
       history: [],
-      kundli: kundli?.toJSON ? kundli.toJSON() : kundli,
-      user_request: userRequest?.toJSON ? userRequest.toJSON() : userRequest,
+      ...(AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.has(session.id)
+        ? {
+            kundli: kundli?.toJSON ? kundli.toJSON() : kundli,
+            user_request: userRequest?.toJSON ? userRequest.toJSON() : userRequest,
+          }
+        : {}),
       fast_mode: true,
       max_bubbles: Math.min(AI_CHAT_ENGINE_MAX_BUBBLES, 3),
       conversation_stage: "greeting",
@@ -2699,18 +2748,22 @@ const sendMessageV3 = async (req, res) => {
     });
     previousMessages.reverse();
 
-    let kundliJson = null;
-    let userRequestJson = null;
-    if (session.kundliUserRequestId) {
+    let fallbackKundliPayload = null;
+    if (
+      AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.has(sessionId) &&
+      session.kundliUserRequestId
+    ) {
       try {
         const [kundliRecord, userRequestRecord] = await Promise.all([
           Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
           UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
         ]);
-        kundliJson = kundliRecord?.toJSON ? kundliRecord.toJSON() : null;
-        userRequestJson = userRequestRecord?.toJSON ? userRequestRecord.toJSON() : null;
+        fallbackKundliPayload = {
+          kundli: kundliRecord?.toJSON ? kundliRecord.toJSON() : null,
+          user_request: userRequestRecord?.toJSON ? userRequestRecord.toJSON() : null,
+        };
       } catch (kundliErr) {
-        console.error("Failed to load Kundli context for AI chat engine:", kundliErr.message);
+        console.error("Failed to load fallback Kundli context for AI chat engine:", kundliErr.message);
       }
     }
 
@@ -2737,8 +2790,7 @@ const sendMessageV3 = async (req, res) => {
             role: message.role,
             content: message.content,
           })),
-        kundli: kundliJson,
-        user_request: userRequestJson,
+        ...(fallbackKundliPayload || {}),
         fast_mode: fastMode,
         max_bubbles: AI_CHAT_ENGINE_MAX_BUBBLES,
       });
@@ -2954,6 +3006,7 @@ const attachKundliToSession = async (req, res) => {
 
     // Attach Kundli to session
     await session.update({ kundliUserRequestId });
+    await cacheAiChatKundliContext(sessionId, kundli, userRequest);
 
     // Generate greeting message only if this session has no messages yet
     let greetingMessages = [];
@@ -3085,3 +3138,9 @@ module.exports = {
   greetSession,
   getAutoFollowUpQuestion,
 };
+
+
+
+
+
+
