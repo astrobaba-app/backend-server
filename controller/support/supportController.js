@@ -3,6 +3,7 @@ const TicketReply = require("../../model/support/ticketReply");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
 const Admin = require("../../model/admin/admin");
+const notificationService = require("../../services/notificationService");
 const { Op, fn, col } = require("sequelize");
 const {
   sendTicketCreatedEmail,
@@ -51,6 +52,40 @@ const serializeTicketForAdmin = (ticket) => {
     user: plainTicket.user || plainTicket.astrologer || null,
     requesterType: plainTicket.astrologerId ? "astrologer" : "user",
   };
+};
+
+const formatTicketStatus = (status) =>
+  String(status || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getSupportTicketActionUrl = (ticket) =>
+  `/support/tickets/${ticket.id}`;
+
+const notifyTicketUser = async (ticket, payload) => {
+  if (!ticket?.userId) {
+    return;
+  }
+
+  try {
+    await notificationService.sendToUser(ticket.userId, {
+      type: "general",
+      priority: payload.priority || "high",
+      title: payload.title,
+      message: payload.message,
+      actionUrl: getSupportTicketActionUrl(ticket),
+      data: {
+        notificationCategory: "support_ticket",
+        ticketId: ticket.id,
+        ticketNumber: ticket.ticketNumber,
+        supportEvent: payload.supportEvent,
+        ...(payload.data || {}),
+      },
+      sendPush: true,
+    });
+  } catch (error) {
+    console.error("Support ticket notification error:", error);
+  }
 };
 
 // ============= USER ROUTES =============
@@ -607,12 +642,21 @@ const replyToTicketAdmin = async (req, res) => {
         );
       } catch (error) {
         console.error("Email send error e", error);
-        res.status(500).json({
+        return res.status(500).json({
           success: false,
           message: "Failed to send mail reply",
           error: error.message,
         });
       }
+
+      await notifyTicketUser(ticket, {
+        supportEvent: "admin_reply",
+        title: `Reply on ticket ${ticket.ticketNumber}`,
+        message: `Support replied to "${ticket.subject}".`,
+        data: {
+          replyId: reply.id,
+        },
+      });
     }
 
     res.status(201).json({
@@ -694,6 +738,16 @@ const updateTicketStatus = async (req, res) => {
         oldStatus,
         status
       );
+
+      await notifyTicketUser(ticket, {
+        supportEvent: "status_updated",
+        title: `Ticket ${ticket.ticketNumber} updated`,
+        message: `Your support ticket status changed to ${formatTicketStatus(status)}.`,
+        data: {
+          oldStatus,
+          status,
+        },
+      });
     }
 
     res.status(200).json({

@@ -200,7 +200,7 @@ const createAndQueueOtp = async ({ actorType, mobile, templateId, includeAppHash
     createdAt: Date.now(),
   });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
-
+ // console.log("[OTPQueue] OTP queued", { actorType, mobile, otp });
   await enqueueOtp({ actorType, mobile, otp, templateId, includeAppHash });
 };
 

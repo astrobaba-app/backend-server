@@ -1,6 +1,31 @@
 const Blog = require("../../model/blog/blog");
 const Admin = require("../../model/admin/admin");
 const Astrologer = require("../../model/astrologer/astrologer");
+const notificationService = require("../../services/notificationService");
+
+const notifyBlogPublished = async (blog) => {
+  if (!blog?.id || !blog.isPublished) {
+    return;
+  }
+
+  try {
+    await notificationService.broadcastToAll({
+      type: "general",
+      priority: "medium",
+      title: "New Blog on Graho",
+      message: blog.title,
+      actionUrl: `/blog/${blog.id}`,
+      data: {
+        notificationCategory: "blog",
+        blogId: blog.id,
+        blogTitle: blog.title,
+      },
+      sendPush: true,
+    });
+  } catch (error) {
+    console.error("Blog notification error:", error);
+  }
+};
 
 // Create a new blog (admin only)
 const createAdminBlog = async (req, res) => {
@@ -32,6 +57,8 @@ const createAdminBlog = async (req, res) => {
     const admin = await Admin.findByPk(adminId, {
       attributes: ["id", "name", "email"],
     });
+
+    notifyBlogPublished(blog);
 
     res.status(201).json({
       success: true,
@@ -118,6 +145,7 @@ const updateAdminBlog = async (req, res) => {
       });
     }
 
+    const wasPublished = Boolean(blog.isPublished);
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
@@ -136,6 +164,10 @@ const updateAdminBlog = async (req, res) => {
 
     await blog.update(updateData);
     await blog.reload();
+
+    if (!wasPublished && blog.isPublished) {
+      notifyBlogPublished(blog);
+    }
 
     res.status(200).json({
       success: true,
@@ -198,6 +230,10 @@ const toggleBlogPublish = async (req, res) => {
 
     const newStatus = !blog.isPublished;
     await blog.update({ isPublished: newStatus });
+
+    if (newStatus) {
+      notifyBlogPublished(blog);
+    }
 
     res.status(200).json({
       success: true,

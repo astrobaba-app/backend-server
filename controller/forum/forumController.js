@@ -5,8 +5,10 @@ const ForumComment = require("../../model/forum/forumComment");
 const ForumPostLike = require("../../model/forum/forumPostLike");
 const ForumPostReport = require("../../model/forum/forumPostReport");
 const ForumPostAppeal = require("../../model/forum/forumPostAppeal");
+const Notification = require("../../model/notification/notification");
 const User = require("../../model/user/userAuth");
 const { buildForumAuthorSnapshot } = require("../../services/forumIdentityService");
+const notificationService = require("../../services/notificationService");
 const {
   checkForumUserAccess,
 } = require("../../services/forumModerationService");
@@ -36,6 +38,193 @@ const REPORT_REASONS = new Set([
   "off_topic",
   "other",
 ]);
+const FORUM_LIKE_MILESTONES = new Set([10, 50, 100, 500]);
+const FORUM_COMMENT_MILESTONES = new Set([10, 50]);
+
+const notifyNewForumPost = async (post) => {
+  if (!post?.id || !post.isActive) {
+    return;
+  }
+
+  try {
+    await notificationService.broadcastToAll({
+      type: "general",
+      priority: "medium",
+      title: "New Discussion on Graho",
+      message: post.title,
+      actionUrl: `/forum/${post.id}`,
+      data: {
+        notificationCategory: "forum_post",
+        forumPostId: post.id,
+        postId: post.id,
+        postTitle: post.title,
+      },
+      sendPush: true,
+    });
+  } catch (error) {
+    console.error("Forum post notification error:", error);
+  }
+};
+
+const hasForumPostNotification = async (userId, postId, event, milestone = null) => {
+  const notificationData = {
+    notificationCategory: "forum_post",
+    forumPostId: String(postId),
+    forumEvent: event,
+  };
+
+  if (milestone !== null) {
+    notificationData.milestone = String(milestone);
+  }
+
+  const notification = await Notification.findOne({
+    where: {
+      userId,
+      type: "general",
+      data: {
+        [Op.contains]: notificationData,
+      },
+    },
+    attributes: ["id"],
+  });
+
+  return Boolean(notification);
+};
+
+const sendForumPostOwnerNotification = async (post, actorUserId, payload) => {
+  const shouldSkipSelf = payload.skipActorSelf !== false;
+
+  if (
+    !post?.authorUserId ||
+    (shouldSkipSelf && String(post.authorUserId) === String(actorUserId))
+  ) {
+    return null;
+  }
+
+  const exists = await hasForumPostNotification(
+    post.authorUserId,
+    post.id,
+    payload.forumEvent,
+    payload.milestone
+  );
+
+  if (exists) {
+    return null;
+  }
+
+  return notificationService.sendToUser(post.authorUserId, {
+    type: "general",
+    priority: payload.priority || "medium",
+    title: payload.title,
+    message: payload.message,
+    actionUrl: `/forum/${post.id}`,
+    data: {
+      notificationCategory: "forum_post",
+      forumPostId: post.id,
+      postId: post.id,
+      postTitle: post.title,
+      forumEvent: payload.forumEvent,
+      ...(payload.milestone ? { milestone: String(payload.milestone) } : {}),
+      ...(payload.commentId ? { commentId: payload.commentId } : {}),
+      ...(payload.count ? { count: payload.count } : {}),
+    },
+    sendPush: true,
+  });
+};
+
+const notifyFirstForumComment = async (post, comment, count) => {
+  if (Number(count) !== 1) {
+    return;
+  }
+
+  try {
+    await sendForumPostOwnerNotification(post, comment.authorUserId, {
+      forumEvent: "first_comment",
+      title: "First comment on your discussion",
+      message: `Someone commented on "${post.title}".`,
+      commentId: comment.id,
+      count,
+    });
+  } catch (error) {
+    console.error("Forum first comment notification error:", error);
+  }
+};
+
+const notifyForumLikeMilestone = async (post, actorUserId) => {
+  const likeCount = Number(post.likeCount || 0);
+
+  if (!FORUM_LIKE_MILESTONES.has(likeCount)) {
+    return;
+  }
+
+  try {
+    await sendForumPostOwnerNotification(post, actorUserId, {
+      forumEvent: "like_milestone",
+      milestone: likeCount,
+      title: `${likeCount} likes on your discussion`,
+      message: `"${post.title}" reached ${likeCount} likes.`,
+      count: likeCount,
+      skipActorSelf: false,
+    });
+  } catch (error) {
+    console.error("Forum like milestone notification error:", error);
+  }
+};
+
+const notifyForumCommentMilestone = async (post, comment) => {
+  const commentCount = Number(post.commentCount || 0);
+
+  if (!FORUM_COMMENT_MILESTONES.has(commentCount)) {
+    return;
+  }
+
+  try {
+    await sendForumPostOwnerNotification(post, comment.authorUserId, {
+      forumEvent: "comment_milestone",
+      milestone: commentCount,
+      title: `${commentCount} comments on your discussion`,
+      message: `"${post.title}" reached ${commentCount} comments.`,
+      commentId: comment.id,
+      count: commentCount,
+      skipActorSelf: false,
+    });
+  } catch (error) {
+    console.error("Forum comment milestone notification error:", error);
+  }
+};
+
+const notifyForumCommentReply = async (post, parentComment, replyComment) => {
+  if (
+    !post?.id ||
+    !parentComment?.authorUserId ||
+    !replyComment?.id ||
+    String(parentComment.authorUserId) === String(replyComment.authorUserId)
+  ) {
+    return;
+  }
+
+  try {
+    await notificationService.sendToUser(parentComment.authorUserId, {
+      type: "general",
+      priority: "medium",
+      title: "New reply to your comment",
+      message: `Someone replied to your comment on "${post.title}".`,
+      actionUrl: `/forum/${post.id}`,
+      data: {
+        notificationCategory: "forum_post",
+        forumEvent: "comment_reply",
+        forumPostId: post.id,
+        postId: post.id,
+        postTitle: post.title,
+        commentId: replyComment.id,
+        parentCommentId: parentComment.id,
+      },
+      sendPush: true,
+    });
+  } catch (error) {
+    console.error("Forum comment reply notification error:", error);
+  }
+};
 
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -307,6 +496,8 @@ const createForumPost = async (req, res) => {
 
     await transaction.commit();
 
+    notifyNewForumPost(post);
+
     res.status(201).json({
       success: true,
       message: "Forum post created and queued for moderation",
@@ -404,6 +595,10 @@ const toggleForumPostLike = async (req, res) => {
     await touchPostActivity(post.id, transaction);
     await post.reload({ transaction });
     await transaction.commit();
+
+    if (isLiked) {
+      notifyForumLikeMilestone(post, req.user.id);
+    }
 
     res.status(200).json({
       success: true,
@@ -588,7 +783,17 @@ const createForumComment = async (req, res) => {
       });
     }
 
+    await post.reload({ transaction });
+    const commentCountAfterCreate = Number(post.commentCount || 0);
+
     await transaction.commit();
+
+    if (parentComment) {
+      notifyForumCommentReply(post, parentComment, comment);
+    }
+
+    notifyFirstForumComment(post, comment, commentCountAfterCreate);
+    notifyForumCommentMilestone(post, comment);
 
     res.status(201).json({
       success: true,
