@@ -16,6 +16,7 @@ const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
 const { startOtpQueueWorker } = require("./services/otpQueueService");
+const { startAiChatQueueWorker } = require("./controller/aiChat/aiChatController");
 const scheduledNotificationService = require("./services/scheduledNotificationService");
 
 const PORT = process.env.PORT || 6001;
@@ -316,6 +317,7 @@ initDB(() => {
     startInterestClassificationWorker();
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
+    startAiChatQueueWorker();
     const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
     startReportWorkerScheduler();
     console.log("Live viewer count sync enabled (every 30 seconds)");

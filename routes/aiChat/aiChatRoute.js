@@ -18,6 +18,7 @@ const {
   attachKundliToSession,
   greetSession,
   getAutoFollowUpQuestion,
+  getAiChatQueueStatus,
 } = require("../../controller/aiChat/aiChatController");
 const {
   createVoiceSession,
@@ -37,6 +38,7 @@ router.post("/v3/session/:sessionId/send", checkForAuthenticationCookie(), sendM
 router.post("/create", checkForAuthenticationCookie(), createChatSession);
 router.get("/sessions", checkForAuthenticationCookie(), getMyChatSessions);
 router.get("/session/:sessionId/messages", checkForAuthenticationCookie(), getChatMessages);
+router.get("/session/:sessionId/queue-status", checkForAuthenticationCookie(), getAiChatQueueStatus);
 router.post("/session/:sessionId/send", checkForAuthenticationCookie(), sendMessage);
 router.post("/session/:sessionId/end", checkForAuthenticationCookie(), endChatSession);
 router.delete("/session/:sessionId", checkForAuthenticationCookie(), deleteChatSession);

@@ -1,4 +1,5 @@
 require("dotenv").config();
+const crypto = require("crypto");
 const AIChatSession = require("../../model/aiChat/aiChatSession");
 const AIChatMessage = require("../../model/aiChat/aiChatMessage");
 const User = require("../../model/user/userAuth");
@@ -8,6 +9,7 @@ const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const { sequelize } = require("../../dbConnection/dbConfig");
 const { Op } = require("sequelize");
+const redis = require("../../config/redis/redis");
 const {
   getWalletBalanceBreakdown,
   buildWalletDebitPlan,
@@ -2604,6 +2606,308 @@ const buildLocalEngineFallbackMessages = (message, astrologerId) => {
   return buildVariableChatDelays(varyFallbackMessageCount(fallbackMessages));
 };
 
+const AI_CHAT_SENT_QUEUE_PREFIX = "queue:ai_chat:sent";
+const AI_CHAT_RECEIVE_QUEUE_PREFIX = "queue:ai_chat:receive";
+const AI_CHAT_MAX_RESPONSE_ATTEMPTS = 3;
+const AI_CHAT_QUEUE_DEBUG = String(process.env.AI_CHAT_QUEUE_DEBUG || "").toLowerCase() === "true";
+
+const activeAiChatSessionWorkers = new Set();
+let aiChatQueueWorkerStarted = false;
+
+const aiChatSentQueueKey = (sessionId) => `${AI_CHAT_SENT_QUEUE_PREFIX}:${sessionId}`;
+const aiChatReceiveQueueKey = (sessionId) => `${AI_CHAT_RECEIVE_QUEUE_PREFIX}:${sessionId}`;
+
+const aiChatQueueLog = (event, payload = {}) => {
+  if (AI_CHAT_QUEUE_DEBUG) {
+    console.log(`[AIChatQueue][${event}]`, payload);
+  }
+};
+
+const parseRedisValue = (value) => {
+  if (!value) return null;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value;
+};
+
+const removeQueuedPayload = async (queueKey, payload) => {
+  if (!queueKey || !payload) return;
+  try {
+    await redis.lrem(queueKey, 1, JSON.stringify(payload));
+  } catch (error) {
+    console.error("[AIChatQueue] Failed to remove queue payload", {
+      queueKey,
+      message: error.message,
+    });
+  }
+};
+
+const getAiChatQueueStatus = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const session = await AIChatSession.findOne({ where: { id: sessionId, userId } });
+    if (!session) {
+      return res.status(404).json({ success: false, message: "Chat session not found" });
+    }
+
+    const [sentCount, receiveCount] = await Promise.all([
+      redis.llen(aiChatSentQueueKey(sessionId)),
+      redis.llen(aiChatReceiveQueueKey(sessionId)),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      sessionId,
+      queues: {
+        sent: Number(sentCount || 0),
+        receive: Number(receiveCount || 0),
+      },
+    });
+  } catch (error) {
+    console.error("AI chat queue status error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get AI chat queue status",
+      error: error.message,
+    });
+  }
+};
+
+const createAssistantMessagesForQueuedUserMessage = async (job) => {
+  const session = await AIChatSession.findOne({
+    where: { id: job.sessionId, userId: job.userId },
+  });
+  if (!session) {
+    throw new Error("queued_ai_chat_session_not_found");
+  }
+
+  const sessionState = await enforceActiveAiSession(session);
+  if (sessionState.ended) {
+    return { skipped: true, reason: sessionState.reason };
+  }
+
+  const userMessage = await AIChatMessage.findOne({
+    where: { id: job.userMessageId, sessionId: job.sessionId, role: "user" },
+  });
+  if (!userMessage) {
+    throw new Error("queued_ai_chat_user_message_not_found");
+  }
+
+  const historyLimit = Number.isFinite(Number(job.historyLimit))
+    ? Math.min(Math.max(Number(job.historyLimit), 1), 20)
+    : 12;
+  const previousMessages = await AIChatMessage.findAll({
+    where: {
+      sessionId: job.sessionId,
+      createdAt: { [Op.lte]: userMessage.createdAt },
+    },
+    order: [["createdAt", "DESC"]],
+    limit: historyLimit + 1,
+  });
+  previousMessages.reverse();
+
+  let fallbackKundliPayload = null;
+  if (
+    AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.has(job.sessionId) &&
+    session.kundliUserRequestId
+  ) {
+    try {
+      const [kundliRecord, userRequestRecord] = await Promise.all([
+        Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
+        UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
+      ]);
+      fallbackKundliPayload = {
+        kundli: kundliRecord?.toJSON ? kundliRecord.toJSON() : null,
+        user_request: userRequestRecord?.toJSON ? userRequestRecord.toJSON() : null,
+      };
+    } catch (kundliErr) {
+      console.error("Failed to load fallback Kundli context for queued AI chat:", kundliErr.message);
+    }
+  }
+
+  const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
+  let engineResponse = null;
+  try {
+    engineResponse = await generateAiChatEngineResponse({
+      session_id: job.sessionId,
+      user_message: userMessage.content,
+      astrologer: {
+        id: publicAstrologer.id,
+        name: publicAstrologer.name,
+        gender: publicAstrologer.gender,
+        expertise: publicAstrologer.expertise,
+        skills: publicAstrologer.skills || [],
+      },
+      user: {
+        id: job.userId,
+        name: job.userName || null,
+      },
+      history: previousMessages
+        .filter((message) => message.id !== userMessage.id)
+        .map((message) => ({ role: message.role, content: message.content })),
+      ...(fallbackKundliPayload || {}),
+      fast_mode: job.fastMode !== false,
+      max_bubbles: AI_CHAT_ENGINE_MAX_BUBBLES,
+    });
+  } catch (engineError) {
+    console.error("Queued AI chat engine request failed:", engineError?.message || engineError);
+  }
+
+  const responseMessages =
+    Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
+      ? engineResponse.messages
+      : buildLocalEngineFallbackMessages(userMessage.content, session.astrologerId);
+
+  const createdAssistantMessages = [];
+  const tokensUsed = Number(engineResponse?.tokens_used || 0);
+  for (const [index, item] of responseMessages.entries()) {
+    const content = ensureCompleteSentenceEnding(
+      sanitizeAssistantResponse(item.content || "")
+    );
+    if (!content) continue;
+
+    const aiMessage = await AIChatMessage.create({
+      sessionId: job.sessionId,
+      role: "assistant",
+      content,
+      tokens: index === 0 ? tokensUsed : null,
+    });
+
+    createdAssistantMessages.push({
+      id: aiMessage.id,
+      role: aiMessage.role,
+      content: aiMessage.content,
+      createdAt: aiMessage.createdAt,
+      displayDelayMs: Number(item.displayDelayMs ?? item.display_delay_ms ?? 700),
+    });
+  }
+
+  if (createdAssistantMessages.length === 0) {
+    const fallback = buildLocalEngineFallbackMessages(userMessage.content, session.astrologerId)[0];
+    const aiMessage = await AIChatMessage.create({
+      sessionId: job.sessionId,
+      role: "assistant",
+      content: fallback.content,
+      tokens: tokensUsed || null,
+    });
+    createdAssistantMessages.push({
+      id: aiMessage.id,
+      role: aiMessage.role,
+      content: aiMessage.content,
+      createdAt: aiMessage.createdAt,
+      displayDelayMs: fallback.displayDelayMs,
+    });
+  }
+
+  const preview = createdAssistantMessages.map((message) => message.content).join(" ");
+  const updatePayload = {
+    lastMessageAt: new Date(),
+    lastMessagePreview: preview.substring(0, 250),
+  };
+  if (session.title === "New Chat" && previousMessages.length <= 2) {
+    updatePayload.title = userMessage.content.substring(0, 50) +
+      (userMessage.content.length > 50 ? "..." : "");
+  }
+  await session.update(updatePayload);
+
+  return {
+    createdAssistantMessages,
+    tokensUsed,
+    engine: {
+      model: engineResponse?.model || null,
+      fallback: Boolean(engineResponse?.fallback || !engineResponse),
+      ragChunks: engineResponse?.rag_chunks || [],
+    },
+  };
+};
+
+const processAiChatReceiveQueue = async (sessionId) => {
+  if (!sessionId || activeAiChatSessionWorkers.has(sessionId)) return;
+
+  activeAiChatSessionWorkers.add(sessionId);
+  const receiveQueueKey = aiChatReceiveQueueKey(sessionId);
+  try {
+    while (true) {
+      const rawJob = await redis.lindex(receiveQueueKey, 0);
+      if (!rawJob) return;
+
+      const job = parseRedisValue(rawJob);
+      if (!job?.id || !job?.sessionId || !job?.userMessageId || !job?.userId) {
+        await redis.lpop(receiveQueueKey);
+        console.error("[AIChatQueue] Dropping malformed receive job", { sessionId });
+        continue;
+      }
+
+      try {
+        aiChatQueueLog("RECEIVE_START", { jobId: job.id, sessionId });
+        await createAssistantMessagesForQueuedUserMessage(job);
+        await redis.lpop(receiveQueueKey);
+        aiChatQueueLog("RECEIVE_DONE", { jobId: job.id, sessionId });
+      } catch (error) {
+        const attempts = Number(job.attempts || 0) + 1;
+        await redis.lpop(receiveQueueKey);
+        console.error("[AIChatQueue] Receive job failed", {
+          jobId: job.id,
+          sessionId,
+          attempts,
+          message: error.message,
+        });
+
+        if (attempts < AI_CHAT_MAX_RESPONSE_ATTEMPTS) {
+          await redis.rpush(
+            receiveQueueKey,
+            JSON.stringify({ ...job, attempts, lastError: error.message })
+          );
+        } else {
+          const fallback = buildLocalEngineFallbackMessages(job.message, job.astrologerId)[0];
+          await AIChatMessage.create({
+            sessionId: job.sessionId,
+            role: "assistant",
+            content: fallback.content,
+          });
+        }
+      }
+    }
+  } finally {
+    activeAiChatSessionWorkers.delete(sessionId);
+    const remaining = Number(await redis.llen(receiveQueueKey)) || 0;
+    if (remaining > 0) {
+      setImmediate(() => {
+        void processAiChatReceiveQueue(sessionId);
+      });
+    }
+  }
+};
+
+const startAiChatQueueWorker = async () => {
+  if (aiChatQueueWorkerStarted) return;
+  aiChatQueueWorkerStarted = true;
+  console.log("[AIChatQueue] Worker ready in on-demand mode");
+
+  try {
+    const queueKeys = await redis.keys(`${AI_CHAT_RECEIVE_QUEUE_PREFIX}:*`);
+    if (Array.isArray(queueKeys)) {
+      queueKeys.forEach((queueKey) => {
+        const sessionId = String(queueKey).slice(`${AI_CHAT_RECEIVE_QUEUE_PREFIX}:`.length);
+        if (sessionId) {
+          setImmediate(() => {
+            void processAiChatReceiveQueue(sessionId);
+          });
+        }
+      });
+    }
+  } catch (error) {
+    console.error("[AIChatQueue] Failed to scan pending receive queues", {
+      message: error.message,
+    });
+  }
+};
 const createAiGreetingMessages = async ({
   session,
   userId,
@@ -2689,6 +2993,8 @@ const createAiGreetingMessages = async ({
 };
 
 const sendMessageV3 = async (req, res) => {
+  let sentQueuePayload = null;
+
   try {
     const userId = req.user.id;
     const { sessionId } = req.params;
@@ -2735,149 +3041,68 @@ const sendMessageV3 = async (req, res) => {
       });
     }
 
+    const jobId = crypto.randomUUID();
+    sentQueuePayload = {
+      id: jobId,
+      sessionId,
+      userId,
+      message: trimmedMessage,
+      queuedAt: Date.now(),
+    };
+    const sentQueueKey = aiChatSentQueueKey(sessionId);
+    const receiveQueueKey = aiChatReceiveQueueKey(sessionId);
+
+    await redis.rpush(sentQueueKey, JSON.stringify(sentQueuePayload));
+
     const userMessage = await AIChatMessage.create({
       sessionId,
       role: "user",
       content: trimmedMessage,
     });
 
-    const previousMessages = await AIChatMessage.findAll({
-      where: { sessionId },
-      order: [["createdAt", "DESC"]],
-      limit: historyLimit + 1,
+    await removeQueuedPayload(sentQueueKey, sentQueuePayload);
+
+    const receiveQueuePayload = {
+      ...sentQueuePayload,
+      userMessageId: userMessage.id,
+      userName: req.user?.fullName || null,
+      astrologerId: session.astrologerId,
+      fastMode,
+      historyLimit,
+      attempts: 0,
+      sentAt: Date.now(),
+    };
+
+    await redis.rpush(receiveQueueKey, JSON.stringify(receiveQueuePayload));
+    setImmediate(() => {
+      void processAiChatReceiveQueue(sessionId);
     });
-    previousMessages.reverse();
 
-    let fallbackKundliPayload = null;
-    if (
-      AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS.has(sessionId) &&
-      session.kundliUserRequestId
-    ) {
-      try {
-        const [kundliRecord, userRequestRecord] = await Promise.all([
-          Kundli.findOne({ where: { requestId: session.kundliUserRequestId } }),
-          UserRequest.findOne({ where: { id: session.kundliUserRequestId } }),
-        ]);
-        fallbackKundliPayload = {
-          kundli: kundliRecord?.toJSON ? kundliRecord.toJSON() : null,
-          user_request: userRequestRecord?.toJSON ? userRequestRecord.toJSON() : null,
-        };
-      } catch (kundliErr) {
-        console.error("Failed to load fallback Kundli context for AI chat engine:", kundliErr.message);
-      }
-    }
-
-    const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
-    let engineResponse = null;
-    try {
-      engineResponse = await generateAiChatEngineResponse({
-        session_id: sessionId,
-        user_message: trimmedMessage,
-        astrologer: {
-          id: publicAstrologer.id,
-          name: publicAstrologer.name,
-          gender: publicAstrologer.gender,
-          expertise: publicAstrologer.expertise,
-          skills: publicAstrologer.skills || [],
-        },
-        user: {
-          id: userId,
-          name: req.user?.fullName || null,
-        },
-        history: previousMessages
-          .filter((message) => message.id !== userMessage.id)
-          .map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-        ...(fallbackKundliPayload || {}),
-        fast_mode: fastMode,
-        max_bubbles: AI_CHAT_ENGINE_MAX_BUBBLES,
-      });
-    } catch (engineError) {
-      console.error("AI chat engine request failed:", engineError?.message || engineError);
-    }
-
-    const responseMessages =
-      Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
-        ? engineResponse.messages
-        : buildLocalEngineFallbackMessages(trimmedMessage, session.astrologerId);
-
-    const createdAssistantMessages = [];
-    let tokensUsed = Number(engineResponse?.tokens_used || 0);
-    for (const [index, item] of responseMessages.entries()) {
-      const content = ensureCompleteSentenceEnding(
-        sanitizeAssistantResponse(item.content || "")
-      );
-      if (!content) continue;
-
-      const aiMessage = await AIChatMessage.create({
-        sessionId,
-        role: "assistant",
-        content,
-        tokens: index === 0 ? tokensUsed : null,
-      });
-
-      createdAssistantMessages.push({
-        id: aiMessage.id,
-        role: aiMessage.role,
-        content: aiMessage.content,
-        createdAt: aiMessage.createdAt,
-        displayDelayMs: Number(item.displayDelayMs ?? item.display_delay_ms ?? 700),
-      });
-    }
-
-    if (createdAssistantMessages.length === 0) {
-      const fallback = buildLocalEngineFallbackMessages(trimmedMessage, session.astrologerId)[0];
-      const aiMessage = await AIChatMessage.create({
-        sessionId,
-        role: "assistant",
-        content: fallback.content,
-        tokens: tokensUsed || null,
-      });
-      createdAssistantMessages.push({
-        id: aiMessage.id,
-        role: aiMessage.role,
-        content: aiMessage.content,
-        createdAt: aiMessage.createdAt,
-        displayDelayMs: fallback.displayDelayMs,
-      });
-    }
-
-    const preview = createdAssistantMessages.map((message) => message.content).join(" ");
-    if (session.title === "New Chat" && previousMessages.length <= 2) {
-      const title = trimmedMessage.substring(0, 50) + (trimmedMessage.length > 50 ? "..." : "");
-      await session.update({
-        title,
-        lastMessageAt: new Date(),
-        lastMessagePreview: preview.substring(0, 250),
-      });
-    } else {
-      await session.update({
-        lastMessageAt: new Date(),
-        lastMessagePreview: preview.substring(0, 250),
-      });
-    }
-
-    return res.status(200).json({
+    return res.status(202).json({
       success: true,
+      queued: true,
+      jobId,
       userMessage: {
         id: userMessage.id,
+        sessionId: userMessage.sessionId,
         role: "user",
         content: userMessage.content,
         createdAt: userMessage.createdAt,
+        updatedAt: userMessage.updatedAt,
       },
-      aiMessage: createdAssistantMessages[0],
-      aiMessages: createdAssistantMessages,
-      tokensUsed,
+      aiMessage: null,
+      aiMessages: [],
+      queues: {
+        sent: 0,
+        receive: Number(await redis.llen(receiveQueueKey)) || 0,
+      },
       disableAutoFollowUp: true,
-      engine: {
-        model: engineResponse?.model || null,
-        fallback: Boolean(engineResponse?.fallback || !engineResponse),
-        ragChunks: engineResponse?.rag_chunks || [],
-      },
     });
   } catch (error) {
+    if (sentQueuePayload) {
+      await removeQueuedPayload(aiChatSentQueueKey(sentQueuePayload.sessionId), sentQueuePayload);
+    }
+
     console.error("Send message v3 error:", error);
     return res.status(500).json({
       success: false,
@@ -3137,6 +3362,8 @@ module.exports = {
   attachKundliToSession,
   greetSession,
   getAutoFollowUpQuestion,
+  getAiChatQueueStatus,
+  startAiChatQueueWorker,
 };
 
 
