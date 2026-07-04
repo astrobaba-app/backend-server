@@ -60,6 +60,7 @@ const CompatibilityReport = require("../model/horoscope/compatibilityReport");
 const DailyInsightPayload = require("../model/horoscope/dailyInsightPayload");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
+const ContentBank = require("../model/horoscope/contentBank");
 
 // Live models
 const LiveChatMessage = require("../model/live/liveChatMessage");

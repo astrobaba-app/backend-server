@@ -387,15 +387,36 @@ const getRudrakshaSuggestion = async (userRequest) => {
     });
     
     // Extract rudraksha from horoscope
-    return response.data.horoscope.remedies?.rudraksha || {
-      suggested: "5 Mukhi Rudraksha",
+    const rudraksha = response.data.horoscope.remedies?.rudraksha || {
+      suggested: ["5 Mukhi Rudraksha"],
       description: "Based on planetary positions"
     };
+
+    // Deduplicate/Clean suggested if it is a jammed string
+    if (rudraksha.suggested) {
+      if (typeof rudraksha.suggested === 'string') {
+        if (rudraksha.suggested.includes("Rudraksha") && !rudraksha.suggested.includes(",")) {
+          // e.g. "17-Mukhi Rudraksha14-Mukhi Rudraksha" -> ["17-Mukhi Rudraksha", "14-Mukhi Rudraksha"]
+          rudraksha.suggested = rudraksha.suggested.split(/(?<=Rudraksha)(?=\d)/);
+        } else {
+          rudraksha.suggested = [rudraksha.suggested];
+        }
+      }
+      if (Array.isArray(rudraksha.suggested)) {
+        rudraksha.suggested = rudraksha.suggested.map(s => s.trim()).filter(Boolean);
+      }
+    }
+
+    if (rudraksha.recommendation && typeof rudraksha.recommendation === 'string') {
+      rudraksha.recommendation = rudraksha.recommendation.replace(/Rudraksha(\d)/g, 'Rudraksha, $1');
+    }
+
+    return rudraksha;
   } catch (error) {
     console.error("Error in getRudrakshaSuggestion:", error.message);
     // Return default if endpoint not available
     return {
-      suggested: "5 Mukhi Rudraksha",
+      suggested: ["5 Mukhi Rudraksha"],
       description: "Consult an astrologer for personalized recommendation"
     };
   }

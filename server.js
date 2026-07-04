@@ -15,6 +15,7 @@ const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
 const { startOtpQueueWorker } = require("./services/otpQueueService");
+const { loadContentBank } = require("./services/templatedFreeReportService");
 
 const PORT = process.env.PORT || 6001;
 const app = express();
@@ -300,5 +301,16 @@ initDB(() => {
     startOtpQueueWorker();
     startPalmQueueWorker();
     console.log("Live viewer count sync enabled (every 30 seconds)");
+
+    // Preload Content Bank into memory (non-blocking — runs in background)
+    loadContentBank().then(success => {
+      if (success) {
+        console.log("[ContentBank] In-memory cache preloaded successfully on startup.");
+      } else {
+        console.warn("[ContentBank] Startup preload failed — cache will be loaded lazily on first request.");
+      }
+    }).catch(err => {
+      console.warn("[ContentBank] Startup preload error:", err.message);
+    });
   });
 });

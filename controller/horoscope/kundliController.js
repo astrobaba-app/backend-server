@@ -73,6 +73,71 @@ function buildAshtakvargaPayload(ashtakvargaData, ascLongitude) {
 
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
+function syncRudrakshaRemedies(kundliJson) {
+  if (kundliJson && kundliJson.aiFreeReport?.rudrakshaReport) {
+    const rr = kundliJson.aiFreeReport.rudrakshaReport;
+    if (!kundliJson.remedies) {
+      kundliJson.remedies = {};
+    }
+    if (!kundliJson.remedies.rudraksha) {
+      kundliJson.remedies.rudraksha = {};
+    }
+    if (!kundliJson.remedies.rudraksha.mukhi_details) {
+      kundliJson.remedies.rudraksha.mukhi_details = {};
+    }
+
+    // Clean any existing jammed recommendation/suggested in remedies
+    if (typeof kundliJson.remedies.rudraksha.suggested === 'string') {
+      if (kundliJson.remedies.rudraksha.suggested.includes("Rudraksha") && !kundliJson.remedies.rudraksha.suggested.includes(",")) {
+        kundliJson.remedies.rudraksha.suggested = kundliJson.remedies.rudraksha.suggested.split(/(?<=Rudraksha)(?=\d)/);
+      } else {
+        kundliJson.remedies.rudraksha.suggested = [kundliJson.remedies.rudraksha.suggested];
+      }
+    }
+    if (Array.isArray(kundliJson.remedies.rudraksha.suggested)) {
+      kundliJson.remedies.rudraksha.suggested = kundliJson.remedies.rudraksha.suggested.map(s => s.trim()).filter(Boolean);
+    }
+    if (kundliJson.remedies.rudraksha.recommendation && typeof kundliJson.remedies.rudraksha.recommendation === 'string') {
+      kundliJson.remedies.rudraksha.recommendation = kundliJson.remedies.rudraksha.recommendation.replace(/Rudraksha(\d)/g, 'Rudraksha, $1');
+    }
+    
+    // Inject primary bead info
+    if (rr.recommendation?.primary) {
+      const primName = rr.recommendation.primary; // e.g. "17-Mukhi Rudraksha"
+      const cleanPrimName = primName.replace(/\s*Rudraksha\s*/gi, "").trim(); // "17-Mukhi"
+      const primData = rr.seventeenMukhi || {};
+      
+      kundliJson.remedies.rudraksha.mukhi_details[primName] = {
+        details: primData.details || "",
+        benefits: primData.benefits || [],
+        how_to_wear: primData.howToWear || "",
+        precautions: primData.precautions || []
+      };
+      kundliJson.remedies.rudraksha.mukhi_details[cleanPrimName] = kundliJson.remedies.rudraksha.mukhi_details[primName];
+    }
+
+    // Inject secondary bead info
+    if (rr.recommendation?.secondary) {
+      const secName = rr.recommendation.secondary; // e.g. "14-Mukhi Rudraksha"
+      const cleanSecName = secName.replace(/\s*Rudraksha\s*/gi, "").trim(); // "14-Mukhi"
+      const secData = rr.fourteenMukhi || {};
+      
+      kundliJson.remedies.rudraksha.mukhi_details[secName] = {
+        details: secData.details || "",
+        benefits: secData.benefits || [],
+        how_to_wear: secData.howToWear || "",
+        precautions: secData.precautions || []
+      };
+      kundliJson.remedies.rudraksha.mukhi_details[cleanSecName] = kundliJson.remedies.rudraksha.mukhi_details[secName];
+    }
+
+    // Inject suggested list
+    if (rr.recommendation?.primary && rr.recommendation?.secondary) {
+      kundliJson.remedies.rudraksha.suggested = [rr.recommendation.primary, rr.recommendation.secondary];
+    }
+  }
+}
+
 const KUNDLI_DOB_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const KUNDLI_TOB_REGEX = /^\d{2}:\d{2}:\d{2}$/;
 const UNKNOWN_WHATSAPP_TOB_DEFAULT = "00:00:00";
@@ -667,12 +732,15 @@ const createKundli = async (req, res) => {
       });
     }
 
+    const kundliJson = kundli.toJSON();
+    syncRudrakshaRemedies(kundliJson);
+
     // Return immediately without waiting for AI generation
     return res.status(responseStatusCode).json({
       success: true,
       message: "Kundli created successfully",
       userRequest,
-      kundli: kundli.toJSON(),
+      kundli: kundliJson,
     });
   } catch (error) {
     console.error("Create Kundli error:", error);
@@ -1152,13 +1220,12 @@ const getKundli = async (req, res) => {
       });
     }
 
-    // Simply return the kundli data with whatever AI report exists (or null)
-    // The frontend polling will handle getting AI content when it's ready
+    const kundliJson = kundli.toJSON();
+    syncRudrakshaRemedies(kundliJson);
+
     res.status(200).json({
       success: true,
-      kundli: {
-        ...kundli.toJSON(),
-      },
+      kundli: kundliJson,
     });
   } catch (error) {
     console.error("Get Kundli error:", error);
@@ -1489,6 +1556,7 @@ const getSharedKundli = async (req, res) => {
     if (kundliJson.userRequest) {
       delete kundliJson.userRequest.userId;
     }
+    syncRudrakshaRemedies(kundliJson);
 
     return res.status(200).json({
       success: true,

@@ -387,4 +387,24 @@ router.post(
   cleanupPalmQueue
 );
 
+// Manual in-memory cache refresh route for Content Bank
+router.post(
+  "/content-bank/refresh",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  async (req, res) => {
+    try {
+      const { loadContentBank } = require("../../services/templatedFreeReportService");
+      const success = await loadContentBank();
+      if (success) {
+        return res.json({ success: true, message: "Content Bank memory cache refreshed successfully." });
+      } else {
+        return res.status(500).json({ success: false, message: "Failed to reload Content Bank. Check logs." });
+      }
+    } catch (err) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
+
 module.exports = router;

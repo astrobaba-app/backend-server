@@ -5,6 +5,74 @@ const ChatSession = require("../../model/chat/chatSession");
 const { Op } = require("sequelize");
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 
+function syncRudrakshaRemedies(kundliJson, aiFreeReport) {
+  // If the background AI generation passed aiFreeReport to response, merge it!
+  const report = aiFreeReport || kundliJson.aiFreeReport;
+  if (kundliJson && report?.rudrakshaReport) {
+    const rr = report.rudrakshaReport;
+    if (!kundliJson.remedies) {
+      kundliJson.remedies = {};
+    }
+    if (!kundliJson.remedies.rudraksha) {
+      kundliJson.remedies.rudraksha = {};
+    }
+    if (!kundliJson.remedies.rudraksha.mukhi_details) {
+      kundliJson.remedies.rudraksha.mukhi_details = {};
+    }
+
+    // Clean any existing jammed recommendation/suggested in remedies
+    if (typeof kundliJson.remedies.rudraksha.suggested === 'string') {
+      if (kundliJson.remedies.rudraksha.suggested.includes("Rudraksha") && !kundliJson.remedies.rudraksha.suggested.includes(",")) {
+        kundliJson.remedies.rudraksha.suggested = kundliJson.remedies.rudraksha.suggested.split(/(?<=Rudraksha)(?=\d)/);
+      } else {
+        kundliJson.remedies.rudraksha.suggested = [kundliJson.remedies.rudraksha.suggested];
+      }
+    }
+    if (Array.isArray(kundliJson.remedies.rudraksha.suggested)) {
+      kundliJson.remedies.rudraksha.suggested = kundliJson.remedies.rudraksha.suggested.map(s => s.trim()).filter(Boolean);
+    }
+    if (kundliJson.remedies.rudraksha.recommendation && typeof kundliJson.remedies.rudraksha.recommendation === 'string') {
+      kundliJson.remedies.rudraksha.recommendation = kundliJson.remedies.rudraksha.recommendation.replace(/Rudraksha(\d)/g, 'Rudraksha, $1');
+    }
+    
+    // Inject primary bead info
+    if (rr.recommendation?.primary) {
+      const primName = rr.recommendation.primary; // e.g. "17-Mukhi Rudraksha"
+      const cleanPrimName = primName.replace(/\s*Rudraksha\s*/gi, "").trim(); // "17-Mukhi"
+      const primData = rr.seventeenMukhi || {};
+      
+      kundliJson.remedies.rudraksha.mukhi_details[primName] = {
+        details: primData.details || "",
+        benefits: primData.benefits || [],
+        how_to_wear: primData.howToWear || "",
+        precautions: primData.precautions || []
+      };
+      kundliJson.remedies.rudraksha.mukhi_details[cleanPrimName] = kundliJson.remedies.rudraksha.mukhi_details[primName];
+    }
+
+    // Inject secondary bead info
+    if (rr.recommendation?.secondary) {
+      const secName = rr.recommendation.secondary; // e.g. "14-Mukhi Rudraksha"
+      const cleanSecName = secName.replace(/\s*Rudraksha\s*/gi, "").trim(); // "14-Mukhi"
+      const secData = rr.fourteenMukhi || {};
+      
+      kundliJson.remedies.rudraksha.mukhi_details[secName] = {
+        details: secData.details || "",
+        benefits: secData.benefits || [],
+        how_to_wear: secData.howToWear || "",
+        precautions: secData.precautions || []
+      };
+      kundliJson.remedies.rudraksha.mukhi_details[cleanSecName] = kundliJson.remedies.rudraksha.mukhi_details[secName];
+    }
+
+    // Inject suggested list
+    if (rr.recommendation?.primary && rr.recommendation?.secondary) {
+      kundliJson.remedies.rudraksha.suggested = [rr.recommendation.primary, rr.recommendation.secondary];
+    }
+  }
+}
+
+
 /**
  * Get user's Kundlis for astrologer during a call
  * Astrologer can view all Kundlis of the user they are in a call with
@@ -131,10 +199,13 @@ const getKundliForCall = async (req, res) => {
       );
     }
 
+    const kundliJson = kundli.toJSON();
+    syncRudrakshaRemedies(kundliJson, aiFreeReport);
+
     res.status(200).json({
       success: true,
       kundli: {
-        ...kundli.toJSON(),
+        ...kundliJson,
         aiFreeReport,
       },
     });
