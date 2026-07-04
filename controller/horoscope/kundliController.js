@@ -1443,13 +1443,17 @@ const generateKundliShareLink = async (req, res) => {
       await kundli.update({ isPublic: true });
     }
 
-    const frontendBaseUrl = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
-    const shareUrl = `${frontendBaseUrl}/kundliReport?id=${encodeURIComponent(userRequestId)}`;
+    const { buildShareLink } = require("../../services/shareLinkService");
+    const shareLink = buildShareLink("kundli", userRequestId);
 
     return res.status(200).json({
       success: true,
       message: "Kundli share link generated successfully",
-      shareUrl,
+      shareUrl: shareLink.shareUrl,
+      webUrl: shareLink.webUrl,
+      appUrl: shareLink.appUrl,
+      androidIntentUrl: shareLink.androidIntentUrl,
+      playStoreUrl: shareLink.playStoreUrl,
     });
   } catch (error) {
     console.error("Generate Kundli Share Link error:", error);
