@@ -15,8 +15,12 @@ const {
   queueArchiveAndDeleteSession,
 } = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
+const {
+  createChatRequestActionToken,
+  validateChatRequestActionToken,
+} = require("../../services/authService");
 
-const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
+const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
   "user_ended_chat",
   "insufficient_balance",
@@ -280,15 +284,24 @@ const startChatSession = async (req, res) => {
     }
 
     try {
+      const actionToken = createChatRequestActionToken({
+        sessionId: session.id,
+        astrologerId,
+      });
       await pushNotificationService.sendToAstrologer(astrologerId, {
-        title: "New Chat Invitation",
+        title: "Incoming Chat Request",
         body: `${req.user.fullName || "User"} wants to start a chat with you.`,
         data: {
-          type: "chat_request",
+          type: "incoming_chat_request",
+          legacyType: "chat_request",
           sessionId: String(session.id),
           requestExpiresAt: getRequestExpiryIso(session),
+          requestTimeoutSeconds: String(CHAT_REQUEST_TIMEOUT_SECONDS),
           astrologerId: String(astrologerId),
           userId: String(req.user.id),
+          userName: req.user.fullName || "User",
+          userPhoto: req.user.photo || "",
+          actionToken,
           clickAction: "/astrologer/live-chats",
           url: `https://graho.in/astrologer/live-chats?sessionId=${session.id}`,
         },
@@ -1767,6 +1780,111 @@ const endAstrologerChatSession = async (req, res) => {
   }
 };
 
+const timeoutChatRequest = async (req, res) => {
+  try {
+    const astrologerId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await ChatSession.findOne({
+      where: { id: sessionId, astrologerId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "Chat session not found",
+      });
+    }
+
+    if (session.requestStatus !== "pending") {
+      return res.status(200).json({
+        success: true,
+        message: "Chat request already handled",
+        session,
+      });
+    }
+
+    await session.update({
+      requestStatus: "rejected",
+      status: "cancelled",
+      endTime: new Date(),
+    });
+
+    const io = req.app.get("io");
+    if (io) {
+      const {
+        getSessionRoom,
+        getUserRoom,
+        getAstrologerRoom,
+        mapSession,
+      } = require("../../services/chatSocket");
+
+      io.to(getSessionRoom(sessionId)).emit("chat:timeout", { sessionId });
+      io.to(getUserRoom(session.userId)).emit("chat:updated", {
+        sessionId,
+        session: mapSession(session, "user"),
+      });
+      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+        sessionId,
+        session: mapSession(session, "astrologer"),
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Chat request timed out",
+      session,
+    });
+  } catch (error) {
+    console.error("Timeout chat request error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to timeout chat request",
+      error: error.message,
+    });
+  }
+};
+
+const performChatRequestAction = async (req, res) => {
+  const { sessionId } = req.params;
+  const { action, actionToken } = req.body || {};
+  const tokenPayload = validateChatRequestActionToken(actionToken);
+
+  if (
+    !tokenPayload ||
+    String(tokenPayload.sessionId) !== String(sessionId) ||
+    !tokenPayload.astrologerId
+  ) {
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired chat request action token",
+    });
+  }
+
+  req.user = {
+    id: tokenPayload.astrologerId,
+    role: "astrologer",
+  };
+
+  if (action === "accept") {
+    req.body = { forceAccept: false };
+    return approveChatRequest(req, res);
+  }
+
+  if (action === "reject") {
+    return rejectChatRequest(req, res);
+  }
+
+  if (action === "timeout") {
+    return timeoutChatRequest(req, res);
+  }
+
+  return res.status(400).json({
+    success: false,
+    message: "Unsupported chat request action",
+  });
+};
+
 module.exports = {
   startChatSession,
   endChatSession,
@@ -1784,5 +1902,7 @@ module.exports = {
   getTotalMinutesWithAstrologer,
   approveChatRequest,
   rejectChatRequest,
+  timeoutChatRequest,
+  performChatRequestAction,
 };
 

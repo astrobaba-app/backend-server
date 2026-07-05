@@ -5,6 +5,7 @@ const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
 const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+const INCOMING_CHAT_REQUESTS_CHANNEL_ID = "graho_incoming_chat_requests_v1";
 const GENERAL_ALERTS_CHANNEL_ID = "graho_general_alerts_v3";
 
 class PushNotificationService {
@@ -24,33 +25,41 @@ class PushNotificationService {
     }
 
     const fcmTokens = tokens.map((t) => t.token);
-    const isChatRequest = data?.type === "chat_request";
-    const channelId = isChatRequest ? CHAT_ALERTS_CHANNEL_ID : GENERAL_ALERTS_CHANNEL_ID;
+    const isIncomingChatRequest =
+      data?.type === "incoming_chat_request" || data?.type === "chat_request";
+    const channelId = isIncomingChatRequest
+      ? INCOMING_CHAT_REQUESTS_CHANNEL_ID
+      : GENERAL_ALERTS_CHANNEL_ID;
     const requestExpiresAt = data?.requestExpiresAt
       ? new Date(data.requestExpiresAt).getTime()
       : null;
-    const ttlMs = isChatRequest
-      ? Math.max(1, Math.min(30000, requestExpiresAt ? requestExpiresAt - Date.now() : 30000))
+    const ttlMs = isIncomingChatRequest
+      ? Math.max(1, Math.min(60000, requestExpiresAt ? requestExpiresAt - Date.now() : 60000))
       : undefined;
+    const messageData = {
+      ...data,
+      title: String(title || ""),
+      body: String(body || ""),
+      ownerId: String(ownerId),
+      timestamp: new Date().toISOString(),
+    };
 
     const message = {
-      notification: {
-        title,
-        body,
-        ...(imageUrl && { imageUrl }),
-      },
-      data: {
-        ...data,
-        ownerId: String(ownerId),
-        timestamp: new Date().toISOString(),
-      },
+      ...(!isIncomingChatRequest && {
+        notification: {
+          title,
+          body,
+          ...(imageUrl && { imageUrl }),
+        },
+      }),
+      data: messageData,
       android: {
         priority: "high",
         ...(ttlMs ? { ttl: ttlMs } : {}),
-        ...(isChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
+        ...(isIncomingChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
         notification: {
           channelId,
-          ...(isChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
+          ...(isIncomingChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
           priority: "max",
           visibility: "public",
           defaultVibrateTimings: true,
@@ -62,7 +71,7 @@ class PushNotificationService {
           "apns-priority": "10",
           ...(ttlMs ? { "apns-expiration": String(Math.floor((Date.now() + ttlMs) / 1000)) } : {}),
         },
-        ...(isChatRequest
+        ...(isIncomingChatRequest
           ? {
               payload: {
                 aps: {

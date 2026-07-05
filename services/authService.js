@@ -3,6 +3,7 @@ const JWT = require("jsonwebtoken");
 const ACCESS_TOKEN_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN;
 const REFRESH_TOKEN_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN;
 const ADMIN_ROLES = new Set(["admin", "superadmin", "masteradmin"]);
+const CHAT_REQUEST_ACTION_EXPIRES_IN = "75s";
 
 const resolveActorType = (user = {}) => {
   if (typeof user.actorType === "string" && user.actorType.trim()) {
@@ -92,6 +93,36 @@ function validateRefreshToken(token) {
   }
 }
 
+const createChatRequestActionToken = ({ sessionId, astrologerId }) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is missing in environment variables");
+  }
+
+  return JWT.sign(
+    {
+      purpose: "chat_request_action",
+      sessionId: String(sessionId),
+      astrologerId: String(astrologerId),
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: CHAT_REQUEST_ACTION_EXPIRES_IN }
+  );
+};
+
+const validateChatRequestActionToken = (token) => {
+  try {
+    const payload = JWT.verify(token, process.env.JWT_SECRET);
+    if (payload?.purpose !== "chat_request_action") {
+      return null;
+    }
+
+    return payload;
+  } catch (error) {
+    console.error("Error validating chat request action token:", error.message);
+    return null;
+  }
+};
+
 module.exports = {
   createToken,
   validateToken,
@@ -99,4 +130,6 @@ module.exports = {
   createRefreshToken,
   validateRefreshToken,
   resolveActorType,
+  createChatRequestActionToken,
+  validateChatRequestActionToken,
 };

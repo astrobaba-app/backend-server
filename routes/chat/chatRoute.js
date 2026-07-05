@@ -16,6 +16,8 @@ const {
   getTotalMinutesWithAstrologer,
   approveChatRequest,
   rejectChatRequest,
+  timeoutChatRequest,
+  performChatRequestAction,
   endAstrologerChatSession,
 } = require("../../controller/chat/chatController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
@@ -61,6 +63,18 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["astrologer"]),
   rejectChatRequest
+);
+
+router.post(
+  "/astrologer/requests/:sessionId/timeout",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  timeoutChatRequest
+);
+
+router.post(
+  "/astrologer/requests/:sessionId/action",
+  performChatRequestAction
 );
 
 router.post(
