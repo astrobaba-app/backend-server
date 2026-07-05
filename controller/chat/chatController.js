@@ -16,7 +16,7 @@ const {
 } = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
 
-const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
+const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
   "user_ended_chat",
   "insufficient_balance",

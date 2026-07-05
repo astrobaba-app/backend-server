@@ -4,8 +4,13 @@ const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
-const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts_v2";
 const GENERAL_ALERTS_CHANNEL_ID = "graho_general_alerts_v3";
+const CHAT_REQUEST_TTL_MS = 60 * 1000;
+
+const isTokenUniqueConflict = (error) =>
+  error?.name === "SequelizeUniqueConstraintError" &&
+  (error?.fields?.token || error?.parent?.constraint?.includes("token"));
 
 class PushNotificationService {
 
@@ -30,7 +35,13 @@ class PushNotificationService {
       ? new Date(data.requestExpiresAt).getTime()
       : null;
     const ttlMs = isChatRequest
-      ? Math.max(1, Math.min(30000, requestExpiresAt ? requestExpiresAt - Date.now() : 30000))
+      ? Math.max(
+          1,
+          Math.min(
+            CHAT_REQUEST_TTL_MS,
+            requestExpiresAt ? requestExpiresAt - Date.now() : CHAT_REQUEST_TTL_MS
+          )
+        )
       : undefined;
 
     const message = {
@@ -338,6 +349,22 @@ class PushNotificationService {
         return newToken;
       }
     } catch (error) {
+      if (isTokenUniqueConflict(error)) {
+        const existingToken = await DeviceToken.findOne({ where: { token } });
+
+        if (existingToken) {
+          await existingToken.update({
+            userId,
+            deviceType,
+            deviceId,
+            isActive: true,
+            lastUsedAt: new Date(),
+          });
+          console.log(`[FCM] Recovered duplicate token registration for user ${userId}`);
+          return existingToken;
+        }
+      }
+
       console.error("[FCM] Error saving device token:", error);
       throw error;
     }
@@ -388,6 +415,23 @@ class PushNotificationService {
       console.log(`[FCM] Created new token for astrologer ${astrologerId}`);
       return newToken;
     } catch (error) {
+      if (isTokenUniqueConflict(error)) {
+        const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
+
+        if (existingToken) {
+          await existingToken.update({
+            astrologerId,
+            deviceType,
+            deviceId,
+            deviceName,
+            isActive: true,
+            lastUsedAt: new Date(),
+          });
+          console.log(`[FCM] Recovered duplicate token registration for astrologer ${astrologerId}`);
+          return existingToken;
+        }
+      }
+
       console.error("[FCM] Error saving astrologer device token:", error);
       throw error;
     }
