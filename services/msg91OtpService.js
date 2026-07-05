@@ -31,7 +31,7 @@ const sendMsg91Otp = async ({ mobile, otp, variables = {}, templateId }) => {
     template_id: resolvedTemplateId,
     mobile,
   };
-
+ 
   if (otp) {
     params.otp = otp;
   }

@@ -5,6 +5,7 @@ const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
 const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+const GENERAL_ALERTS_CHANNEL_ID = "graho_general_alerts_v3";
 
 class PushNotificationService {
 
@@ -24,6 +25,7 @@ class PushNotificationService {
 
     const fcmTokens = tokens.map((t) => t.token);
     const isChatRequest = data?.type === "chat_request";
+    const channelId = isChatRequest ? CHAT_ALERTS_CHANNEL_ID : GENERAL_ALERTS_CHANNEL_ID;
     const requestExpiresAt = data?.requestExpiresAt
       ? new Date(data.requestExpiresAt).getTime()
       : null;
@@ -47,11 +49,10 @@ class PushNotificationService {
         ...(ttlMs ? { ttl: ttlMs } : {}),
         ...(isChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
         notification: {
-          channelId: CHAT_ALERTS_CHANNEL_ID,
+          channelId,
           ...(isChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
-          priority: isChatRequest ? "max" : "high",
+          priority: "max",
           visibility: "public",
-          defaultSound: true,
           defaultVibrateTimings: true,
           defaultLightSettings: true,
         },
@@ -249,10 +250,9 @@ class PushNotificationService {
         android: {
           priority: 'high',
           notification: {
-            channelId: CHAT_ALERTS_CHANNEL_ID,
+            channelId: GENERAL_ALERTS_CHANNEL_ID,
             priority: "max",
             visibility: "public",
-            defaultSound: true,
             defaultVibrateTimings: true,
             defaultLightSettings: true,
           },
