@@ -877,11 +877,11 @@ const buildFallbackGreetingMessages = (userName, astrologerId, hasKundli) => {
     ? [
         [
           { content: `Namaste ${namePrefix}kundli details mil gayi hain.` },
-          { content: "Aap apna sawal bataiye, main dhyan se dekhkar guide karta hun." },
+          { content: "Aap sawal bataiye, main dhyan se guide karta hun." },
         ],
         [
           { content: "Namaste ji, swagat hai." },
-          { content: "Kundli attached hai, isliye timing aur direction dono angle se dekh paunga." },
+          { content: "Kundli attached hai, timing clearly dekh paunga." },
         ],
         [
           { content: `Namaste ${namePrefix}aap bataiye kis baat ko lekar guidance chahiye?` },
@@ -891,11 +891,11 @@ const buildFallbackGreetingMessages = (userName, astrologerId, hasKundli) => {
     : [
         [
           { content: `Namaste ${namePrefix}swagat hai.` },
-          { content: "Aap apna sawal bataiye, main astrology angle se guide karta hun." },
+          { content: "Aap sawal bataiye, main astrology se guide karta hun." },
         ],
         [
           { content: "Namaste ji, main sun raha hun." },
-          { content: "Career, relationship, family ya kisi bhi concern par seedha pooch sakte hain." },
+          { content: "Career, relationship, family par seedha pooch sakte hain." },
         ],
         [
           { content: `Namaste, main ${profile.name} hun.` },
@@ -1745,7 +1745,7 @@ const sendMessage = async (req, res) => {
     if (isUserStopIntentMessage(trimmedMessage)) {
       const lastAssistantMessage = await AIChatMessage.findOne({
         where: { sessionId, role: "assistant" },
-        order: [["createdAt", "DESC"]],
+        order: [["createdAt", "DESC"], ["id", "DESC"]],
         attributes: ["content"],
       });
 
@@ -1836,7 +1836,7 @@ const sendMessage = async (req, res) => {
     // This keeps token usage efficient while maintaining important context
     const previousMessages = await AIChatMessage.findAll({
       where: { sessionId },
-      order: [["createdAt", "DESC"]],
+      order: [["createdAt", "DESC"], ["id", "DESC"]],
       limit: historyLimit,
     });
 
@@ -2110,7 +2110,7 @@ const getAutoFollowUpQuestion = async (req, res) => {
 
     const previousMessages = await AIChatMessage.findAll({
       where: { sessionId },
-      order: [["createdAt", "ASC"]],
+      order: [["createdAt", "ASC"], ["id", "ASC"]],
       limit: 40,
     });
 
@@ -2317,7 +2317,7 @@ const getChatMessages = async (req, res) => {
 
     const { rows: messages, count } = await AIChatMessage.findAndCountAll({
       where: { sessionId },
-      order: [["createdAt", "ASC"]],
+      order: [["createdAt", "ASC"], ["id", "ASC"]],
       limit: parseInt(limit),
       offset: parseInt(offset),
     });
@@ -2405,7 +2405,7 @@ const getAiChatHistoryV2 = async (req, res) => {
 
 //     const messages = await AIChatMessage.findAll({
 //       where: { sessionId },
-//       order: [["createdAt", "ASC"]],
+//       order: [["createdAt", "ASC"], ["id", "ASC"]],
 //     });
 
 //     return res.status(200).json({
@@ -2482,7 +2482,7 @@ const getAiChatHistorySessionV2 = async (req, res) => {
 
     const messages = await AIChatMessage.findAll({
       where: { sessionId },
-      order: [["createdAt", "ASC"]],
+      order: [["createdAt", "ASC"], ["id", "ASC"]],
     });
 
     return res.status(200).json({
@@ -2541,14 +2541,54 @@ const sendMessageV2 = (req, res) => {
   return sendMessage(req, res);
 };
 
+const AI_CHAT_MAX_BUBBLE_WORDS = 10;
+const AI_CHAT_SUBSEQUENT_BUBBLE_MIN_DELAY_MS = 5000;
+const AI_CHAT_SUBSEQUENT_BUBBLE_MAX_DELAY_MS = 10000;
+
+const countWords = (content) =>
+  String(content || "").trim().split(/\s+/).filter(Boolean).length;
+
+const splitAiChatSentences = (content) => {
+  const normalized = String(content || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+
+  const matches = normalized.match(/[^.!?।]+[.!?।]+|[^.!?।]+$/g) || [];
+  return matches.map((sentence) => sentence.trim()).filter(Boolean);
+};
+
+const splitShortAiChatBubble = (content, maxWords = AI_CHAT_MAX_BUBBLE_WORDS) => {
+  const sentences = splitAiChatSentences(content);
+  if (!sentences.length) return [];
+
+  return sentences.filter(Boolean).map((sentence) => {
+    const trimmed = sentence.trim();
+    if (countWords(trimmed) <= maxWords) {
+      return trimmed;
+    }
+
+    return ensureCompleteSentenceEnding(trimmed);
+  });
+};
+
+const getSubsequentBubbleDelayMs = (wordCount) => {
+  const clampedWordCount = Math.max(1, Math.min(Number(wordCount) || 1, AI_CHAT_MAX_BUBBLE_WORDS));
+  const ratio = AI_CHAT_MAX_BUBBLE_WORDS === 1
+    ? 1
+    : (clampedWordCount - 1) / (AI_CHAT_MAX_BUBBLE_WORDS - 1);
+  return Math.round(
+    AI_CHAT_SUBSEQUENT_BUBBLE_MIN_DELAY_MS +
+      (AI_CHAT_SUBSEQUENT_BUBBLE_MAX_DELAY_MS - AI_CHAT_SUBSEQUENT_BUBBLE_MIN_DELAY_MS) * ratio
+  );
+};
+
 const buildVariableChatDelays = (messages) => {
   let previousDelay = 0;
   return messages.map((item, index) => {
-    const wordCount = String(item.content || "").trim().split(/\s+/).filter(Boolean).length;
+    const wordCount = countWords(item.content);
     if (index === 0) {
       previousDelay = 1400 + Math.floor(Math.random() * 1200) + Math.min(wordCount * 45, 900);
     } else {
-      previousDelay += 1800 + Math.floor(Math.random() * 2400) + Math.min(wordCount * 55, 1200);
+      previousDelay += getSubsequentBubbleDelayMs(wordCount);
     }
 
     return {
@@ -2558,6 +2598,16 @@ const buildVariableChatDelays = (messages) => {
   });
 };
 
+const normalizeAiChatBubbles = (messages) => {
+  const bubbles = [];
+  (Array.isArray(messages) ? messages : []).forEach((item) => {
+    splitShortAiChatBubble(item?.content).forEach((content) => {
+      bubbles.push({ ...item, content, displayDelayMs: undefined, display_delay_ms: undefined });
+    });
+  });
+
+  return buildVariableChatDelays(bubbles.slice(0, AI_CHAT_ENGINE_MAX_BUBBLES));
+};
 const varyFallbackMessageCount = (messages) => {
   const maxCount = Math.min(AI_CHAT_ENGINE_MAX_BUBBLES, messages.length);
   if (maxCount <= 1) {
@@ -2565,15 +2615,7 @@ const varyFallbackMessageCount = (messages) => {
   }
 
   const requestedCount = 1 + Math.floor(Math.random() * maxCount);
-  const selected = messages.slice(0, requestedCount);
-  if (selected.length === 1 && messages.length > 1) {
-    selected[0] = {
-      ...selected[0],
-      content: messages.map((item) => item.content).join(" "),
-    };
-  }
-
-  return selected;
+  return messages.slice(0, requestedCount);
 };
 
 const buildLocalEngineFallbackMessages = (message, astrologerId) => {
@@ -2585,21 +2627,21 @@ const buildLocalEngineFallbackMessages = (message, astrologerId) => {
   let fallbackMessages;
   if (isHindi) {
     fallbackMessages = [
-      { content: `${profile.name} बोल रहा हूँ, आपकी बात समझ रहा हूँ।` },
-      { content: "ज्योतिष के हिसाब से इस विषय में जल्दबाज़ी से बचना बेहतर रहेगा।" },
-      { content: "आप चाहें तो मैं इसे कुंडली के हिसाब से और गहराई से देख सकता हूँ।" },
+      { content: "आपकी बात समझ रहा हूँ।" },
+      { content: "जल्दबाज़ी से बचना बेहतर रहेगा।" },
+      { content: "कुंडली से इसे गहराई से देख सकता हूँ।" },
     ];
   } else if (isHinglish) {
     fallbackMessages = [
-      { content: `${profile.name} bol raha hun, aapki baat samajh raha hun.` },
-      { content: "Astrology ke hisaab se abhi patience aur timing zyada important dikh rahi hai." },
-      { content: "Aap ye sawal career angle se pooch rahe hain ya relationship angle se?" },
+      { content: "Aapki baat samajh raha hun." },
+      { content: "Abhi patience aur timing zyada important dikh rahi hai." },
+      { content: "Career angle hai ya relationship angle?" },
     ];
   } else {
     fallbackMessages = [
-      { content: `${profile.name} here, I understand your concern.` },
-      { content: "Astrologically, this looks like a phase where patience and timing matter more than force." },
-      { content: "Is this more about career, relationship, or family?" },
+      { content: "I understand your concern." },
+      { content: "Patience and timing matter more than force now." },
+      { content: "Career, relationship, or family angle?" },
     ];
   }
 
@@ -2707,7 +2749,7 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
       sessionId: job.sessionId,
       createdAt: { [Op.lte]: userMessage.createdAt },
     },
-    order: [["createdAt", "DESC"]],
+    order: [["createdAt", "DESC"], ["id", "DESC"]],
     limit: historyLimit + 1,
   });
   previousMessages.reverse();
@@ -2759,24 +2801,29 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
     console.error("Queued AI chat engine request failed:", engineError?.message || engineError);
   }
 
-  const responseMessages =
+  const rawResponseMessages =
     Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
       ? engineResponse.messages
       : buildLocalEngineFallbackMessages(userMessage.content, session.astrologerId);
+  const responseMessages = normalizeAiChatBubbles(rawResponseMessages);
 
   const createdAssistantMessages = [];
   const tokensUsed = Number(engineResponse?.tokens_used || 0);
+  const assistantBaseCreatedAt = Date.now();
   for (const [index, item] of responseMessages.entries()) {
     const content = ensureCompleteSentenceEnding(
       sanitizeAssistantResponse(item.content || "")
     );
     if (!content) continue;
 
+    const createdAt = new Date(assistantBaseCreatedAt + index);
     const aiMessage = await AIChatMessage.create({
       sessionId: job.sessionId,
       role: "assistant",
       content,
       tokens: index === 0 ? tokensUsed : null,
+      createdAt,
+      updatedAt: createdAt,
     });
 
     createdAssistantMessages.push({
@@ -2953,22 +3000,27 @@ const createAiGreetingMessages = async ({
   }
 
   const hasKundli = Boolean(userRequest || kundli || session.kundliUserRequestId);
-  const responseMessages =
+  const rawGreetingMessages =
     Array.isArray(engineResponse?.messages) && engineResponse.messages.length > 0
       ? engineResponse.messages
       : buildFallbackGreetingMessages(userName, session.astrologerId, hasKundli);
+  const responseMessages = normalizeAiChatBubbles(rawGreetingMessages);
 
   const createdMessages = [];
-  for (const item of responseMessages) {
+  const greetingBaseCreatedAt = Date.now();
+  for (const [index, item] of responseMessages.entries()) {
     const content = ensureCompleteSentenceEnding(
       sanitizeAssistantResponse(item.content || "")
     );
     if (!content) continue;
 
+    const createdAt = new Date(greetingBaseCreatedAt + index);
     const message = await AIChatMessage.create({
       sessionId: session.id,
       role: "assistant",
       content,
+      createdAt,
+      updatedAt: createdAt,
     });
 
     createdMessages.push(
@@ -3298,7 +3350,7 @@ const greetSession = async (req, res) => {
       // Return the first assistant message as the existing greeting
       const firstMsg = await AIChatMessage.findOne({
         where: { sessionId, role: "assistant" },
-        order: [["createdAt", "ASC"]],
+        order: [["createdAt", "ASC"], ["id", "ASC"]],
       });
       return res.status(200).json({
         success: true,
