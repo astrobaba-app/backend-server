@@ -16,7 +16,7 @@ const {
 } = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
 
-const CHAT_REQUEST_TIMEOUT_SECONDS = 30;
+const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
   "user_ended_chat",
   "insufficient_balance",
@@ -148,6 +148,86 @@ function emitChatMessage(io, session, payload) {
     .to(getUserRoom(session.userId))
     .to(getAstrologerRoom(session.astrologerId))
     .emit("message:new", payload);
+}
+
+async function cancelPendingChatRequestNotification(session, reason = "cancelled") {
+  if (!session) return;
+
+  try {
+    await pushNotificationService.cancelChatRequestForAstrologer(
+      session.astrologerId,
+      session.id,
+      reason
+    );
+  } catch (pushError) {
+    console.error("Failed to cancel astrologer chat request push:", pushError);
+  }
+}
+
+async function notifyPendingChatRequestClosed(io, session, reason = "cancelled") {
+  if (!session) return;
+
+  await cancelPendingChatRequestNotification(session, reason);
+
+  if (!io) return;
+
+  const {
+    getSessionRoom,
+    getUserRoom,
+    getAstrologerRoom,
+    mapSession,
+    clearUserInactivityAutoEnd,
+    clearWalletLimitAutoEnd,
+  } = require("../../services/chatSocket");
+
+  clearUserInactivityAutoEnd(session.id);
+  clearWalletLimitAutoEnd(session.id);
+
+  io.to(getSessionRoom(session.id)).emit("chat:rejected", {
+    sessionId: session.id,
+    reason,
+  });
+
+  io.to(getUserRoom(session.userId)).emit("chat:updated", {
+    sessionId: session.id,
+    session: mapSession(session, "user"),
+  });
+
+  io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+    sessionId: session.id,
+    session: mapSession(session, "astrologer"),
+  });
+}
+
+function schedulePendingChatRequestExpiry(app, sessionId) {
+  const timeout = setTimeout(async () => {
+    try {
+      const session = await ChatSession.findByPk(sessionId);
+      if (!session || session.status !== "active" || session.requestStatus !== "pending") {
+        return;
+      }
+
+      if (!isPendingRequestExpired(session)) {
+        schedulePendingChatRequestExpiry(app, sessionId);
+        return;
+      }
+
+      await session.update({
+        requestStatus: "rejected",
+        status: "cancelled",
+        endTime: new Date(),
+      });
+
+      await session.reload();
+      await notifyPendingChatRequestClosed(app.get("io"), session, "expired");
+    } catch (error) {
+      console.error("Pending chat request expiry error:", error);
+    }
+  }, CHAT_REQUEST_TIMEOUT_SECONDS * 1000 + 500);
+
+  if (typeof timeout.unref === "function") {
+    timeout.unref();
+  }
 }
 
 function mapHistoryMessages(messages = []) {
@@ -298,6 +378,8 @@ const startChatSession = async (req, res) => {
       console.error("Failed to send astrologer mobile push:", mobilePushError);
     }
 
+    schedulePendingChatRequestExpiry(req.app, session.id);
+
     res.status(201).json({
       success: true,
       message: "Chat request sent. Waiting for astrologer approval.",
@@ -376,6 +458,31 @@ const endChatSession = async (req, res) => {
     }
 
     const io = req.app.get("io");
+
+    if (session.requestStatus !== "approved") {
+      await session.update({
+        requestStatus: "rejected",
+        status: "cancelled",
+        endTime: new Date(),
+      });
+      await session.reload();
+      await notifyPendingChatRequestClosed(io, session, "user_cancelled");
+
+      return res.status(200).json({
+        success: true,
+        message: "Chat request cancelled",
+        session: {
+          id: session.id,
+          totalMinutes: session.totalMinutes || 0,
+          totalCost: parseFloat(session.totalCost || 0),
+          billedAmount: 0,
+          pricePerMinute: parseFloat(session.pricePerMinute),
+          startTime: session.startTime,
+          endTime: session.endTime,
+        },
+      });
+    }
+
     const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
 
@@ -1202,6 +1309,8 @@ const approveChatRequest = async (req, res) => {
         status: "cancelled",
         endTime: new Date(),
       });
+      await session.reload();
+      await notifyPendingChatRequestClosed(req.app.get("io"), session, "expired");
 
       return res.status(410).json({
         success: false,
@@ -1325,6 +1434,7 @@ const approveChatRequest = async (req, res) => {
       maxEndTime: walletLimit.maxEndTime,
       walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
     });
+    await cancelPendingChatRequestNotification(session, "approved");
 
     if (io && chatSocketService) {
       chatSocketService.scheduleUserInactivityAutoEnd(io, session);
@@ -1393,36 +1503,13 @@ const rejectChatRequest = async (req, res) => {
       status: "cancelled",
       endTime: new Date(),
     });
+    await session.reload();
 
-    const io = req.app.get("io");
-    if (io) {
-      const {
-        getSessionRoom,
-        getUserRoom,
-        getAstrologerRoom,
-        mapSession,
-        clearUserInactivityAutoEnd,
-        clearWalletLimitAutoEnd,
-      } = require("../../services/chatSocket");
-
-      clearUserInactivityAutoEnd(session.id);
-      clearWalletLimitAutoEnd(session.id);
-
-      const sessionForUser = mapSession(session, "user");
-      const sessionForAstrologer = mapSession(session, "astrologer");
-
-      io.to(getSessionRoom(sessionId)).emit("chat:rejected", { sessionId });
-
-      io.to(getUserRoom(session.userId)).emit("chat:updated", {
-        sessionId,
-        session: sessionForUser,
-      });
-
-      io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
-        sessionId,
-        session: sessionForAstrologer,
-      });
-    }
+    await notifyPendingChatRequestClosed(
+      req.app.get("io"),
+      session,
+      "astrologer_rejected"
+    );
 
     return res.status(200).json({
       success: true,
