@@ -87,12 +87,7 @@ async function getRecentUserMessagesForSession(sessionId) {
       userId: historySession.userId,
       messages: messages.reverse().map((message) => message.message).filter(Boolean),
     };
-    console.log("[InterestCohort][Worker] Loaded user messages from chat history", {
-      sessionId,
-      historySessionId: historySession.id,
-      userId: result.userId,
-      messageCount: result.messages.length,
-    });
+    console.log("[InterestCohort][Worker] Loaded user messages from chat history");
     return result;
   }
 
@@ -100,9 +95,7 @@ async function getRecentUserMessagesForSession(sessionId) {
     attributes: ["id", "userId"],
   });
   if (!liveSession) {
-    console.log("[InterestCohort][Worker] No live or history session found", {
-      sessionId,
-    });
+    console.log("[InterestCohort][Worker] No live or history session found");
     return { userId: null, messages: [] };
   }
 
@@ -121,38 +114,24 @@ async function getRecentUserMessagesForSession(sessionId) {
     userId: liveSession.userId,
     messages: messages.reverse().map((message) => message.message).filter(Boolean),
   };
-  console.log("[InterestCohort][Worker] Loaded user messages from live chat", {
-    sessionId,
-    userId: result.userId,
-    messageCount: result.messages.length,
-  });
+  console.log("[InterestCohort][Worker] Loaded user messages from live chat");
   return result;
 }
 
 async function processQueueItem(item) {
   const parsed = parseQueueItem(item);
   if (!parsed?.sessionId) {
-    console.log("[InterestCohort][Worker] Skipped invalid queue item", {
-      item,
-    });
+    console.log("[InterestCohort][Worker] Skipped invalid queue item");
     return { processed: false, reason: "invalid_item" };
   }
 
-  console.log("[InterestCohort][Worker] Processing queue item", {
-    sessionId: parsed.sessionId,
-    userId: parsed.userId || null,
-    attempts: parsed.attempts || 0,
-  });
+  console.log("[InterestCohort][Worker] Processing queue item");
 
   const { userId: resolvedUserId, messages } = await getRecentUserMessagesForSession(parsed.sessionId);
   const userId = parsed.userId || resolvedUserId;
 
   if (!userId || messages.length === 0) {
-    console.log("[InterestCohort][Worker] Requeueing item; messages unavailable", {
-      sessionId: parsed.sessionId,
-      userId,
-      messageCount: messages.length,
-    });
+    console.log("[InterestCohort][Worker] Requeueing item; messages unavailable");
     await requeueWithBackoff(parsed, "messages_not_available");
     return { processed: false, reason: "messages_not_available" };
   }
@@ -174,14 +153,7 @@ async function processQueueItem(item) {
 
   const rawContent = completion.choices?.[0]?.message?.content || "";
   const classification = normalizeClassificationPayload(rawContent);
-  console.log("[InterestCohort][Worker] OpenAI classification received", {
-    sessionId: parsed.sessionId,
-    userId,
-    hasClassification: Boolean(classification),
-    primaryIntent: classification?.primaryIntent || null,
-    secondaryIntent: classification?.secondaryIntent || null,
-    confidence: classification?.confidence || null,
-  });
+  console.log("[InterestCohort][Worker] OpenAI classification received successfully");
 
   const result = await recordIntentClassification({
     userId,
@@ -196,12 +168,7 @@ async function processQueueItem(item) {
     },
   });
 
-  console.log("[InterestCohort][Worker] Queue item record result", {
-    sessionId: parsed.sessionId,
-    userId,
-    recorded: result.recorded,
-    reason: result.reason || null,
-  });
+  console.log("[InterestCohort][Worker] Queue item record result logged");
 
   return {
     processed: result.recorded,
@@ -218,10 +185,7 @@ async function processInterestClassificationQueue() {
 
   try {
     const batchSize = Math.min(Math.max(Number(process.env.INTEREST_WORKER_BATCH_SIZE || 25), 1), 100);
-    console.log("[InterestCohort][Worker] Queue processing started", {
-      queue: INTEREST_QUEUE_NAME,
-      batchSize,
-    });
+    console.log("[InterestCohort][Worker] Queue processing started");
 
     for (let index = 0; index < batchSize; index += 1) {
       const item = await redis.rpop(INTEREST_QUEUE_NAME);
@@ -247,10 +211,7 @@ async function processInterestClassificationQueue() {
 
 function startInterestClassificationWorker() {
   if (workerTimer || process.env.INTEREST_WORKER_DISABLED === "true") {
-    console.log("[InterestCohort][Worker] Worker not started", {
-      alreadyStarted: Boolean(workerTimer),
-      disabled: process.env.INTEREST_WORKER_DISABLED === "true",
-    });
+    console.log("[InterestCohort][Worker] Worker not started");
     return;
   }
 

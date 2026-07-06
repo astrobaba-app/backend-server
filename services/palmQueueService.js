@@ -26,10 +26,10 @@ const RECONCILE_INTERVAL_MS = 60 * 1000;
 const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
 const queueLog = (event, payload = {}) => {
   if (!PALM_DEBUG) return;
-  console.log(`[PalmFlow][QUEUE] ${event}`, payload);
+  console.log(`[PalmFlow][QUEUE] ${event}`);
 };
 const queueInfo = (event, payload = {}) => {
-  console.log(`[PalmQueue][${event}]`, payload);
+  console.log(`[PalmQueue][${event}]`);
 };
 const QUALITY_REJECT_ERROR_TAG = "QUALITY_REJECTED_TERMINAL";
 const PALM_REPORT_TYPE = "palmistry";
@@ -337,7 +337,7 @@ const processNextPalmJob = async ({ chain = false } = {}) => {
           stageMessage: "Matched a previous palm analysis. Report is ready instantly.",
           completedAt: new Date(),
         });
-        console.log("[PalmQueue] cache hit by imageHash", { jobId: job.id, imageHash: upload.imageHash });
+        console.log("[PalmQueue] cache hit by imageHash");
         return;
       }
     }
@@ -416,16 +416,7 @@ const processNextPalmJob = async ({ chain = false } = {}) => {
       },
     });
 
-    console.log("[PalmQueue][ReportRequest] LLM response saved", {
-      reportRequestId: reportGenerationRequest.id,
-      userId: job.userId,
-      userRequestId: userRequestId || null,
-      kundliId: kundli?.id || null,
-      price: PALM_REPORT_PRICE,
-      inputTokens: reportGenerationRequest.inputTokens,
-      outputTokens: reportGenerationRequest.outputTokens,
-      totalTokens: reportGenerationRequest.totalTokens,
-    });
+    console.log("[PalmQueue][ReportRequest] LLM response saved successfully");
 
     await PalmReport.upsert({
       palmUploadId: upload.id,
@@ -568,12 +559,7 @@ const processPalmQueueSnapshot = async ({ workerName = "PalmQueueWorker" } = {})
 
   const initialLength = Number(await redis.llen(PALM_QUEUE_KEY)) || 0;
   const batchSize = parsePositiveInt(process.env.PALM_QUEUE_WORKER_BATCH_SIZE, 25);
-  console.log(`[${workerName}] Queue processing started`, {
-    queue: PALM_QUEUE_KEY,
-    initialLength,
-    batchSize,
-    processingLimit: initialLength,
-  });
+  console.log(`[${workerName}] Queue processing started`);
 
   let processed = 0;
   for (let index = 0; index < initialLength; index += 1) {
@@ -581,11 +567,7 @@ const processPalmQueueSnapshot = async ({ workerName = "PalmQueueWorker" } = {})
     processed += 1;
   }
 
-  console.log(`[${workerName}] Queue processing completed`, {
-    queue: PALM_QUEUE_KEY,
-    initialLength,
-    processed,
-  });
+  console.log(`[${workerName}] Queue processing completed successfully`);
 
   return { initialLength, processed };
 };

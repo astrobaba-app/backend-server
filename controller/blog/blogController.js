@@ -359,11 +359,7 @@ const likeBlog = async (req, res) => {
       });
     }
 
-    // Get client information (handles proxies, load balancers, CDNs)
     const { userId, ipAddress, userAgent } = getClientInfo(req);
-    console.log("User ID:", userId);
-    console.log("IP Address:", ipAddress);
-    console.log("User Agent:", userAgent);
 
     // Check if user already liked this blog
     const existingLike = await BlogLike.findOne({
@@ -420,10 +416,7 @@ const checkBlogLikeStatus = async (req, res) => {
       });
     }
 
-    // Get client information (handles proxies, load balancers, CDNs)
     const { userId, ipAddress } = getClientInfo(req);
-    console.log("User ID:", userId);
-    console.log("IP Address:", ipAddress);
 
     const existingLike = await BlogLike.findOne({
       where: {

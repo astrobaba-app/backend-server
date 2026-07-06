@@ -11,7 +11,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
  */
 const handleVoiceWebSocket = (ws, req) => {
   console.log('=== NEW VOICE WEBSOCKET CONNECTION ===');
-  console.log('User:', req.user?.id);
+
   
   let openaiWs = null;
   let isOpenAIReady = false;
@@ -22,8 +22,7 @@ const handleVoiceWebSocket = (ws, req) => {
   try {
     // Connect to OpenAI Realtime API
     const openaiUrl = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
-    console.log('Connecting to OpenAI:', openaiUrl);
-    console.log('Using model:', REALTIME_MODEL);
+    console.log('Connecting to OpenAI');
     
     openaiWs = new WebSocket(openaiUrl, {
       headers: {
@@ -142,7 +141,7 @@ const handleVoiceWebSocket = (ws, req) => {
           if (isTextMessage && messageStr) {
             try {
               const parsed = JSON.parse(messageStr);
-              console.log('→ Forwarding JSON message to client:', parsed.type);
+
               
               // Mark session as configured when we get session.updated
               if (parsed.type === 'session.updated') {
@@ -161,10 +160,7 @@ const handleVoiceWebSocket = (ws, req) => {
                 }
               }
               
-              // Log full message for important types
-              if (parsed.type === 'error' || parsed.type === 'session.created' || parsed.type === 'session.updated') {
-                console.log('Full message:', JSON.stringify(parsed, null, 2));
-              }
+
               
               // Check for errors from OpenAI
               if (parsed.type === 'error') {
@@ -174,12 +170,12 @@ const handleVoiceWebSocket = (ws, req) => {
               // Send JSON text to client so browser receives it as a string
               ws.send(messageStr);
             } catch (e) {
-              console.log('→ Forwarding text message to client (non-JSON)');
+
               ws.send(messageStr);
             }
           } else {
             // Binary audio data
-            console.log('→ Forwarding binary audio to client:', data.length, 'bytes');
+
             // Forward raw binary (PCM16 audio frames)
             ws.send(data);
           }
@@ -214,8 +210,7 @@ const handleVoiceWebSocket = (ws, req) => {
     // OpenAI closed
     openaiWs.on('close', (code, reason) => {
       console.log('OpenAI WebSocket closed');
-      console.log('Close code:', code);
-      console.log('Close reason:', reason?.toString());
+
       if (ws.readyState === WebSocket.OPEN) {
         ws.close(code, reason);
       }
@@ -249,25 +244,18 @@ const handleVoiceWebSocket = (ws, req) => {
         // OR if it's a control message (non-audio), send when ready
         if (openaiWs && openaiWs.readyState === WebSocket.OPEN && isOpenAIReady) {
           if (isSessionConfigured || !isAudioMessage) {
-            // Log what we're sending (reduce spam for audio)
-            if (messageType === 'input_audio_buffer.append') {
-              // Don't log every audio chunk
-            } else {
-              console.log('← Forwarding message to OpenAI:', messageType);
-            }
+
             
             openaiWs.send(dataStr);
           } else {
             // Queue audio until session is configured
             messageQueue.push(dataStr);
-            if (messageQueue.length % 10 === 1) { // Log every 10th to avoid spam
-              console.log('📥 Queued audio (waiting for session.updated), queue size:', messageQueue.length);
-            }
+
           }
         } else {
           // Queue message until OpenAI is ready
           messageQueue.push(dataStr);
-          console.log('📥 Queued message (OpenAI not ready yet), queue size:', messageQueue.length);
+
         }
       } catch (err) {
         console.error('Error forwarding message to OpenAI:', err);

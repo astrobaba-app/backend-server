@@ -118,18 +118,7 @@ async function refreshUserWalletCohorts(userId) {
   const metrics = await calculateWalletMetrics(userId);
   const scores = buildWalletCohortScores(metrics);
 
-  console.log("[WalletCohort] Refreshing wallet cohorts", {
-    userId,
-    metrics: {
-      balance: metrics.balance,
-      rechargeCount: metrics.rechargeCount,
-      totalRechargeAmount: metrics.totalRechargeAmount,
-      daysSinceLastRecharge: metrics.daysSinceLastRecharge,
-    },
-    activeCategories: Object.entries(scores)
-      .filter(([, score]) => Number(score || 0) > 0)
-      .map(([category]) => category),
-  });
+  console.log("[WalletCohort] Refreshing wallet cohorts");
 
   return setUserCohortScores({
     userId,
@@ -143,10 +132,7 @@ async function refreshUserWalletCohorts(userId) {
 }
 
 function queueWalletCohortRefresh(userId, reason = "wallet_event") {
-  console.log("[WalletCohort] Queueing wallet cohort refresh", {
-    userId,
-    reason,
-  });
+  console.log("[WalletCohort] Queueing wallet cohort refresh");
 
   setImmediate(async () => {
     try {

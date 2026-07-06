@@ -245,11 +245,7 @@ const redirectToGoogle = (req, res) => {
     `https://accounts.google.com/o/oauth2/v2/auth?` +
     `client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}&response_type=code&scope=openid profile email&state=${encodeURIComponent(state)}`;
   
-  console.log("Redirecting to Google with:", {
-    clientId: GOOGLE_CLIENT_ID,
-    redirectUri: GOOGLE_REDIRECT_URI,
-    source,
-  });
+  console.log("Redirecting to Google");
   
   res.redirect(googleAuthURL);
 };
@@ -282,10 +278,7 @@ const googleCallback = async (req, res) => {
     return res.status(500).json({ message: "Google OAuth not configured properly" });
   }
 
-  console.log("Google callback received with code:", code.substring(0, 20) + "...");
-  console.log("Using redirect_uri:", GOOGLE_REDIRECT_URI);
-  console.log("Client ID:", GOOGLE_CLIENT_ID);
-  console.log("Source:", source);
+  console.log("Google callback received");
 
   try {
     //Get the access token from Google
@@ -297,7 +290,7 @@ const googleCallback = async (req, res) => {
       grant_type: "authorization_code",
     };
 
-    console.log("Requesting token from Google with redirect_uri:", tokenRequestData.redirect_uri);
+    console.log("Requesting token from Google");
 
     const response = await axios.post(
       "https://oauth2.googleapis.com/token",

@@ -324,10 +324,7 @@ const MAX_AI_INTEREST_SIGNALS_PER_SESSION = 20;
 const appendAiInterestSignal = (existingSignals, classification, userMessageId) => {
   const normalized = normalizeClassificationPayload(classification);
   if (!normalized) {
-    console.log("[InterestCohort][AI] Skipped invalid inline signal", {
-      userMessageId,
-      classification,
-    });
+    console.log("[InterestCohort][AI] Skipped invalid inline signal");
     return Array.isArray(existingSignals) ? existingSignals : [];
   }
 
@@ -343,14 +340,7 @@ const appendAiInterestSignal = (existingSignals, classification, userMessageId) 
     },
   ].slice(-MAX_AI_INTEREST_SIGNALS_PER_SESSION);
 
-  console.log("[InterestCohort][AI] Captured inline interest signal", {
-    userMessageId,
-    primaryIntent: normalized.primaryIntent,
-    secondaryIntent: normalized.secondaryIntent,
-    confidence: normalized.confidence,
-    previousSignalCount: signals.length,
-    nextSignalCount: nextSignals.length,
-  });
+  console.log("[InterestCohort][AI] Captured inline interest signal");
 
   return nextSignals;
 };
@@ -1916,14 +1906,7 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
     );
     let aiRawResponse = parsedInlineResponse.astrologyResponse;
     const intentClassification = parsedInlineResponse.classification;
-    console.log("[InterestCohort][AI] Inline classification parsed from AI reply", {
-      userId,
-      sessionId,
-      hasClassification: Boolean(intentClassification),
-      primaryIntent: intentClassification?.primaryIntent || null,
-      secondaryIntent: intentClassification?.secondaryIntent || null,
-      confidence: intentClassification?.confidence || null,
-    });
+    console.log("[InterestCohort][AI] Inline classification parsed");
     const completionFinishReason = completion.choices[0].finish_reason;
     let tokensUsed = completion.usage?.total_tokens || 0;
 
@@ -2044,13 +2027,7 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
 
   await session.update({ isActive: false });
   await clearAiChatKundliContext(sessionId);
-  console.log("[InterestCohort][AI] AI chat session ended", {
-    userId,
-    sessionId,
-    signalCount: Array.isArray(session.interestSignals)
-      ? session.interestSignals.length
-      : 0,
-  });
+  console.log("[InterestCohort][AI] AI chat session ended");
   queueAiChatInterestFinalization({
     userId,
     sessionId,
@@ -2661,7 +2638,7 @@ const aiChatReceiveQueueKey = (sessionId) => `${AI_CHAT_RECEIVE_QUEUE_PREFIX}:${
 
 const aiChatQueueLog = (event, payload = {}) => {
   if (AI_CHAT_QUEUE_DEBUG) {
-    console.log(`[AIChatQueue][${event}]`, payload);
+    console.log(`[AIChatQueue][${event}]`);
   }
 };
 

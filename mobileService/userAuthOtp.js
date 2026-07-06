@@ -8,7 +8,7 @@ const handleSendAuthOTP = async (phone, otp) => {
       to: formattedPhone,
     });
 
-    console.log("Message sent:", message.sid);
+    console.log("Message sent successfully");
   } catch (err) {
     console.error("Error sending OTP:", err);
   }

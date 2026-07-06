@@ -535,8 +535,6 @@ async function generateMonthlyPredictions(monthlyPayload, userId) {
     throw new Error(`No prediction response returned from OpenAI for ${monthlyPayload.monthName}`);
   }
 
-  console.log(`[YearlyReportService] OpenAI Response for ${monthlyPayload.monthName}:`);
-  console.log(content);
 
   try {
     return JSON.parse(content);

@@ -11,9 +11,7 @@ const createVoiceSession = async (req, res) => {
   try {
     console.log('=== CREATE VOICE SESSION START ===');
     const userId = req.user.id;
-    console.log('User ID:', userId);
-    console.log('OpenAI API Key exists:', !!OPENAI_API_KEY);
-    console.log('Realtime Model:', REALTIME_MODEL);
+
 
     // Generate ephemeral token for OpenAI Realtime API
     // The client will use this to establish WebRTC connection
@@ -36,7 +34,7 @@ const createVoiceSession = async (req, res) => {
     };
 
     console.log('Session config created successfully');
-    console.log('Voice selected:', sessionConfig.voice);
+
 
     res.status(200).json({
       success: true,
@@ -64,7 +62,7 @@ const createVoiceSession = async (req, res) => {
 const getVoiceConfig = async (req, res) => {
   try {
     console.log('=== GET VOICE CONFIG START ===');
-    console.log('User ID:', req.user.id);
+
 
     const config = {
       success: true,
@@ -83,7 +81,7 @@ const getVoiceConfig = async (req, res) => {
     };
 
     console.log('Voice config retrieved successfully');
-    console.log('Available voices:', config.config.voices);
+
 
     res.status(200).json(config);
 

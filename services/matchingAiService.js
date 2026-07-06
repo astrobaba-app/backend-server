@@ -95,7 +95,7 @@ Return ONLY a JSON object with this exact structure:
     cleanContent = cleanContent.replace(/\s*```$/, "");
 
     const enhanced = JSON.parse(cleanContent);
-    console.log(`[MatchingAI] Successfully enhanced Ashtakoot explanations for ${boyName} & ${girlName}`);
+    console.log("[MatchingAI] Successfully enhanced Ashtakoot explanations");
     return enhanced;
   } catch (error) {
     console.error("[MatchingAI] Enhancement failed:", error?.message || error);

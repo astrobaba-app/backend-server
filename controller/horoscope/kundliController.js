@@ -466,9 +466,7 @@ const createKundli = async (req, res) => {
       latitude,
       longitude,
     } = req.body;
-    console.log("Creating kundli for user:", req.body);
-    console.log("User ID:", latitude, longitude);
-   console.log("User ID:", placeOfBirth);
+    console.log("Creating kundli for user");
     // Validate required fields
     if (!timeOfbirth || !placeOfBirth || !gender) {
       return res.status(400).json({
@@ -536,8 +534,8 @@ const createKundli = async (req, res) => {
       }
     };
 
-    console.log("[KundliController] Vimshottari Dasha settled result:", dasha);
-    console.log("[KundliController] Yogini Dasha settled result:", yogini);
+    console.log("[KundliController] Vimshottari Dasha resolved");
+    console.log("[KundliController] Yogini Dasha resolved");
 
     const basicDetailsVal = extractValue(basicDetails, "Basic Details");
     const astroDetailsVal = extractValue(astroDetails, "Astro Details (House Cusps)");

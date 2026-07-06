@@ -163,13 +163,7 @@ const createNoopReportResponse = (label) => ({
     return this;
   },
   json(payload) {
-    console.log(`[${label}] Background response`, {
-      statusCode: this.statusCode || 200,
-      success: payload?.success,
-      reportId: payload?.report?.id || null,
-      reportRequestId: payload?.report?.reportRequestId || null,
-      message: payload?.message || null,
-    });
+    console.log(`[${label}] Background response processed`);
     return payload;
   },
 });
@@ -246,14 +240,7 @@ const saveCachedReportGenerationRequestForWorker = async ({
     },
   });
 
-  console.log("[ReportQueue][LLM][CACHED_HANDOFF]", {
-    reportRequestId: reportGenerationRequest.id,
-    userId,
-    userRequestId: userRequest.id,
-    reportType,
-    sourceId: reportRecord.id,
-    hasPdf,
-  });
+  console.log("[ReportQueue][LLM][CACHED_HANDOFF] Handed off cached data successfully");
 
   return reportGenerationRequest;
 };
@@ -558,7 +545,7 @@ const getOrCreateStoredReport = async ({ userId, userRequestId, kundliData, user
     };
   }
 
-  console.log("[Kundli Report] Generating AI-enhanced content for:", userDetails.fullName);
+  console.log("[Kundli Report] Generating AI-enhanced content");
   const reportData = await generateKundliReportContent(kundliData, userDetails);
 
   reportRecord = await KundliReport.create({
@@ -917,7 +904,7 @@ const generateDailyKundaliReport = async (req, res) => {
       });
     }
 
-    console.log("Received daily report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    console.log("Received daily report request");
 
     if (!req.dailyReportBackgroundMode) {
       const reportPurchase = await assertReportPurchaseAccess({
@@ -1227,16 +1214,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
         },
       });
 
-      console.log("[DailyReport][ReportRequest] LLM response saved", {
-        reportRequestId: reportGenerationRequest.id,
-        userId,
-        userRequestId: userRequest.id,
-        kundliId: dailyKundli?.id || null,
-        price: DAILY_REPORT_GENERATION_PRICE,
-        inputTokens: tokenUsage.inputTokens || 0,
-        outputTokens: tokenUsage.outputTokens || 0,
-        totalTokens: tokenUsage.totalTokens || 0,
-      });
+      console.log("[DailyReport][ReportRequest] LLM response saved successfully");
     }
 
     if (!reportGenerationRequest && req.reportGenerationRequestId && reportRecord && finalResponseData) {
@@ -1294,12 +1272,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
       if (reportRecord?.pdfUrl) {
         pdfMetadata = getStoredPdfMetadata(reportRecord);
       } else {
-        console.log("[DailyReport][PDF] Generating daily report PDF", {
-          userId,
-          userRequestId: userRequest.id,
-          reportId: reportRecord?.id || null,
-          reportRequestId: reportGenerationRequest?.id || null,
-        });
+        console.log("[DailyReport][PDF] Generating daily report PDF");
 
         const pdfBuffer = await generateDailyReportPDF(finalResponseData, dailyUserDetails);
         pdfMetadata = await ensureStoredDailyPdf({
@@ -1309,13 +1282,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
           userRequestId: userRequest.id,
         });
 
-        console.log("[DailyReport][PDF] Uploaded daily report PDF", {
-          userId,
-          userRequestId: userRequest.id,
-          reportId: reportRecord?.id || null,
-          reportRequestId: reportGenerationRequest?.id || null,
-          pdfUrl: pdfMetadata?.pdfUrl || null,
-        });
+        console.log("[DailyReport][PDF] Uploaded daily report PDF successfully");
       }
 
       if (reportGenerationRequest) {
@@ -1347,7 +1314,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
       }
     }
 
-    console.log("final response data for daily report:", finalResponseData);
+
 
     res.status(200).json({
       success: true,
@@ -1555,12 +1522,7 @@ const regenerateDailyReportPdf = async (req, res) => {
       completedAt: new Date(),
     });
 
-    console.log("[Daily PDF] regenerated from stored data", {
-      userId,
-      reportId: reportRecord.id,
-      reportRequestId: reportRequest.id,
-      pdfUrl: pdfMetadata.pdfUrl,
-    });
+    console.log("[Daily PDF] regenerated from stored data successfully");
 
     return res.status(200).json({
       success: true,
@@ -1634,7 +1596,7 @@ const downloadDailyReportPdf = async (req, res) => {
 
 const generateYearlyPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
   try {
-    console.log(`[Yearly PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
+    console.log("[Yearly PDF Background] Generating PDF...");
     const pdfBuffer = await generateYearlyReportPDF(reportRecord.reportData, userRequest);
 
     console.log(`[Yearly PDF Background] Uploading to Cloudinary...`);
@@ -1660,7 +1622,7 @@ const generateYearlyPdfInBackground = async (reportRecord, userRequest, reportGe
       });
     }
 
-    console.log(`[Yearly PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
+    console.log("[Yearly PDF Background] Successfully completed");
   } catch (error) {
     console.error(`[Yearly PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
     if (reportGenerationRequest) {
@@ -1719,7 +1681,7 @@ const generateYearlyKundaliReport = async (req, res) => {
       });
     }
 
-    console.log("Received yearly report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    console.log("Received yearly report request");
 
     const userRequest = await findOrCreateUserRequestWithKundli({
       userId,
@@ -1916,14 +1878,7 @@ const generateYearlyKundaliReport = async (req, res) => {
         },
       });
 
-      console.log("[YearlyReport][ReportRequest] LLM response saved", {
-        reportRequestId: reportGenerationRequest.id,
-        userId,
-        userRequestId: userRequest.id,
-        kundliId: yearlyKundli?.id || null,
-        price: YEARLY_REPORT_GENERATION_PRICE,
-        tokenUsageCaptured: false,
-      });
+      console.log("[YearlyReport][ReportRequest] LLM response saved successfully");
 
       if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
         return res.status(202).json({
@@ -2187,12 +2142,7 @@ const regenerateYearlyReportPdf = async (req, res) => {
       completedAt: new Date(),
     });
 
-    console.log("[Yearly PDF] regenerated from stored data", {
-      userId,
-      reportId: reportRecord.id,
-      reportRequestId: reportRequest.id,
-      pdfUrl: pdfMetadata.pdfUrl,
-    });
+    console.log("[Yearly PDF] regenerated from stored data successfully");
 
     return res.status(200).json({
       success: true,
@@ -2266,7 +2216,7 @@ const downloadYearlyReportPdf = async (req, res) => {
 
 const generateWealthPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
   try {
-    console.log(`[Wealth PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
+    console.log("[Wealth PDF Background] Generating PDF...");
     const pdfBuffer = await generateWealthReportPDF(reportRecord.reportData, userRequest);
 
     console.log(`[Wealth PDF Background] Uploading to Cloudinary...`);
@@ -2292,7 +2242,7 @@ const generateWealthPdfInBackground = async (reportRecord, userRequest, reportGe
       });
     }
 
-    console.log(`[Wealth PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
+    console.log("[Wealth PDF Background] Successfully completed");
   } catch (error) {
     console.error(`[Wealth PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
     if (reportGenerationRequest) {
@@ -2351,7 +2301,7 @@ const generateWealthKundaliReport = async (req, res) => {
       });
     }
 
-    console.log("Received wealth report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    console.log("Received wealth report request");
 
     const userRequest = await findOrCreateUserRequestWithKundli({
       userId,
@@ -2575,14 +2525,7 @@ const generateWealthKundaliReport = async (req, res) => {
         },
       });
 
-      console.log("[WealthReport][ReportRequest] LLM response saved", {
-        reportRequestId: reportGenerationRequest.id,
-        userId,
-        userRequestId: userRequest.id,
-        kundliId: wealthKundli?.id || null,
-        price: WEALTH_REPORT_GENERATION_PRICE,
-        tokenUsageCaptured: false,
-      });
+      console.log("[WealthReport][ReportRequest] LLM response saved successfully");
 
       if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
         return res.status(202).json({
@@ -2866,12 +2809,7 @@ const regenerateWealthReportPdf = async (req, res) => {
       completedAt: new Date(),
     });
 
-    console.log("[Wealth PDF] regenerated from stored data", {
-      userId,
-      reportId: reportRecord.id,
-      reportRequestId: reportRequest.id,
-      pdfUrl: pdfMetadata.pdfUrl,
-    });
+    console.log("[Wealth PDF] regenerated from stored data successfully");
 
     return res.status(200).json({
       success: true,
@@ -2945,7 +2883,7 @@ const downloadWealthReportPdf = async (req, res) => {
 
 const generateSadeSatiPdfInBackground = async (reportRecord, userRequest) => {
   try {
-    console.log(`[Sade Sati PDF Background] Generating PDF for report ID: ${reportRecord.id}...`);
+    console.log("[Sade Sati PDF Background] Generating PDF...");
     const pdfBuffer = await generateSadeSatiReportPDF(reportRecord.reportData, userRequest);
 
     const safeName = (userRequest.fullName ?? "sadesati_report").replace(/\s+/g, "_");
@@ -2965,7 +2903,7 @@ const generateSadeSatiPdfInBackground = async (reportRecord, userRequest) => {
       pdfFileName: fileName,
       pdfUploadedAt: new Date(),
     });
-    console.log(`[Sade Sati PDF Background] Successfully completed for report ID: ${reportRecord.id}`);
+    console.log("[Sade Sati PDF Background] Successfully completed");
   } catch (error) {
     console.error(`[Sade Sati PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
   }
@@ -3001,7 +2939,7 @@ const generateSadeSatiKundaliReport = async (req, res) => {
       });
     }
 
-    console.log("Received Sade Sati report request for:", { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth });
+    console.log("Received Sade Sati report request");
 
     const userRequest = await findOrCreateUserRequestWithKundli({
       userId,

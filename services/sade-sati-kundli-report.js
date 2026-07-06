@@ -509,7 +509,7 @@ function cleanJsonResponse(rawText) {
 }
 
 async function generateSadeSatiReportContent(reportInput, userId) {
-  console.log(`[SadeSatiReportService] Requesting full report from OpenAI for ${reportInput.user_profile?.name || "client"}...`);
+  console.log("[SadeSatiReportService] Requesting full report from OpenAI");
   const response = await createChatCompletion(
     {
       model: CHAT_MODEL,
@@ -545,7 +545,7 @@ async function generateSadeSatiReportContent(reportInput, userId) {
 }
 
 async function generateSadeSatiReport(kundli, userRequest) {
-  console.log(`[SadeSatiReportService] Processing report payload for ${userRequest.fullName}...`);
+  console.log("[SadeSatiReportService] Processing report payload");
   const reportInput = buildSadeSatiReportPayload(kundli, userRequest);
 
   const reportData = await generateSadeSatiReportContent(reportInput, userRequest.userId);

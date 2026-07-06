@@ -121,19 +121,7 @@ async function refreshUserAstroProductCohorts(userId) {
   const metrics = await calculateAstroProductMetrics(userId);
   const scores = buildAstroProductScores(metrics);
 
-  console.log("[AstroCohort] Refreshing astro product cohorts", {
-    userId,
-    metrics: {
-      kundliCount: metrics.kundliCount,
-      kundliViewCount: metrics.kundliViewCount,
-      matchingCount: metrics.matchingCount,
-      matchingViewCount: metrics.matchingViewCount,
-      horoscopeViewCount: metrics.horoscopeViewCount,
-    },
-    activeCategories: Object.entries(scores)
-      .filter(([, score]) => Number(score || 0) > 0)
-      .map(([category]) => category),
-  });
+  console.log("[AstroCohort] Refreshing astro product cohorts");
 
   return setUserCohortScores({
     userId,
@@ -149,10 +137,7 @@ async function refreshUserAstroProductCohorts(userId) {
 function queueAstroProductCohortRefresh(userId, reason = "astro_product_event") {
   if (!userId) return;
 
-  console.log("[AstroCohort] Queueing astro product cohort refresh", {
-    userId,
-    reason,
-  });
+  console.log("[AstroCohort] Queueing astro product cohort refresh");
 
   setImmediate(async () => {
     try {

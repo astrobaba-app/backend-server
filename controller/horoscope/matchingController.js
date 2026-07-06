@@ -93,16 +93,7 @@ const createMatching = async (req, res) => {
       .digest("hex")
       .slice(0, 12);
 
-    console.log("[KundliMatching][backend][create] Incoming request:", {
-      requestFingerprint,
-      userId,
-      boyName,
-      girlName,
-      boyDateOfBirth,
-      boyTimeOfBirth,
-      girlDateOfBirth,
-      girlTimeOfBirth,
-    });
+    console.log("[KundliMatching][backend][create] Processing incoming matching request");
 
     // Validate required fields
     const requiredFields = { boyName, boyDateOfBirth, boyTimeOfBirth, boyPlaceOfBirth, boyLatitude, boyLongitude, girlName, girlDateOfBirth, girlTimeOfBirth, girlPlaceOfBirth, girlLatitude, girlLongitude };
@@ -119,9 +110,7 @@ const createMatching = async (req, res) => {
     const maleData = getBirthDataPayload(boyName, boyDateOfBirth, boyTimeOfBirth, boyLatitude, boyLongitude);
     const femaleData = getBirthDataPayload(girlName, girlDateOfBirth, girlTimeOfBirth, girlLatitude, girlLongitude);
 
-    console.log("[KundliMatching][backend][create] Fetching matching data from Astro Engine...", {
-      requestFingerprint,
-    });
+    console.log("[KundliMatching][backend][create] Fetching matching data from Astro Engine...");
 
     // Call Astro Engine matching API
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/matching/ashtakoot`, {
@@ -143,33 +132,11 @@ const createMatching = async (req, res) => {
     const boyAscendant = matchingData.male_ascendant || null;
     const girlAscendant = matchingData.female_ascendant || null;
 
-    console.log("[KundliMatching][backend][astro-response] Raw kuta description snapshot:", {
-      requestFingerprint,
-      total_points: ashtakootData?.total_points ?? null,
-      max_points: ashtakootData?.max_points ?? null,
-      descriptions: buildKutaDescriptionSnapshot(ashtakootData?.kutas),
-    });
+    console.log("[KundliMatching][backend][astro-response] Astro Engine data received successfully");
 
-    console.log("[KundliMatching][lagna-chart] Astro engine payload summary:", {
-      boyName,
-      girlName,
-      hasBoyLagnaChart: Boolean(boyLagnaChart),
-      hasGirlLagnaChart: Boolean(girlLagnaChart),
-      boyLagnaChartDivision: boyLagnaChart?.division || null,
-      girlLagnaChartDivision: girlLagnaChart?.division || null,
-      boyLagnaPlanets: boyLagnaChart?.planets
-        ? Object.keys(boyLagnaChart.planets)
-        : [],
-      girlLagnaPlanets: girlLagnaChart?.planets
-        ? Object.keys(girlLagnaChart.planets)
-        : [],
-      boyAscendant,
-      girlAscendant,
-    });
+    console.log("[KundliMatching][lagna-chart] Astro engine payload parsed");
 
-    console.log("[MatchingAI] Firing AI enhancements in parallel...", {
-      requestFingerprint,
-    });
+    console.log("[MatchingAI] Firing AI enhancements in parallel...");
 
     // 🚀 FIRE BOTH AI CALLS IN PARALLEL
     const ashtakootPromise = enhanceAshtakootWithAI({ ashtakootData, boyName, girlName }).catch(err => {
@@ -201,13 +168,7 @@ const createMatching = async (req, res) => {
       }
     }
 
-    console.log("[KundliMatching][backend][ai-enhanced] Final kuta description snapshot:", {
-      requestFingerprint,
-      descriptions: buildKutaDescriptionSnapshot(ashtakootData?.kutas),
-      conclusionPreview: aiConclusion
-        ? aiConclusion.slice(0, 200)
-        : null,
-    });
+    console.log("[KundliMatching][backend][ai-enhanced] AI enhancements completed");
 
     // --- Process Manglik AI Result ---
     if (enhancedManglik) {
@@ -276,13 +237,7 @@ const createMatching = async (req, res) => {
     matchingJson.boyAscendant = boyAscendant;
     matchingJson.girlAscendant = girlAscendant;
 
-    console.log("[KundliMatching][backend][saved] Matching profile persisted:", {
-      requestFingerprint,
-      matchingId: matchingJson.id,
-      descriptions: buildKutaDescriptionSnapshot(
-        matchingJson?.ashtakootDetails?.kutas,
-      ),
-    });
+    console.log("[KundliMatching][backend][saved] Matching profile persisted successfully");
 
   //  console.log("Kundli matching " + JSON.stringify(matchingJson));
 

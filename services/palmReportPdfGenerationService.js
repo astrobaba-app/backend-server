@@ -11,12 +11,7 @@ const sanitizeFileNamePart = (value, fallback = "palm_report") =>
     .slice(0, 60) || fallback;
 
 const generateAndUploadPalmPdf = async ({ upload, report, features, userRequest, reportRequest }) => {
-  console.log("[PalmQueue][PDF] Generating palm report PDF", {
-    palmUploadId: upload.id,
-    reportId: report.id,
-    reportRequestId: reportRequest?.id || null,
-    userRequestId: userRequest?.id || report?.userRequestId || null,
-  });
+  console.log("[PalmQueue][PDF] Generating palm report PDF");
 
   const pdfBuffer = await generatePalmReportPDF({
     palmImages: upload.imageUrls || [],
@@ -52,11 +47,7 @@ const generateAndUploadPalmPdf = async ({ upload, report, features, userRequest,
     });
   }
 
-  console.log("[PalmQueue][PDF] Uploaded palm report PDF", {
-    palmUploadId: upload.id,
-    reportId: report.id,
-    pdfUrl: uploadResult.secure_url,
-  });
+  console.log("[PalmQueue][PDF] Uploaded palm report PDF successfully");
 
   return {
     pdfUrl: uploadResult.secure_url,
