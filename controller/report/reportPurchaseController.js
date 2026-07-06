@@ -128,12 +128,7 @@ const payReportWithWallet = async (req, res) => {
 
     await tx.commit();
 
-    console.log("[ReportPurchase][Wallet] paid", {
-      userId,
-      reportType: config.reportType,
-      purchaseId: purchase.id,
-      amount,
-    });
+    console.log("[ReportPurchase][Wallet] paid successfully");
 
     return res.status(200).json({
       success: true,
@@ -253,12 +248,7 @@ const verifyReportRazorpayPayment = async (req, res) => {
 
     await tx.commit();
 
-    console.log("[ReportPurchase][RazorpayVerify] paid", {
-      userId,
-      reportType: config.reportType,
-      purchaseId: purchase.id,
-      razorpayOrderId: razorpay_order_id,
-    });
+    console.log("[ReportPurchase][RazorpayVerify] paid successfully");
 
     return res.status(200).json({
       success: true,
@@ -347,13 +337,7 @@ const recoverReportRazorpayPayment = async (req, res) => {
 
     await tx.commit();
 
-    console.log("[ReportPurchase][RazorpayRecover] paid", {
-      userId,
-      reportType: config.reportType,
-      purchaseId: purchase.id,
-      razorpayOrderId,
-      razorpayPaymentId: paidPayment.id,
-    });
+    console.log("[ReportPurchase][RazorpayRecover] paid successfully");
 
     return res.status(200).json({
       success: true,

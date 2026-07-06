@@ -15,11 +15,9 @@ const authorizeRoles = (roles) => {
             req.user.role = currentRole;
           }
         } catch (innerErr) {
-          console.log("Error inferring role from DB:", innerErr.message);
+          console.error("Error inferring role from DB:", innerErr.message);
         }
       }
-
-      console.log("User Role (resolved):", currentRole);
 
       if (!roles.includes(currentRole)) {
         return res.status(403).json({
@@ -30,7 +28,7 @@ const authorizeRoles = (roles) => {
 
       next();
     } catch (error) {
-      console.log("authorizeRoles error:", error);
+      console.error("authorizeRoles error:", error);
       return res.status(500).json({ message: "Role authorization failed" });
     }
   };

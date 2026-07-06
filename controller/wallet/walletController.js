@@ -24,19 +24,9 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// Log Razorpay initialization status (without exposing full credentials)
-console.log('[Razorpay] Initialization status:', {
-  keyIdPresent: !!process.env.RAZORPAY_KEY_ID,
-  keySecretPresent: !!process.env.RAZORPAY_KEY_SECRET,
-  keyIdPrefix: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 8) + '...' : 'NOT SET'
-});
 
-const PAYMENT_DEBUG_LOGS = process.env.PAYMENT_DEBUG_LOGS === "true";
-const paymentDebug = (...args) => {
-  if (PAYMENT_DEBUG_LOGS) {
-    console.log(...args);
-  }
-};
+
+const paymentDebug = (...args) => {};
 
 const toAmount = (value) => {
   const parsed = parseFloat(value ?? 0);
@@ -126,10 +116,7 @@ const createRechargeOrder = async (req, res) => {
     const user = await User.findByPk(userId, { attributes: ["id"] });
 
     if (!user) {
-      console.warn("[Wallet] Recharge attempted with stale user token", {
-        userId,
-        orderAmount: rechargeAmount,
-      });
+
 
       return res.status(401).json({
         success: false,
@@ -622,16 +609,7 @@ const deductForAIUsage = async (req, res) => {
     const parsedAmount = toAmount(amount);
     const parsedMinutes = toAmount(minutes);
 
-    console.log('=== AI WALLET DEDUCTION START ===');
-    console.log('[PRODUCTION DEBUG] Timestamp:', new Date().toISOString());
-    console.log('[PRODUCTION DEBUG] User ID:', userId);
-    console.log('[PRODUCTION DEBUG] User object:', JSON.stringify(req.user));
-    console.log('[PRODUCTION DEBUG] Amount:', amount, 'Type:', typeof amount);
-    console.log('[PRODUCTION DEBUG] Type:', type);
-    console.log('[PRODUCTION DEBUG] Minutes:', minutes);
-    console.log('[PRODUCTION DEBUG] AI Session ID:', sessionId || null);
-    console.log('[PRODUCTION DEBUG] Request body:', JSON.stringify(req.body));
-    console.log('[PRODUCTION DEBUG] Request headers:', JSON.stringify(req.headers));
+
 
     if (!parsedAmount || parsedAmount <= 0) {
       console.error('[PRODUCTION DEBUG] Invalid amount validation failed:', { amount, type: typeof amount });
@@ -661,7 +639,6 @@ const deductForAIUsage = async (req, res) => {
     }
 
     // Get wallet
-    console.log('[PRODUCTION DEBUG] Fetching wallet for userId:', userId);
     const wallet = await Wallet.findOne({ where: { userId } });
 
     if (!wallet) {
@@ -672,21 +649,10 @@ const deductForAIUsage = async (req, res) => {
       });
     }
 
-    console.log('[PRODUCTION DEBUG] Wallet found:', {
-      walletId: wallet.id,
-      balance: wallet.balance,
-      balanceType: typeof wallet.balance,
-      parsedBalance: parseFloat(wallet.balance),
-      totalSpent: wallet.totalSpent
-    });
+
 
     // Check sufficient balance
     const currentBalance = parseFloat(wallet.balance);
-    console.log('[PRODUCTION DEBUG] Balance check:', {
-      currentBalance,
-      requiredAmount: parsedAmount,
-      hasSufficientBalance: currentBalance >= parsedAmount
-    });
 
     if (currentBalance < parsedAmount) {
       console.error('[PRODUCTION DEBUG] Insufficient balance for AI usage:', {
@@ -703,8 +669,6 @@ const deductForAIUsage = async (req, res) => {
     }
 
     // Use transaction for atomicity
-    const sequelize = require("../../dbConnection/dbConfig").sequelize;
-    console.log('[PRODUCTION DEBUG] Starting database transaction');
     const dbTransaction = await sequelize.transaction();
 
     try {
@@ -713,20 +677,9 @@ const deductForAIUsage = async (req, res) => {
       });
       const newTotalSpent = toAmount(wallet.totalSpent) + debitPlan.debitAmount;
 
-      console.log('[PRODUCTION DEBUG] Calculating new balances:', {
-        balanceBefore: debitPlan.previousBalance,
-        amount: parsedAmount,
-        newBalance: debitPlan.nextBalance,
-        signupBonusBefore: debitPlan.previousSignupBonusBalance,
-        signupBonusAfter: debitPlan.nextSignupBonusBalance,
-        rechargeConsumed: debitPlan.rechargeConsumed,
-        signupBonusConsumed: debitPlan.signupBonusConsumed,
-        currentTotalSpent: wallet.totalSpent,
-        newTotalSpent
-      });
+      const sequelize = require("../../dbConnection/dbConfig").sequelize;
 
       // Update wallet
-      console.log('[PRODUCTION DEBUG] Updating wallet in database');
       await wallet.update(
         {
           balance: debitPlan.nextBalance,
@@ -735,10 +688,7 @@ const deductForAIUsage = async (req, res) => {
         },
         { transaction: dbTransaction }
       );
-      console.log('[PRODUCTION DEBUG] Wallet updated successfully');
-
       // Create transaction record
-      console.log('[PRODUCTION DEBUG] Creating transaction record');
       const transaction = await WalletTransaction.create(
         {
           userId,
@@ -759,25 +709,10 @@ const deductForAIUsage = async (req, res) => {
         },
         { transaction: dbTransaction }
       );
-      console.log('[PRODUCTION DEBUG] Transaction record created:', {
-        transactionId: transaction.id,
-        amount: transaction.amount,
-        description: transaction.description
-      });
 
-      console.log('[PRODUCTION DEBUG] Committing database transaction');
       await dbTransaction.commit();
-      console.log('[PRODUCTION DEBUG] Database transaction committed successfully');
 
-      console.log('[PRODUCTION DEBUG] AI wallet deduction successful:', {
-        userId,
-        amount: parsedAmount,
-        type,
-        minutes: parsedMinutes,
-        balanceBefore: debitPlan.previousBalance,
-        newBalance: debitPlan.nextBalance,
-        transactionId: transaction.id
-      });
+
 
       if (type === "chat") {
         queueAiChatInterestFinalization({
@@ -802,9 +737,7 @@ const deductForAIUsage = async (req, res) => {
           signupBonusConsumed: debitPlan.signupBonusConsumed,
         },
       };
-      console.log('[PRODUCTION DEBUG] Sending success response:', JSON.stringify(responseData));
       res.status(200).json(responseData);
-      console.log('[PRODUCTION DEBUG] === AI WALLET DEDUCTION SUCCESS ===');
     } catch (dbError) {
       console.error('[PRODUCTION DEBUG] Database error, rolling back transaction');
       await dbTransaction.rollback();

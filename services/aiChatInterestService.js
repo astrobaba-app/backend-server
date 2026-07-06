@@ -44,9 +44,7 @@ const buildFinalClassificationFromSignals = (signals) => {
 
   const ranked = [...categoryScores.entries()].sort((a, b) => b[1] - a[1]);
   if (!ranked.length) {
-    console.log("[InterestCohort][AI] No valid interest signals after normalization", {
-      signalCount: signals.length,
-    });
+    console.log("[InterestCohort][AI] No valid interest signals after normalization");
     return null;
   }
 
@@ -64,33 +62,20 @@ const buildFinalClassificationFromSignals = (signals) => {
     confidence: aggregateConfidence,
   };
 
-  console.log("[InterestCohort][AI] Built final classification from session signals", {
-    signalCount: signals.length,
-    validSignalCount,
-    rankedCategories: ranked.slice(0, 5).map(([category, weightedScore]) => ({
-      category,
-      weightedScore,
-    })),
-    finalClassification,
-  });
+  console.log("[InterestCohort][AI] Built final classification from session signals successfully");
 
   return finalClassification;
 };
 
 async function findAiSessionForInterestFinalization({ userId, sessionId }) {
   if (sessionId) {
-    console.log("[InterestCohort][AI] Resolving AI session by provided session id", {
-      userId,
-      sessionId,
-    });
+    console.log("[InterestCohort][AI] Resolving AI session by provided session id");
     return AIChatSession.findOne({
       where: { id: sessionId, userId },
     });
   }
 
-  console.log("[InterestCohort][AI] Resolving latest active AI session for user", {
-    userId,
-  });
+  console.log("[InterestCohort][AI] Resolving latest active AI session for user");
   return AIChatSession.findOne({
     where: { userId, isActive: true },
     order: [
@@ -108,10 +93,7 @@ async function finalizeAiChatInterestSession({ userId, sessionId = null, markIna
 
   const session = await findAiSessionForInterestFinalization({ userId, sessionId });
   if (!session) {
-    console.log("[InterestCohort][AI] Cannot finalize AI interest; session not found", {
-      userId,
-      sessionId,
-    });
+    console.log("[InterestCohort][AI] Cannot finalize AI interest; session not found");
     return { finalized: false, reason: "session_not_found" };
   }
 
@@ -119,13 +101,7 @@ async function finalizeAiChatInterestSession({ userId, sessionId = null, markIna
     ? session.interestSignals.length
     : 0;
 
-  console.log("[InterestCohort][AI] Finalizing AI chat interest session", {
-    userId,
-    sessionId: session.id,
-    requestedSessionId: sessionId,
-    signalCount,
-    markInactive,
-  });
+  console.log("[InterestCohort][AI] Finalizing AI chat interest session");
 
   const classification = buildFinalClassificationFromSignals(session.interestSignals);
   if (!classification) {
@@ -148,15 +124,7 @@ async function finalizeAiChatInterestSession({ userId, sessionId = null, markIna
     await session.update({ isActive: false });
   }
 
-  console.log("[InterestCohort][AI] Final session interest record result", {
-    userId: session.userId,
-    sessionId: session.id,
-    recorded: result.recorded,
-    reason: result.reason || null,
-    primaryIntent: classification.primaryIntent,
-    secondaryIntent: classification.secondaryIntent,
-    confidence: classification.confidence,
-  });
+  console.log("[InterestCohort][AI] Final session interest record result logged");
 
   return {
     finalized: result.recorded,
@@ -167,7 +135,7 @@ async function finalizeAiChatInterestSession({ userId, sessionId = null, markIna
 }
 
 function queueAiChatInterestFinalization(payload) {
-  console.log("[InterestCohort][AI] Queueing AI interest finalization", payload);
+  console.log("[InterestCohort][AI] Queueing AI interest finalization");
   setImmediate(async () => {
     try {
       await finalizeAiChatInterestSession(payload);

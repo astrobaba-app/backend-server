@@ -5,11 +5,7 @@ const INTEREST_QUEUE_NAME =
 
 async function enqueueHumanConsultationInterestClassification({ userId, sessionId, endedAt }) {
   if (!userId || !sessionId) {
-    console.log("[InterestCohort][Human] Queue skipped; missing fields", {
-      userId,
-      sessionId,
-      endedAt,
-    });
+    console.log("[InterestCohort][Human] Queue skipped due to missing fields");
     return { queued: false, reason: "missing_required_fields" };
   }
 
@@ -22,12 +18,7 @@ async function enqueueHumanConsultationInterestClassification({ userId, sessionI
 
   try {
     await redis.lpush(INTEREST_QUEUE_NAME, JSON.stringify(payload));
-    console.log("[InterestCohort][Human] Queued consultation for classification", {
-      queue: INTEREST_QUEUE_NAME,
-      userId,
-      sessionId,
-      consultationEndTime: payload.consultationEndTime,
-    });
+    console.log("[InterestCohort][Human] Queued consultation for classification successfully");
     return { queued: true };
   } catch (error) {
     console.error("[InterestCohort][Human] Failed to queue interest classification:", error);

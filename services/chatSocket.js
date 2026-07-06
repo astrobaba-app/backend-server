@@ -607,16 +607,16 @@ function initializeChatSocket(io) {
     const isAstrologer = role === "astrologer";
     socket.data.sessionAccessCache = new Map();
 
-    console.log(`[Socket.IO] User connected: ${authId}, Role: ${role}`);
+    console.log("[Socket.IO] User connected");
 
     if (isAstrologer) {
       const roomName = getAstrologerRoom(authId);
       socket.join(roomName);
-      console.log(`[Socket.IO] Astrologer joined room: ${roomName}`);
+      console.log("[Socket.IO] Astrologer joined room");
     } else {
       const roomName = getUserRoom(authId);
       socket.join(roomName);
-      console.log(`[Socket.IO] User joined room: ${roomName}`);
+      console.log("[Socket.IO] User joined room");
     }
 
     socket.on("join_chat", async ({ sessionId }) => {

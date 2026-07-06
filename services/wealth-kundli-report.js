@@ -561,7 +561,7 @@ EXPECTED JSON SCHEMA OUTLINES:
 async function generateWealthReportContent(reportInput, userId) {
   const prompt = buildPrompt(reportInput);
   
-  console.log(`[WealthReportService] Requesting OpenAI analysis for client: ${reportInput.client.name}...`);
+  console.log("[WealthReportService] Requesting OpenAI analysis");
   console.log(`[WealthReportService] Prompt length: ${prompt.length} characters`);
   const requestStartedAt = Date.now();
   const timeoutMs = Number(
@@ -597,13 +597,7 @@ async function generateWealthReportContent(reportInput, userId) {
   });
 
   const response = await Promise.race([openAiRequest, timeout]);
-  console.log("[WealthReportService] OpenAI analysis completed", {
-    userId,
-    durationMs: Date.now() - requestStartedAt,
-    promptTokens: response?.usage?.prompt_tokens || null,
-    completionTokens: response?.usage?.completion_tokens || null,
-    totalTokens: response?.usage?.total_tokens || null,
-  });
+  console.log("[WealthReportService] OpenAI analysis completed successfully");
 
   const content = response?.choices?.[0]?.message?.content?.trim();
   if (!content) {
@@ -611,7 +605,6 @@ async function generateWealthReportContent(reportInput, userId) {
   }
 
   try {
-    console.log("[WealthReportService] Raw LLM response content:\n", content);
     const data = JSON.parse(content);
     console.log("[WealthReportService] OpenAI parsed response successfully");
     return data;
@@ -625,7 +618,7 @@ async function generateWealthReportContent(reportInput, userId) {
  * Orchestrates payload construction and LLM query
  */
 async function generateWealthReport(kundli, userRequest) {
-  console.log(`[WealthReportService] Processing report payload for ${userRequest.fullName}...`);
+  console.log("[WealthReportService] Processing report payload");
   const reportInput = buildWealthReportPayload(kundli, userRequest);
 
   // Call OpenAI API

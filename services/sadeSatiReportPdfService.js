@@ -2221,7 +2221,7 @@ async function generateSadeSatiReportPDF(reportData, userRequest) {
       }
       const htmlFileName = `sadesati_report_${Date.now()}.html`;
       fs.writeFileSync(path.join(tempDir, htmlFileName), htmlContent, "utf8");
-      console.log(`[Sade Sati PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
+      console.log("[Sade Sati PDF Service] Dumped HTML to temp for reference");
     } catch (dumpErr) {
       console.warn("[Sade Sati PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
     }

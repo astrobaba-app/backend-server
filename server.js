@@ -107,7 +107,7 @@ io.engine.on("connection", (rawSocket) => {
 });
 
 io.on("connection", (socket) => {
-  console.log(`[Socket.IO] New connection: ${socket.id} from ${socket.handshake.address}`);
+  console.log("[Socket.IO] New connection");
 });
 
 app.use(

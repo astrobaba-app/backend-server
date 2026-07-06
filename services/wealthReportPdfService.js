@@ -285,11 +285,7 @@ const logWealthPredictionCoverage = (pred) => {
     }
   });
 
-  console.log("[Wealth PDF Service] prediction coverage", {
-    availableSections: Object.keys(pred).filter((key) => hasRenderableValue(pred[key])),
-    missingSections,
-    missingFields,
-  });
+  console.log("[Wealth PDF Service] prediction coverage calculated");
 };
 
 const formatDate = (dateStr) => {
@@ -2464,7 +2460,7 @@ async function generateWealthReportPDF(reportData, userRequest) {
       const htmlFileName = `wealth_report_${Date.now()}.html`;
       htmlDumpPath = path.join(tempDir, htmlFileName);
       fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
-      console.log(`[Wealth PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
+      console.log("[Wealth PDF Service] Dumped HTML to temp for reference");
     } catch (dumpErr) {
       console.warn("[Wealth PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
     }

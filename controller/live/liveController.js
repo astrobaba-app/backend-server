@@ -152,7 +152,7 @@ const getHostToken = async (req, res) => {
     const astrologerId = req.user.id;
     const { sessionId } = req.params;
 
-    console.log("Getting host token - Astrologer:", astrologerId, "Session:", sessionId);
+    console.log("Getting host token");
 
     const liveSession = await LiveSession.findOne({
       where: {
@@ -170,7 +170,7 @@ const getHostToken = async (req, res) => {
       });
     }
 
-    console.log("Live session found:", liveSession.id, "Channel:", liveSession.agoraChannelName);
+    console.log("Live session found");
 
     // Generate Agora token for host with uid 0 (auto-assign)
     const uid = 0; // Use 0 to let Agora auto-assign unique UID
@@ -530,9 +530,7 @@ const endLiveSession = async (req, res) => {
     // Emit socket event to all participants in the room AND entire namespace
     const socketsInRoom = liveNamespace.adapter.rooms.get(roomName)?.size || 0;
     
-    console.log(`[Live Controller] Ending session ${sessionId}`);
-    console.log(`[Live Controller] Room ${roomName} has ${socketsInRoom} sockets`);
-    console.log(`[Live Controller] Namespace /live has ${liveNamespace.sockets.size} total sockets`);
+    console.log("[Live Controller] Ending session");
     
     // Emit to room with both event names for compatibility
     liveNamespace.to(roomName).emit("live_session_ended", {
@@ -554,7 +552,7 @@ const endLiveSession = async (req, res) => {
       astrologerName: liveSession.astrologer.fullName,
     });
     
-    console.log(`[Live Controller] Emitted end events for session ${sessionId}`);
+    console.log("[Live Controller] Emitted end events");
 
     res.status(200).json({
       success: true,

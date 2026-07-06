@@ -395,7 +395,7 @@ async function generateDailyReport(payload, userRequest, options = {}) {
 
   try {
     const parsed = JSON.parse(content);
-    console.log("[DailyKundliReport] GPT response received:", parsed);
+    console.log("[DailyKundliReport] GPT response received successfully");
     if (options.includeMeta) {
       return {
         data: parsed,

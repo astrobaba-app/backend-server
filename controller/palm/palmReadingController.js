@@ -30,7 +30,7 @@ const CHECKOUT_TOKEN_SECRET = process.env.PALM_CHECKOUT_TOKEN_SECRET || process.
 const PALM_DEBUG = String(process.env.PALM_DEBUG_LOGS || "").toLowerCase() === "true";
 const beLog = (event, payload = {}) => {
   if (!PALM_DEBUG) return;
-  console.log(`[PalmFlow][BE] ${event}`, payload);
+  console.log(`[PalmFlow][BE] ${event}`);
 };
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -1042,12 +1042,7 @@ const regeneratePalmReadingPdf = async (req, res) => {
       },
     });
 
-    console.log("[Palm PDF] regenerated from stored data", {
-      userId,
-      palmUploadId,
-      reportRequestId: reportRequest.id,
-      pdfUrl: uploadResult.secure_url,
-    });
+    console.log("[Palm PDF] regenerated from stored data successfully");
 
     return res.status(200).json({
       success: true,

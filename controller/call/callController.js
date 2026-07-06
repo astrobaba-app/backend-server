@@ -12,15 +12,12 @@ const { Op } = require("sequelize");
 const initiateCall = async (req, res) => {
   try {
     console.log("=== INITIATE CALL REQUEST ===");
-    console.log("User ID:", req.user?.id);
-    console.log("Request body:", req.body);
-    console.log("Agora App ID:", process.env.AGORA_APP_ID ? "Present" : "Missing");
     
     const userId = req.user.id;
     const { astrologerId, callType = "video" } = req.body;
 
     if (!astrologerId) {
-      console.log("ERROR: Astrologer ID is missing");
+      console.error("ERROR: Astrologer ID is missing");
       return res.status(400).json({
         success: false,
         message: "Astrologer ID is required",
@@ -55,11 +52,10 @@ const initiateCall = async (req, res) => {
     });
 
     if (activeCall) {
-      console.log("Active call found:", activeCall.toJSON());
+      console.log("Active call found");
       // Check if the call is stale (older than 2 minutes with no answer)
       const callAge = Date.now() - new Date(activeCall.createdAt).getTime();
       const twoMinutes = 2 * 60 * 1000;
-      console.log(`Call age: ${callAge}ms (${Math.floor(callAge / 1000)}s), Threshold: ${twoMinutes}ms, Status: ${activeCall.status}`);
       
       if (callAge > twoMinutes && (activeCall.status === "initiated" || activeCall.status === "ringing")) {
         console.log("Stale call detected, cancelling it");
@@ -117,8 +113,7 @@ const initiateCall = async (req, res) => {
     // Emit Socket.IO event for real-time notification (this is the important one)
     const io = req.app.get("io");
     if (io) {
-      console.log("Emitting call:incoming to astrologer:", astrologerId);
-      console.log("Room name:", `astrologer:${astrologerId}`);
+      console.log("Emitting call:incoming to astrologer");
       io.to(`astrologer:${astrologerId}`).emit("call:incoming", {
         callSession: {
           ...callSession.toJSON(),
@@ -131,7 +126,7 @@ const initiateCall = async (req, res) => {
       });
       console.log("Socket.IO event emitted successfully");
     } else {
-      console.log("ERROR: Socket.IO instance not found!");
+      console.error("ERROR: Socket.IO instance not found!");
     }
 
     res.status(201).json({
@@ -328,8 +323,6 @@ const endCall = async (req, res) => {
   try {
     console.log("=== END CALL REQUEST ===");
     const { callId } = req.params;
-    console.log("Call ID:", callId);
-    console.log("Auth User ID:", req.user?.id);
     
     const authUserId = req.user.id;
 
@@ -340,7 +333,7 @@ const endCall = async (req, res) => {
       },
     });
 
-    console.log("Call Session Found:", callSession ? "Yes" : "No");
+    console.log("Call Session Found");
     
     if (!callSession) {
       console.log("Call not found");
@@ -371,8 +364,7 @@ const endCall = async (req, res) => {
     const isUser = callSession.userId === authUserId;
     const isAstrologer = callSession.astrologerId === authUserId;
     
-    console.log("Is User:", isUser);
-    console.log("Is Astrologer:", isAstrologer);
+
 
     // Verify participant
     if (!isUser && !isAstrologer) {

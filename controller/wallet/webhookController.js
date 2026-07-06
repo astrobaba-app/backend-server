@@ -11,9 +11,7 @@ const handleWebhook = async (req, res) => {
     const webhookSignature = req.headers["x-razorpay-signature"];
     const webhookBody = JSON.stringify(req.body);
 
-    console.log('=== WEBHOOK RECEIVED ===');
-    console.log('Event:', req.body.event);
-    console.log('Timestamp:', new Date().toISOString());
+
 
     // Verify webhook signature
     const expectedSignature = crypto
@@ -21,7 +19,7 @@ const handleWebhook = async (req, res) => {
       .update(webhookBody)
       .digest("hex");
 
-    console.log('Webhook signature valid:', webhookSignature === expectedSignature);
+
 
     if (webhookSignature !== expectedSignature) {
       console.error("=== WEBHOOK SIGNATURE INVALID ===");
@@ -35,7 +33,7 @@ const handleWebhook = async (req, res) => {
     const event = req.body.event;
     const payload = req.body.payload;
 
-    console.log(`Processing webhook event: ${event}`);
+
 
     switch (event) {
       case "payment.captured":
@@ -51,7 +49,7 @@ const handleWebhook = async (req, res) => {
         break;
 
       default:
-        console.log(`Unhandled webhook event: ${event}`);
+
     }
 
     res.status(200).json({ success: true });
@@ -84,7 +82,7 @@ const handlePaymentCaptured = async (payment) => {
 
     // Idempotency check - skip if already processed
     if (transaction.status === "completed") {
-      console.log(`Transaction ${transaction.id} already completed (idempotency check)`);
+
       return;
     }
 
@@ -122,7 +120,7 @@ const handlePaymentCaptured = async (payment) => {
     }, { transaction: dbTransaction });
 
     await dbTransaction.commit();
-    console.log(`Payment captured successfully: ${payment.id}, New balance: ${newBalance}`);
+
   } catch (error) {
     if (dbTransaction) {
       await dbTransaction.rollback();
@@ -147,7 +145,7 @@ const handlePaymentFailed = async (payment) => {
 
     // Skip if already processed
     if (transaction.status !== "pending") {
-      console.log(`Transaction ${transaction.id} already processed`);
+
       return;
     }
 
@@ -163,7 +161,7 @@ const handlePaymentFailed = async (payment) => {
       },
     });
 
-    console.log(`Payment failed: ${payment.id}`);
+
   } catch (error) {
     console.error("Error handling payment failed:", error);
   }
@@ -174,7 +172,6 @@ const handlePaymentFailed = async (payment) => {
  */
 const handleOrderPaid = async (order, payment) => {
   try {
-    console.log(`Order paid: ${order.id}, Payment: ${payment.id}`);
     // Additional logic if needed
   } catch (error) {
     console.error("Error handling order paid:", error);

@@ -43,7 +43,7 @@ const getBirthDataPayload = (userRequest) => {
 const getBirthChart = async (userRequest) => {
   try {
     const birth_data = getBirthDataPayload(userRequest);
-    console.log('Fetching birth chart with data:', birth_data);
+    console.log('Fetching birth chart');
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/chart/birth`, {
       birth_data,
       house_system: "WHOLE_SIGN"
@@ -95,13 +95,8 @@ const getAstroDetails = async (userRequest) => {
  */
 const getPanchang = async (userRequest) => {
   try {
-    console.log('[DEBUG] getPanchang called with:', {
-      date: formatDate(userRequest.dateOfbirth),
-      time: formatTime(userRequest.timeOfbirth),
-      latitude: userRequest.latitude,
-      longitude: userRequest.longitude
-    });
-    
+    console.log('[DEBUG] getPanchang called');
+
     const payload = {
       date: formatDate(userRequest.dateOfbirth),
       time: formatTime(userRequest.timeOfbirth),
@@ -109,12 +104,11 @@ const getPanchang = async (userRequest) => {
       longitude: parseFloat(userRequest.longitude),
       timezone: "Asia/Kolkata",
     };
-    
-    console.log('[DEBUG] Calling astro engine URL:', `${ASTRO_ENGINE_BASE_URL}/panchang`);
-    console.log('[DEBUG] Payload:', JSON.stringify(payload, null, 2));
-    
+
+    // console.log('[DEBUG] Calling astro engine URL:', `${ASTRO_ENGINE_BASE_URL}/panchang`);
+
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/panchang`, payload);
-    
+
     console.log('[DEBUG] getPanchang response received');
     return response.data.panchang;
   } catch (error) {
@@ -130,7 +124,7 @@ const getPanchang = async (userRequest) => {
 const getPlanetaryPositions = async (userRequest) => {
   try {
     const chartData = await getBirthChart(userRequest);
-  
+
     // Extract the full chart object so we don't lose anything
     const chart = chartData.chart || {};
     const planets = chart.planets || {};
@@ -147,11 +141,11 @@ const getPlanetaryPositions = async (userRequest) => {
           sign_num: Math.floor(((ascLon + 360) % 360) / 30),
           sign_degree: asc.degree ?? (ascLon % 30),
         };
-        
+
         // CRITICAL: If you are adding Ascendant to planets, 
         // you must also assign it a house so the UI knows where to put it!
         if (chart.planet_houses) {
-          chart.planet_houses['Ascendant'] = 1; 
+          chart.planet_houses['Ascendant'] = 1;
         }
       }
     }
@@ -230,13 +224,13 @@ const getTransitChart = async (userRequest, targetDateTime = new Date()) => {
 const getVimshottariDasha = async (userRequest) => {
   try {
     const birth_data = getBirthDataPayload(userRequest);
-    console.log("[AstroEngine] Requesting Vimshottari Dasha with:", birth_data);
+    console.log("[AstroEngine] Requesting Vimshottari Dasha");
 
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/dasha/vimshottari`, {
       birth_data,
       years: 120
     });
-    console.log("[AstroEngine] Vimshottari Dasha raw response:", response.data);
+
     const rawDashas = response.data?.dashas;
 
     // Support both shapes:
@@ -337,7 +331,7 @@ const getAscendantReport = async (userRequest) => {
   try {
     const chartData = await getBirthChart(userRequest);
     const ascendant = chartData.chart.ascendant;
-    
+
     // Basic ascendant report
     return {
       ascendant_sign: ascendant.sign,
@@ -359,7 +353,7 @@ const getGemstoneRemedies = async (userRequest) => {
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/horoscope/complete`, {
       birth_data
     });
-    
+
     // Extract remedies from horoscope
     return response.data.horoscope.remedies?.gemstones || {
       primary: "Ruby",
@@ -385,7 +379,7 @@ const getRudrakshaSuggestion = async (userRequest) => {
     const response = await axios.post(`${ASTRO_ENGINE_BASE_URL}/horoscope/complete`, {
       birth_data
     });
-    
+
     // Extract rudraksha from horoscope
     return response.data.horoscope.remedies?.rudraksha || {
       suggested: "5 Mukhi Rudraksha",

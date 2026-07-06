@@ -151,11 +151,7 @@ const ensureKundliForUserRequest = async (userRequestRecord) => {
   }
 
   assertBirthCoordinates(userRequest);
-  console.log("[PalmKundli] Generating kundli for palm report", {
-    userId: userRequest.userId,
-    userRequestId: userRequest.id,
-    fullName: userRequest.fullName,
-  });
+  console.log("[PalmKundli] Generating kundli for palm report");
 
   const [
     basicDetails,
@@ -303,13 +299,7 @@ const buildPalmKundliContext = (kundli, userRequestRecord) => {
     remedies: kundli?.remedies || null,
   };
 
-  console.log("[PalmKundli] Focused kundli context built", {
-    userRequestId: userRequest?.id,
-    planetCount: planets.length,
-    houseCount: context.relevantHouses.length,
-    yogaCount: context.selectedYogas.length,
-    approxChars: JSON.stringify(context).length,
-  });
+  console.log("[PalmKundli] Focused kundli context built successfully");
 
   return context;
 };

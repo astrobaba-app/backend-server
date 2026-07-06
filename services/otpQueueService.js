@@ -287,11 +287,7 @@ const drainOtpQueue = async () => {
               : {}),
           },
         });
-        console.log("[OTPQueue] OTP sent", {
-          jobId: job.id,
-          actorType: job.actorType,
-          mobile: job.mobile,
-        });
+        console.log("[OTPQueue] OTP sent successfully");
       } catch (error) {
         const attempts = Number(job.attempts || 0) + 1;
         console.error("[OTPQueue] OTP send failed", {

@@ -446,26 +446,11 @@ async function recordIntentClassification({
 }) {
   const normalized = normalizeClassificationPayload(classification);
   if (!userId || !sessionId || !sessionType || !source || !normalized) {
-    console.log("[InterestCohort] Skipped recording invalid classification", {
-      userId,
-      sessionId,
-      sessionType,
-      source,
-      classification,
-      normalized,
-    });
+    console.log("[InterestCohort] Skipped recording invalid classification");
     return { recorded: false, reason: "invalid_classification" };
   }
 
-  console.log("[InterestCohort] Recording intent classification", {
-    userId,
-    sessionId,
-    sessionType,
-    source,
-    primaryIntent: normalized.primaryIntent,
-    secondaryIntent: normalized.secondaryIntent,
-    confidence: normalized.confidence,
-  });
+  console.log("[InterestCohort] Recording intent classification");
 
   return sequelize.transaction(async (transaction) => {
     const existing = await InterestIntentResult.findOne({
@@ -476,13 +461,7 @@ async function recordIntentClassification({
 
     if (existing) {
       if (String(existing.userId) !== String(userId)) {
-        console.log("[InterestCohort] Existing intent result belongs to another user", {
-          userId,
-          sessionId,
-          sessionType,
-          existingUserId: existing.userId,
-          existingIntentResultId: existing.id,
-        });
+        console.log("[InterestCohort] Existing intent result belongs to another user");
         return { recorded: false, reason: "session_user_mismatch", intentResult: existing };
       }
 
@@ -512,17 +491,7 @@ async function recordIntentClassification({
         { transaction }
       );
 
-      console.log("[InterestCohort] Updated existing intent classification", {
-        userId,
-        sessionId,
-        sessionType,
-        existingIntentResultId: existing.id,
-        previousPrimaryIntent: previousClassification.primaryIntent,
-        previousSecondaryIntent: previousClassification.secondaryIntent,
-        nextPrimaryIntent: normalized.primaryIntent,
-        nextSecondaryIntent: normalized.secondaryIntent,
-        updatedScoreCount: updatedScores.filter(Boolean).length,
-      });
+      console.log("[InterestCohort] Updated existing intent classification");
 
       return {
         recorded: true,
@@ -572,16 +541,7 @@ async function recordIntentClassification({
       await updateCohortForScore(score, transaction);
     }
 
-    console.log("[InterestCohort] Recorded intent classification and applied scores", {
-      userId,
-      sessionId,
-      sessionType,
-      intentResultId: intentResult.id,
-      primaryIntent: normalized.primaryIntent,
-      secondaryIntent: normalized.secondaryIntent,
-      updatedScoreCount: updatedScores.filter(Boolean).length,
-      cohortThreshold: COHORT_SCORE_THRESHOLD,
-    });
+    console.log("[InterestCohort] Recorded intent classification and applied scores successfully");
 
     return {
       recorded: true,
@@ -599,11 +559,7 @@ async function setUserCohortScores({
 }) {
   const normalizedType = normalizeCohortType(cohortType);
   if (!userId || !normalizedType || !scores || typeof scores !== "object") {
-    console.log("[Cohort] Skipped invalid cohort score refresh", {
-      userId,
-      cohortType,
-      hasScores: Boolean(scores),
-    });
+    console.log("[Cohort] Skipped invalid cohort score refresh");
     return { updated: false, reason: "invalid_payload" };
   }
 
@@ -660,13 +616,7 @@ async function setUserCohortScores({
       await updateCohortForScore(scoreRow, transaction);
     }
 
-    console.log("[Cohort] Refreshed user cohort scores", {
-      userId,
-      cohortType: normalizedType,
-      activeCategories: updatedScores
-        .filter((row) => Number(row?.score || 0) >= COHORT_SCORE_THRESHOLD)
-        .map((row) => row.category),
-    });
+    console.log("[Cohort] Refreshed user cohort scores successfully");
 
     return {
       updated: true,
@@ -688,12 +638,7 @@ async function incrementUserCohortScore({
   const scoreIncrement = Math.round(Number(increment || 0));
 
   if (!userId || !normalizedType || !normalizedCategory || !scoreIncrement) {
-    console.log("[Cohort] Skipped invalid cohort score increment", {
-      userId,
-      cohortType,
-      category,
-      increment,
-    });
+    console.log("[Cohort] Skipped invalid cohort score increment");
     return { updated: false, reason: "invalid_payload" };
   }
 
@@ -845,14 +790,7 @@ async function getCohortSummary(options = {}) {
   );
   const activeCategories = categories.filter((item) => item.userCount > 0).length;
 
-  console.log("[Cohort][Admin] Cohort summary fetched", {
-    cohortType: requestedType || "all",
-    totalCategories: categories.length,
-    activeCategories,
-    totalCohortMemberships,
-    nonZeroCategories: categories.filter((item) => item.userCount > 0),
-    cohortThreshold: COHORT_SCORE_THRESHOLD,
-  });
+  console.log("[Cohort][Admin] Cohort summary fetched successfully");
 
   return {
     groups,

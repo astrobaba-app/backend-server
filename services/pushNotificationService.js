@@ -20,7 +20,7 @@ class PushNotificationService {
     });
 
     if (!tokens || tokens.length === 0) {
-      console.log(`[FCM] No active device tokens found for ${ownerKey}=${ownerId}`);
+      console.log("[FCM] No active device tokens found");
       return { success: false, message: "No device tokens found" };
     }
 
@@ -99,7 +99,7 @@ class PushNotificationService {
     const response = await admin.messaging().sendEachForMulticast(message);
 
     console.log(
-      `[FCM] Sent to ${ownerKey}=${ownerId}: ${response.successCount} success, ${response.failureCount} failures`
+      `[FCM] Sent: ${response.successCount} success, ${response.failureCount} failures`
     );
 
     if (response.failureCount > 0) {
@@ -297,7 +297,7 @@ class PushNotificationService {
       };
 
       const response = await admin.messaging().send(message);
-      console.log(`[FCM] Sent to topic ${topic}:`, response);
+      console.log("[FCM] Sent to topic successfully");
 
       return { success: true, messageId: response };
     } catch (error) {
@@ -353,7 +353,7 @@ class PushNotificationService {
           isActive: true,
           lastUsedAt: new Date(),
         });
-        console.log(`[FCM] Updated existing token for user ${userId}`);
+        console.log("[FCM] Updated existing token for user");
         return existingToken;
       } else {
         // Create new token
@@ -365,7 +365,7 @@ class PushNotificationService {
           isActive: true,
           lastUsedAt: new Date(),
         });
-        console.log(`[FCM] Created new token for user ${userId}`);
+        console.log("[FCM] Created new token for user");
         return newToken;
       }
     } catch (error) {
@@ -403,7 +403,7 @@ class PushNotificationService {
           isActive: true,
           lastUsedAt: new Date(),
         });
-        console.log(`[FCM] Updated existing token for astrologer ${astrologerId}`);
+        console.log("[FCM] Updated existing token for astrologer");
         return existingToken;
       }
 
@@ -416,7 +416,7 @@ class PushNotificationService {
         isActive: true,
         lastUsedAt: new Date(),
       });
-      console.log(`[FCM] Created new token for astrologer ${astrologerId}`);
+      console.log("[FCM] Created new token for astrologer");
       return newToken;
     } catch (error) {
       console.error("[FCM] Error saving astrologer device token:", error);

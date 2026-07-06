@@ -1796,7 +1796,7 @@ async function generateYearlyReportPDF(reportData, userRequest) {
       const htmlFileName = `yearly_report_${Date.now()}.html`;
       htmlDumpPath = path.join(tempDir, htmlFileName);
       fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
-      console.log(`[Yearly PDF Service] Dumped HTML to temp for reference: ${htmlFileName}`);
+      console.log("[Yearly PDF Service] Dumped HTML to temp for reference");
     } catch (dumpErr) {
       console.warn("[Yearly PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
     }

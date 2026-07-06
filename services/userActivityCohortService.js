@@ -114,19 +114,7 @@ async function refreshUserActivityCohorts(userId) {
 
   const scores = buildActivityScores(metrics);
 
-  console.log("[ActivityCohort] Refreshing user activity cohorts", {
-    userId,
-    metrics: {
-      accountAgeDays: metrics.accountAgeDays,
-      loginCount: metrics.loginCount,
-      lastLoginMethod: metrics.lastLoginMethod,
-      daysSinceLastLogin: metrics.daysSinceLastLogin,
-      lastLogoutAt: metrics.lastLogoutAt,
-    },
-    activeCategories: Object.entries(scores)
-      .filter(([, score]) => Number(score || 0) > 0)
-      .map(([category]) => category),
-  });
+  console.log("[ActivityCohort] Refreshing user activity cohorts");
 
   return setUserCohortScores({
     userId,
@@ -142,10 +130,7 @@ async function refreshUserActivityCohorts(userId) {
 function queueUserActivityCohortRefresh(userId, reason = "user_activity_event") {
   if (!userId) return;
 
-  console.log("[ActivityCohort] Queueing user activity cohort refresh", {
-    userId,
-    reason,
-  });
+  console.log("[ActivityCohort] Queueing user activity cohort refresh");
 
   setImmediate(async () => {
     try {

@@ -46,7 +46,7 @@ const logTokenUsage = (feature, completion, extra = {}) => {
     totalTokens: usage.total_tokens ?? usage.totalTokens ?? null,
     ...extra,
   };
-  console.log("[PalmReport][OpenAI] token_usage", normalized);
+  console.log("[PalmReport][OpenAI] token_usage logged");
   return normalized;
 };
 
@@ -501,13 +501,7 @@ const analyzePalm = async ({ imageUrls, metadata = {}, kundliContext = null }) =
   }
 
   if (PALM_DEBUG) {
-    console.log("[PalmFlow][BE] analyze_start", {
-      userId: getUserId(metadata),
-      imageCount: images.length,
-      jobId: metadata.job_id || null,
-      palmUploadId: metadata.palm_upload_id || null,
-      hasKundliContext: Boolean(kundliContext),
-    });
+    console.log("[PalmFlow][BE] analyze_start");
   }
 
   const visionResult = await openaiExtractFeatures(images, metadata);
@@ -515,11 +509,7 @@ const analyzePalm = async ({ imageUrls, metadata = {}, kundliContext = null }) =
   const qualityChecks = extracted.fraud_quality_checks || {};
 
   if (PALM_DEBUG) {
-    console.log("[PalmFlow][BE] features_done", {
-      jobId: metadata.job_id || null,
-      elapsedMs: Date.now() - startedAt,
-      reject: Boolean(qualityChecks.reject),
-    });
+    console.log("[PalmFlow][BE] features_done");
   }
 
   if (qualityChecks.unsafe_content_suspected || qualityChecks.needs_moderation_fallback) {
@@ -556,22 +546,7 @@ const analyzePalm = async ({ imageUrls, metadata = {}, kundliContext = null }) =
     ...narrativeResult.tokenUsage,
   ]);
 
-  console.log("[PalmFlow][BE] analyze_success", {
-    userId: getUserId(metadata),
-    jobId: metadata.job_id || null,
-    palmUploadId: metadata.palm_upload_id || null,
-    narrativeMs: Date.now() - narrativeStartedAt,
-    totalMs: Date.now() - startedAt,
-    confidenceKeys:
-      extracted.confidence_scores && typeof extracted.confidence_scores === "object"
-        ? Object.keys(extracted.confidence_scores).length
-        : 0,
-    tokenUsage: {
-      inputTokens: tokenUsage.inputTokens,
-      outputTokens: tokenUsage.outputTokens,
-      totalTokens: tokenUsage.totalTokens,
-    },
-  });
+  console.log("[PalmFlow][BE] analyze_success successfully completed");
 
   return {
     extracted_features: extracted,

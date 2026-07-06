@@ -112,11 +112,7 @@ const redirectToApple = (req, res) => {
 
   const appleAuthURL = `https://appleid.apple.com/auth/authorize?${params.toString()}`;
 
-  console.log("Redirecting to Apple Sign In:", {
-    clientId: APPLE_CLIENT_ID,
-    redirectUri: APPLE_REDIRECT_URI,
-    source,
-  });
+  console.log("Redirecting to Apple Sign In");
 
   res.redirect(appleAuthURL);
 };
@@ -172,7 +168,7 @@ const appleCallback = async (req, res) => {
       }
     }
 
-    console.log("Apple Sign In payload:", { appleId, email, name, source });
+
 
     // ── 3. Find or create user ───────────────────────────────────────────────
     let appleAuth = await AppleAuth.findOne({

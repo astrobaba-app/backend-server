@@ -78,12 +78,7 @@ const enqueueReportLlmRequest = async ({ userId, reportType, payload }) => {
   };
 
   await redis.rpush(LLM_QUEUE_KEY(), JSON.stringify(job));
-  console.log("[ReportQueue][LLM][ENQUEUE]", {
-    queue: LLM_QUEUE_KEY(),
-    reportRequestId: reportRequest.id,
-    userId,
-    reportType,
-  });
+  console.log("[ReportQueue][LLM][ENQUEUE]");
 
   return reportRequest;
 };
@@ -102,13 +97,7 @@ const enqueueReportPdfRequest = async ({ reportRequest, reportRequestId, userId,
   };
 
   await redis.rpush(PDF_QUEUE_KEY(), JSON.stringify(job));
-  console.log("[ReportQueue][PDF][ENQUEUE]", {
-    queue: PDF_QUEUE_KEY(),
-    reportRequestId: job.reportRequestId,
-    userId: job.userId,
-    reportType: job.reportType,
-    sourceId: job.sourceId,
-  });
+  console.log("[ReportQueue][PDF][ENQUEUE]");
 
   return job;
 };
@@ -129,7 +118,7 @@ const getRetryQueuedStatus = (workerName) => {
 const drainQueueSnapshot = async ({ queueKey, batchSize, handler, workerName }) => {
   const initialLength = Number(await redis.llen(queueKey)) || 0;
   const limit = initialLength;
-  console.log(`[${workerName}] Queue processing started`, { queue: queueKey, initialLength, batchSize, processingLimit: limit });
+  console.log(`[${workerName}] Queue processing started`);
 
   let processed = 0;
   for (let index = 0; index < limit; index += 1) {
@@ -188,7 +177,7 @@ const drainQueueSnapshot = async ({ queueKey, batchSize, handler, workerName }) 
     }
   }
 
-  console.log(`[${workerName}] Queue processing finished`, { queue: queueKey, processed, initialLength });
+  console.log(`[${workerName}] Queue processing finished successfully`);
   return { processed, initialLength };
 };
 

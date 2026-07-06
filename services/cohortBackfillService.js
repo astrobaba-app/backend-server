@@ -159,7 +159,7 @@ async function getBackfillStats() {
     },
   };
 
-  console.log("[CohortBackfill][Admin] Stats fetched", stats);
+  console.log("[CohortBackfill][Admin] Stats fetched successfully");
   return stats;
 }
 
@@ -181,13 +181,7 @@ async function runDeterministicBackfill({ cohortType, limit, dryRun }) {
   const users = await getPendingUsersForCohortType(cohortType, limit);
   const userIds = users.map((user) => user.id);
 
-  console.log("[CohortBackfill] Deterministic batch selected", {
-    cohortType,
-    limit,
-    dryRun,
-    selectedUsers: userIds.length,
-    userIds,
-  });
+  console.log("[CohortBackfill] Deterministic batch selected");
 
   if (dryRun) {
     return {
@@ -329,13 +323,7 @@ async function classifyInterestBackfillUser({
       ? await getFirstAiUserMessages(userId, messageLimit)
       : await getFirstHumanUserMessages(userId, messageLimit);
 
-  console.log("[CohortBackfill][Interest] User messages prepared", {
-    source,
-    userId,
-    sessionId,
-    messageCount: messages.length,
-    dryRun,
-  });
+  console.log("[CohortBackfill][Interest] User messages prepared");
 
   if (!messages.length) {
     return {
@@ -377,17 +365,7 @@ async function classifyInterestBackfillUser({
   const rawContent = completion.choices?.[0]?.message?.content || "";
   const classification = normalizeClassificationPayload(rawContent);
 
-  console.log("[CohortBackfill][Interest] OpenAI classification received", {
-    source,
-    userId,
-    sessionId,
-    model: completion.model || null,
-    usage,
-    hasClassification: Boolean(classification),
-    primaryIntent: classification?.primaryIntent || null,
-    secondaryIntent: classification?.secondaryIntent || null,
-    confidence: classification?.confidence || null,
-  });
+  console.log("[CohortBackfill][Interest] OpenAI classification received successfully");
 
   const recordResult = await recordIntentClassification({
     userId,
@@ -427,15 +405,7 @@ async function runInterestBackfill({ source, limit, messageLimit, dryRun }) {
     let processedUsers = 0;
     let skippedUsers = 0;
 
-    console.log("[CohortBackfill][Interest] Batch selected", {
-      source: selectedSource,
-      limit,
-      messageLimit,
-      dryRun,
-      selectedUsers: pendingUsers.length,
-      estimatedOpenAICalls: dryRun ? 0 : pendingUsers.length,
-      userIds: pendingUsers.map((user) => user.userId),
-    });
+    console.log("[CohortBackfill][Interest] Batch selected");
 
     for (const pendingUser of pendingUsers) {
       try {
@@ -482,7 +452,7 @@ async function runInterestBackfill({ source, limit, messageLimit, dryRun }) {
       usage: sourceUsage,
     };
 
-    console.log("[CohortBackfill][Interest] Batch completed", result);
+    console.log("[CohortBackfill][Interest] Batch completed");
     sourceResults.push(result);
   }
 
@@ -500,7 +470,7 @@ async function runInterestBackfill({ source, limit, messageLimit, dryRun }) {
     sources: sourceResults,
   };
 
-  console.log("[CohortBackfill][Interest] Manual backfill completed", response);
+  console.log("[CohortBackfill][Interest] Manual backfill completed successfully");
   return response;
 }
 
@@ -515,13 +485,7 @@ async function runManualCohortBackfill(options = {}) {
   const maxLimit = cohortType === COHORT_TYPES.INTEREST ? MAX_INTEREST_LIMIT : MAX_BACKFILL_LIMIT;
   const limit = clampInteger(options.limit, defaultLimit, 1, maxLimit);
 
-  console.log("[CohortBackfill][Admin] Manual backfill requested", {
-    cohortType,
-    limit,
-    dryRun,
-    source: options.source || null,
-    messageLimit: options.messageLimit || null,
-  });
+  console.log("[CohortBackfill][Admin] Manual backfill requested");
 
   if (cohortType === COHORT_TYPES.WALLET || cohortType === COHORT_TYPES.ASTRO) {
     return runDeterministicBackfill({ cohortType, limit, dryRun });
