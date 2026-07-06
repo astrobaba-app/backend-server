@@ -4,8 +4,9 @@ const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
 
-const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts";
+const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts_v3";
 const GENERAL_ALERTS_CHANNEL_ID = "graho_general_alerts_v3";
+const CHAT_REQUEST_TTL_MS = 60000;
 
 class PushNotificationService {
 
@@ -25,22 +26,32 @@ class PushNotificationService {
 
     const fcmTokens = tokens.map((t) => t.token);
     const isChatRequest = data?.type === "chat_request";
+    const isChatRequestCancel = data?.type === "chat_request_cancel";
     const channelId = isChatRequest ? CHAT_ALERTS_CHANNEL_ID : GENERAL_ALERTS_CHANNEL_ID;
     const requestExpiresAt = data?.requestExpiresAt
       ? new Date(data.requestExpiresAt).getTime()
       : null;
-    const ttlMs = isChatRequest
-      ? Math.max(1, Math.min(30000, requestExpiresAt ? requestExpiresAt - Date.now() : 30000))
+    const ttlMs = isChatRequest || isChatRequestCancel
+      ? Math.max(1, Math.min(CHAT_REQUEST_TTL_MS, requestExpiresAt ? requestExpiresAt - Date.now() : CHAT_REQUEST_TTL_MS))
       : undefined;
 
+    const notificationPayload = {
+      title,
+      body,
+      ...(imageUrl && { imageUrl }),
+    };
+
     const message = {
-      notification: {
-        title,
-        body,
-        ...(imageUrl && { imageUrl }),
-      },
+      ...(!isChatRequest && !isChatRequestCancel ? { notification: notificationPayload } : {}),
       data: {
         ...data,
+        ...(isChatRequest
+          ? {
+              title,
+              body,
+              channelId,
+            }
+          : {}),
         ownerId: String(ownerId),
         timestamp: new Date().toISOString(),
       },
@@ -48,14 +59,18 @@ class PushNotificationService {
         priority: "high",
         ...(ttlMs ? { ttl: ttlMs } : {}),
         ...(isChatRequest ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
-        notification: {
-          channelId,
-          ...(isChatRequest ? { tag: `chat-request-${data.sessionId}` } : {}),
-          priority: "max",
-          visibility: "public",
-          defaultVibrateTimings: true,
-          defaultLightSettings: true,
-        },
+        ...(isChatRequestCancel ? { collapseKey: `chat-request-${data.sessionId}` } : {}),
+        ...(!isChatRequest && !isChatRequestCancel
+          ? {
+              notification: {
+                channelId,
+                priority: "max",
+                visibility: "public",
+                defaultVibrateTimings: true,
+                defaultLightSettings: true,
+              },
+            }
+          : {}),
       },
       apns: {
         headers: {
@@ -66,6 +81,10 @@ class PushNotificationService {
           ? {
               payload: {
                 aps: {
+                  alert: {
+                    title,
+                    body,
+                  },
                   sound: "default",
                   interruptionLevel: "time-sensitive",
                   category: "CHAT_REQUEST",
@@ -144,6 +163,18 @@ class PushNotificationService {
       console.error("[FCM] Error sending to astrologer:", error);
       throw error;
     }
+  }
+
+  async cancelChatRequestForAstrologer(astrologerId, sessionId, reason = "cancelled") {
+    return this.sendToAstrologer(astrologerId, {
+      title: "Chat request cancelled",
+      body: "This chat request is no longer available.",
+      data: {
+        type: "chat_request_cancel",
+        sessionId: String(sessionId),
+        reason: String(reason),
+      },
+    });
   }
 
   /**
