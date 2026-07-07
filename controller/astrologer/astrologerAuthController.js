@@ -440,6 +440,7 @@ const updateProfile = async (req, res) => {
   try {
     const astrologerId = req.user.id;
     const {
+      email,
       fullName,
       dateOfBirth,
       gender,
@@ -497,6 +498,24 @@ const updateProfile = async (req, res) => {
 
     // Update fields
     const updateData = {};
+    if (email !== undefined) {
+      const normalizedEmail = normalizeEmail(email);
+
+      if (normalizedEmail) {
+        const existingAstrologer = await Astrologer.findOne({
+          where: { email: normalizedEmail },
+        });
+
+        if (existingAstrologer && existingAstrologer.id !== astrologer.id) {
+          return res.status(400).json({
+            success: false,
+            message: "Email is already in use by another astrologer",
+          });
+        }
+      }
+
+      updateData.email = normalizedEmail || null;
+    }
     if (fullName) updateData.fullName = fullName;
     if (req.fileUrl) updateData.photo = req.fileUrl;
     if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
@@ -547,6 +566,8 @@ const updateProfile = async (req, res) => {
       message: "Profile updated successfully",
       astrologer: {
         id: astrologer.id,
+        phoneNumber: astrologer.phoneNumber,
+        email: astrologer.email,
         fullName: astrologer.fullName,
         photo: astrologer.photo,
         dateOfBirth: astrologer.dateOfBirth,
