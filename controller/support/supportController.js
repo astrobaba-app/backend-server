@@ -13,6 +13,7 @@ const {
 const {
   uploadToSupabase,
 } = require("../../config/uploadConfig/supabaseUpload");
+const { getSupportFaqGroups } = require("./supportFaqData");
 
 const generateTicketNumber = async () => {
   const year = new Date().getFullYear();
@@ -62,6 +63,31 @@ const formatTicketStatus = (status) =>
 const getSupportTicketActionUrl = (ticket) =>
   `/support/tickets/${ticket.id}`;
 
+const normalizeTicketCategory = (category) => {
+  if (!category) return "general";
+
+  const normalized = String(category).trim().toLowerCase();
+
+  const categoryMap = {
+    kundli: "kundli",
+    "astrologer and wallet": "astrologer_wallet",
+    "graho store": "graho_store",
+    "horoscope & predictions": "horoscope",
+    "refund policy": "refund",
+    "notifications & settings": "notifications",
+    "discussion forum": "discussion",
+    support: "support",
+    general: "general",
+    technical: "technical",
+    billing: "billing",
+    account: "account",
+    consultation: "consultation",
+    other: "other",
+  };
+
+  return categoryMap[normalized] || "general";
+};
+
 const notifyTicketUser = async (ticket, payload) => {
   if (!ticket?.userId) {
     return;
@@ -94,6 +120,7 @@ const createTicket = async (req, res) => {
   try {
     const actor = getTicketActor(req);
     const { subject, description, category, priority = "medium" } = req.body;
+    const normalizedCategory = normalizeTicketCategory(category);
 
     if (!subject || !description) {
       return res.status(400).json({
@@ -115,7 +142,7 @@ const createTicket = async (req, res) => {
       subject,
       description,
       images: imageUrls,
-      category,
+      category: normalizedCategory,
       priority,
       status: "open",
     });
@@ -887,10 +914,27 @@ const getTicketStatistics = async (req, res) => {
   }
 };
 
+const getFaqs = async (req, res) => {
+  try {
+    res.status(200).json({
+      success: true,
+      faqs: getSupportFaqGroups(),
+    });
+  } catch (error) {
+    console.error("Get support FAQs error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch support FAQs",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   // User routes
   createTicket,
   getMyTickets,
+  getFaqs,
   getTicketDetails,
   replyToTicket,
 

@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   createTicket,
   getMyTickets,
+  getFaqs,
   getTicketDetails,
   replyToTicket,
   getAllTickets,
@@ -19,6 +20,7 @@ const upload = require("../../config/uploadConfig/supabaseUpload");
 // User routes
 router.post("/tickets", checkForAuthenticationCookie(), ...upload.array("images", 5), createTicket);
 router.get("/tickets/my-tickets", checkForAuthenticationCookie(), getMyTickets);
+router.get("/faqs", getFaqs);
 router.get("/tickets/:ticketId", checkForAuthenticationCookie(), getTicketDetails);
 router.post("/tickets/:ticketId/reply", checkForAuthenticationCookie(), ...upload.array("images", 5), replyToTicket);
 
