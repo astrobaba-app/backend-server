@@ -2750,12 +2750,25 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
     }
   }
 
+  let quotedMessageText = null;
+  if (userMessage.replyToMessageId) {
+    try {
+      const replyToMsg = await AIChatMessage.findOne({ where: { id: userMessage.replyToMessageId } });
+      if (replyToMsg) {
+        quotedMessageText = replyToMsg.content;
+      }
+    } catch (err) {
+      console.error("Failed to load replied message context:", err.message);
+    }
+  }
+
   const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
   let engineResponse = null;
   try {
     engineResponse = await generateAiChatEngineResponse({
       session_id: job.sessionId,
       user_message: userMessage.content,
+      reply_to_content: quotedMessageText,
       astrologer: {
         id: publicAstrologer.id,
         name: publicAstrologer.name,
@@ -3076,6 +3089,7 @@ const sendMessageV3 = async (req, res) => {
       sessionId,
       userId,
       message: trimmedMessage,
+      replyToMessageId: requestBody.replyToMessageId || null,
       queuedAt: Date.now(),
     };
     const sentQueueKey = aiChatSentQueueKey(sessionId);
@@ -3087,6 +3101,7 @@ const sendMessageV3 = async (req, res) => {
       sessionId,
       role: "user",
       content: trimmedMessage,
+      replyToMessageId: requestBody.replyToMessageId || null,
     });
 
     await removeQueuedPayload(sentQueueKey, sentQueuePayload);
@@ -3116,6 +3131,7 @@ const sendMessageV3 = async (req, res) => {
         sessionId: userMessage.sessionId,
         role: "user",
         content: userMessage.content,
+        replyToMessageId: userMessage.replyToMessageId,
         createdAt: userMessage.createdAt,
         updatedAt: userMessage.updatedAt,
       },

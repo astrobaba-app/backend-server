@@ -603,7 +603,13 @@ function initializeChatSocket(io) {
   scheduleExistingWalletLimitSessions(io);
 
   io.on("connection", (socket) => {
-    const { id: authId, role } = socket?.user;
+    const { id: authId, role } = socket?.user || {};
+    if (!authId) {
+      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket");
+      socket.disconnect(true);
+      return;
+    }
+
     const isAstrologer = role === "astrologer";
     socket.data.sessionAccessCache = new Map();
 
