@@ -33,6 +33,11 @@ const {
   toggleSignupBonus,
 } = require("../../controller/admin/signupBonusController");
 const {
+  getHomeCardSettings,
+  updateHomeCardSettings,
+  toggleHomeCard,
+} = require("../../controller/admin/homeCardController");
+const {
   getAstrologerPayoutRequests,
   markPayoutRequestPaid,
   rejectPayoutRequest,
@@ -324,6 +329,26 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   toggleSignupBonus
+);
+
+// Home card settings routes
+router.get(
+  "/home-card/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getHomeCardSettings
+);
+router.put(
+  "/home-card/settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateHomeCardSettings
+);
+router.post(
+  "/home-card/toggle",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  toggleHomeCard
 );
 
 // WhatsApp auth settings routes
