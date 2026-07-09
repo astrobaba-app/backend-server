@@ -1,6 +1,7 @@
 const Astrologer = require("../../model/astrologer/astrologer");
 const Review = require("../../model/review/review");
 const User = require("../../model/user/userAuth");
+const redis = require("../../config/redis/redis");
 
 // Get all astrologers with basic details (public)
 const getAllAstrologers = async (req, res) => {
@@ -70,9 +71,18 @@ const getAllAstrologers = async (req, res) => {
       order: [["rating", "DESC"], ["totalConsultations", "DESC"]],
     });
 
+    const astrologerIds = astrologers.map(a => `astrologer:busy:${a.id}`);
+    const busyFlags = astrologerIds.length ? await redis.mget(...astrologerIds) : [];
+    
+    const astrologersWithBusy = astrologers.map((astrologer, index) => {
+      const json = astrologer.toJSON();
+      json.isBusy = !!busyFlags[index];
+      return json;
+    });
+
     res.status(200).json({
       success: true,
-      astrologers,
+      astrologers: astrologersWithBusy,
       pagination: {
         total: count,
         page: parseInt(page),
@@ -143,10 +153,13 @@ const getAstrologerById = async (req, res) => {
       ratingStats.distribution[r.rating]++;
     });
 
+    const isBusy = !!(await redis.get(`astrologer:busy:${astrologer.id}`));
+
     res.status(200).json({
       success: true,
       astrologer: {
         ...astrologer.toJSON(),
+        isBusy,
         recentReviews,
         ratingStats,
       },
@@ -189,9 +202,18 @@ const getTopRatedAstrologers = async (req, res) => {
       ],
     });
 
+    const astrologerIds = astrologers.map(a => `astrologer:busy:${a.id}`);
+    const busyFlags = astrologerIds.length ? await redis.mget(...astrologerIds) : [];
+    
+    const astrologersWithBusy = astrologers.map((astrologer, index) => {
+      const json = astrologer.toJSON();
+      json.isBusy = !!busyFlags[index];
+      return json;
+    });
+
     res.status(200).json({
       success: true,
-      astrologers,
+      astrologers: astrologersWithBusy,
     });
   } catch (error) {
     console.error("Get top rated astrologers error:", error);
@@ -243,9 +265,18 @@ const searchAstrologers = async (req, res) => {
       order: [["rating", "DESC"]],
     });
 
+    const astrologerIds = astrologers.map(a => `astrologer:busy:${a.id}`);
+    const busyFlags = astrologerIds.length ? await redis.mget(...astrologerIds) : [];
+    
+    const astrologersWithBusy = astrologers.map((astrologer, index) => {
+      const json = astrologer.toJSON();
+      json.isBusy = !!busyFlags[index];
+      return json;
+    });
+
     res.status(200).json({
       success: true,
-      astrologers,
+      astrologers: astrologersWithBusy,
       pagination: {
         total: count,
         page: parseInt(page),

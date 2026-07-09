@@ -18,6 +18,7 @@ const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const userInactivityTimers = new Map();
 const walletLimitTimers = new Map();
+const disconnectTimers = new Map();
 const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
 
 /**
@@ -196,6 +197,45 @@ function emitChatMessage(io, session, payload) {
     .to(getUserRoom(session.userId))
     .to(getAstrologerRoom(session.astrologerId))
     .emit("message:new", payload);
+}
+
+async function autoEndSessionForDisconnect(io, sessionId) {
+  try {
+    const session = await ChatSession.findByPk(sessionId);
+    if (!session || session.status !== "active" || session.requestStatus !== "approved") {
+      return;
+    }
+
+    const billing = await completeChatSessionWithBilling(session, io);
+    await session.reload();
+
+    emitChatEnded(io, session, {
+      endedBy: "system",
+      reason: "user_disconnected",
+      currentMinutes: billing.currentMinutes,
+      currentCost: billing.currentCost,
+      totalMinutes: billing.totalMinutes,
+      totalCost: billing.totalCost,
+      billedAmount: billing.billedAmount,
+    });
+
+    io.to(getUserRoom(session.userId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "user"),
+    });
+
+    io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "astrologer"),
+    });
+
+    queueArchiveAndDeleteSession(session.id, {
+      endReason: "user_disconnected",
+      billedAmount: billing.billedAmount,
+    });
+  } catch (error) {
+    console.error("auto end chat disconnect error:", error);
+  }
 }
 
 async function autoEndSessionForUserInactivity(io, sessionId) {
@@ -605,7 +645,7 @@ function initializeChatSocket(io) {
   io.on("connection", (socket) => {
     const { id: authId, role } = socket?.user || {};
     if (!authId) {
-      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket");
+      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket", socket?.user);
       socket.disconnect(true);
       return;
     }
@@ -637,6 +677,14 @@ function initializeChatSocket(io) {
 
         if (!sessionAccess) {
           return;
+        }
+
+        socket.data.activeSessionId = sessionId;
+        const timerKey = `${sessionId}_${authId}`;
+        if (disconnectTimers.has(timerKey)) {
+          clearTimeout(disconnectTimers.get(timerKey));
+          disconnectTimers.delete(timerKey);
+          console.log(`[Socket.IO] Cleared disconnect timer for ${timerKey}`);
         }
 
         socket.join(getSessionRoom(sessionId));
@@ -1123,6 +1171,20 @@ function initializeChatSocket(io) {
     socket.on("disconnect", () => {
       // Do not clear inactivity timers globally here; they are session-level
       // and should continue even if one client disconnects temporarily.
+
+      const { activeSessionId } = socket.data;
+      if (activeSessionId) {
+        const timerKey = `${activeSessionId}_${authId}`;
+        console.log(`[Socket.IO] User disconnected, starting 30s grace period for ${timerKey}`);
+        
+        const timer = setTimeout(() => {
+          console.log(`[Socket.IO] Grace period expired for ${timerKey}, ending session`);
+          disconnectTimers.delete(timerKey);
+          autoEndSessionForDisconnect(io, activeSessionId);
+        }, 30000);
+        
+        disconnectTimers.set(timerKey, timer);
+      }
     });
   });
 }
