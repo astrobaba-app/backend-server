@@ -98,7 +98,22 @@ const updateProfile = async (req, res) => {
 
     // Update fields if provided
     if (fullName !== undefined) user.fullName = fullName;
-    if (email !== undefined) user.email = email;
+    if (email !== undefined) {
+      if (email === null || email === "") {
+        user.email = null;
+      } else {
+        const existingEmailUser = await User.findOne({
+          where: { email },
+        });
+        if (existingEmailUser && existingEmailUser.id !== user.id) {
+          return res.status(409).json({
+            success: false,
+            message: "Email address is already linked to another account",
+          });
+        }
+        user.email = email;
+      }
+    }
     if (mobile !== undefined) {
       if (mobile === null || mobile === "") {
         user.mobile = null;
