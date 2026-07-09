@@ -15,6 +15,7 @@ const {
   queueArchiveAndDeleteSession,
 } = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
+const redis = require("../../config/redis/redis");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
@@ -288,6 +289,23 @@ const startChatSession = async (req, res) => {
       });
     }
 
+    // Check if astrologer or user is busy
+    const isAstroBusy = await redis.get(`astrologer:busy:${astrologerId}`);
+    if (isAstroBusy) {
+      return res.status(400).json({
+        success: false,
+        message: "Astrologer is currently busy",
+      });
+    }
+
+    const isUserBusy = await redis.get(`user:busy:${userId}`);
+    if (isUserBusy) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have an active or pending chat session",
+      });
+    }
+
     const wallet = await Wallet.findOne({ where: { userId } });
     const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
     const requiredBalance = parseFloat(astrologer.pricePerMinute || 0);
@@ -315,6 +333,10 @@ const startChatSession = async (req, res) => {
       // Every new chat starts as a fresh pending request.
       requestStatus: "pending",
     });
+
+    // Mark as busy for 70 seconds (1 minute 10 secs)
+    await redis.set(`astrologer:busy:${astrologerId}`, userId, { ex: 70 });
+    await redis.set(`user:busy:${userId}`, astrologerId, { ex: 70 });
 
     // Get astrologer details
     const astrologerDetails = await Astrologer.findByPk(astrologerId, {
@@ -1424,6 +1446,11 @@ const approveChatRequest = async (req, res) => {
       maxEndTime: walletLimit.maxEndTime,
       walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
     });
+    
+    // Extend the busy locks to cover the entire active chat duration (2 hours safety net)
+    await redis.set(`astrologer:busy:${session.astrologerId}`, session.userId, { ex: 7200 });
+    await redis.set(`user:busy:${session.userId}`, session.astrologerId, { ex: 7200 });
+
     await cancelPendingChatRequestNotification(session, "approved");
 
     if (io && chatSocketService) {
@@ -1494,6 +1521,9 @@ const rejectChatRequest = async (req, res) => {
       endTime: new Date(),
     });
     await session.reload();
+
+    await redis.del(`astrologer:busy:${astrologerId}`);
+    await redis.del(`user:busy:${session.userId}`);
 
     await notifyPendingChatRequestClosed(
       req.app.get("io"),

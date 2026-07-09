@@ -34,6 +34,11 @@ const AIChatMessage = sequelize.define(
       allowNull: true,
       comment: "Number of tokens used for this message",
     },
+    replyToMessageId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: "ID of the message being replied to, if any",
+    },
   },
   {
     tableName: "ai_chat_messages",

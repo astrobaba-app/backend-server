@@ -13,6 +13,7 @@ const {
 const {
   enqueueHumanConsultationInterestClassification,
 } = require("./interestQueueService");
+const redis = require("../config/redis/redis");
 
 const PLATFORM_COMMISSION_PERCENTAGE = 10;
 
@@ -74,6 +75,10 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
       await deleteSessionCreatedKundlis(lockedSession, dbTransaction);
       await dbTransaction.commit();
       committed = true;
+
+      await redis.del(`user:busy:${lockedSession.userId}`);
+      await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
+
       return {
         endTime: lockedSession.endTime,
         currentMinutes: 0,
@@ -100,6 +105,9 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
 
       await dbTransaction.commit();
       committed = true;
+
+      await redis.del(`user:busy:${lockedSession.userId}`);
+      await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
 
       return {
         endTime,
@@ -219,6 +227,9 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
 
     await dbTransaction.commit();
     committed = true;
+
+    await redis.del(`user:busy:${lockedSession.userId}`);
+    await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
 
     enqueueHumanConsultationInterestClassification({
       userId: lockedSession.userId,
