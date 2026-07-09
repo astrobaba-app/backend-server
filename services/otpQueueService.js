@@ -233,7 +233,7 @@ const createAndQueueMobileOtp = async ({ actorType, mobile }) => {
   });
 };
 
-const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
+const verifyQueuedOtp = async ({ actorType, mobile, otp, deleteOtp = true }) => {
   const otpKey = getOtpKey({ actorType, mobile });
   const verifyAttemptsKey = getVerifyAttemptsKey({ actorType, mobile });
   await checkOtpVerifyLimits({ actorType, mobile });
@@ -246,8 +246,10 @@ const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
     throw error;
   }
 
-  await redis.del(otpKey);
-  await redis.del(verifyAttemptsKey);
+  if (deleteOtp) {
+    await redis.del(otpKey);
+    await redis.del(verifyAttemptsKey);
+  }
   return true;
 };
 

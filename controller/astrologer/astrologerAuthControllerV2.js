@@ -191,6 +191,7 @@ const verifyOTPV2 = async (req, res) => {
       actorType: "astrologer",
       mobile: phoneNumber,
       otp,
+      deleteOtp: false,
     });
 
     const astrologer = await Astrologer.findOne({ where: { phoneNumber } });
@@ -202,6 +203,7 @@ const verifyOTPV2 = async (req, res) => {
         verifiedAt: Date.now(),
         source: "v2",
       });
+      await redis.del(`astrologer:otp:${phoneNumber}`);
 
       return res.status(200).json({
         success: true,
@@ -275,6 +277,8 @@ const verifyOTPV2 = async (req, res) => {
     const refreshToken = createRefreshToken(authPayload);
 
     setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
+    
+    await redis.del(`astrologer:otp:${phoneNumber}`);
 
     return res
       .status(200)
