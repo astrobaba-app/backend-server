@@ -212,7 +212,7 @@ const createStoredOtp = async ({ actorType, mobile, otp }) => {
     mobile,
     createdAt: Date.now(),
   });
-  console.log("[OTPQueue] OTP stored", { actorType, mobile, otp });
+ // console.log("[OTPQueue] OTP stored", { actorType, mobile, otp });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
 };
 
@@ -279,17 +279,17 @@ const drainOtpQueue = async () => {
       }
 
       try {
-        // await sendMsg91Otp({
-        //   mobile: `91${job.mobile}`,
-        //   otp: job.otp,
-        //   templateId: job.templateId,
-        //   variables: {
-        //     otp: job.otp,
-        //     ...(job.includeAppHash && ANDROID_SMS_RETRIEVER_HASH
-        //       ? { app_hash: ANDROID_SMS_RETRIEVER_HASH }
-        //       : {}),
-        //   },
-        // });
+        await sendMsg91Otp({
+          mobile: `91${job.mobile}`,
+          otp: job.otp,
+          templateId: job.templateId,
+          variables: {
+            otp: job.otp,
+            ...(job.includeAppHash && ANDROID_SMS_RETRIEVER_HASH
+              ? { app_hash: ANDROID_SMS_RETRIEVER_HASH }
+              : {}),
+          },
+        });
         console.log("[OTPQueue] OTP sent successfully");
       } catch (error) {
         const attempts = Number(job.attempts || 0) + 1;
