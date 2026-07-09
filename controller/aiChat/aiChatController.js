@@ -22,6 +22,7 @@ const {
   normalizeClassificationPayload,
   parseInlineAiResponse,
 } = require("../../services/interestCohortService");
+const pushNotificationService = require("../../services/pushNotificationService");
 const {
   queueAiChatInterestFinalization,
 } = require("../../services/aiChatInterestService");
@@ -157,6 +158,40 @@ const calculateAiWalletLimit = (balance, pricePerMinute) => {
   };
 };
 
+const aiChatInactivityTimers = new Map();
+const AI_CHAT_INACTIVITY_TIMEOUT_MS = parseInt(process.env.AI_CHAT_INACTIVITY_TIMEOUT_MS, 10) || 120000;
+
+const clearAiChatInactivityAutoEnd = (sessionId) => {
+  const timeout = aiChatInactivityTimers.get(sessionId);
+  if (timeout) {
+    clearTimeout(timeout);
+    aiChatInactivityTimers.delete(sessionId);
+  }
+};
+
+const scheduleAiChatInactivityAutoEnd = (session) => {
+  if (!session || !session.id) return;
+
+  if ((session.status || "active") !== "active") {
+    clearAiChatInactivityAutoEnd(session.id);
+    return;
+  }
+
+  clearAiChatInactivityAutoEnd(session.id);
+
+  const timeout = setTimeout(async () => {
+    aiChatInactivityTimers.delete(session.id);
+    console.log(`[AIChat] Auto-ending session ${session.id} due to inactivity`);
+    try {
+      await completeAiChatSessionWithBilling(session, "user_inactivity_timeout");
+    } catch (err) {
+      console.error(`[AIChat] Failed to auto-end session ${session.id}:`, err.message);
+    }
+  }, AI_CHAT_INACTIVITY_TIMEOUT_MS);
+
+  aiChatInactivityTimers.set(session.id, timeout);
+};
+
 const completeAiChatSessionWithBilling = async (
   session,
   reason = "user_ended_ai_chat"
@@ -165,6 +200,8 @@ const completeAiChatSessionWithBilling = async (
   let committed = false;
 
   try {
+    clearAiChatInactivityAutoEnd(session.id);
+
     const lockedSession = await AIChatSession.findByPk(session.id, {
       transaction: dbTransaction,
       lock: dbTransaction.LOCK.UPDATE,
@@ -1634,6 +1671,8 @@ const createChatSessionV2 = async (req, res) => {
 
     await dbTransaction.commit();
 
+    scheduleAiChatInactivityAutoEnd(session);
+
     return res.status(201).json({
       success: true,
       message: "AI chat session created successfully",
@@ -2683,6 +2722,7 @@ const getAiChatQueueStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       sessionId,
+      sessionStatus: session.status,
       queues: {
         sent: Number(sentCount || 0),
         receive: Number(receiveCount || 0),
@@ -2852,6 +2892,12 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
       (userMessage.content.length > 50 ? "..." : "");
   }
   await session.update(updatePayload);
+
+  pushNotificationService.sendToUser(job.userId, {
+    title: "Astrologer replied",
+    body: "Open to see full message",
+    data: { type: "ai_chat_message", sessionId: String(job.sessionId) },
+  }).catch(err => console.error("Push error (ai chat):", err));
 
   return {
     createdAssistantMessages,
@@ -3118,6 +3164,9 @@ const sendMessageV3 = async (req, res) => {
     };
 
     await redis.rpush(receiveQueueKey, JSON.stringify(receiveQueuePayload));
+
+    scheduleAiChatInactivityAutoEnd(session);
+
     setImmediate(() => {
       void processAiChatReceiveQueue(sessionId);
     });

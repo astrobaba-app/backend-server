@@ -583,6 +583,8 @@ async function createAndBroadcastMessage({
     message: messagePayload,
   });
 
+  
+
   // Update chat lists for both sides
   io.to(getUserRoom(session.userId)).emit("chat:updated", {
     sessionId: session.id,
