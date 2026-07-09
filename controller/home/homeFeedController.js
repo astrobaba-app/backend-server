@@ -20,6 +20,7 @@ const Astrologer = require("../../model/astrologer/astrologer");
 const Product = require("../../model/store/product");
 const ForumPost = require("../../model/forum/forumPost");
 const redis = require("../../config/redis/redis");
+const AdminSettings = require("../../model/admin/adminSettings");
 
 // ─── Cache keys & TTLs ────────────────────────────────────────────────────────
 const STATIC_CACHE_KEY = "home:feed:static:v1";   // blogs + products + discussions
@@ -223,4 +224,61 @@ const getHomeFeed = async (req, res) => {
   }
 };
 
-module.exports = { getHomeFeed };
+/**
+ * GET /api/home/share-settings
+ *
+ * Public endpoint — no auth required. Retrieves visibility settings
+ * for share buttons. Falls back to true for all items on any error.
+ */
+const getShareSettings = async (req, res) => {
+  const defaultFlags = {
+    blog: true,
+    astrologer: true,
+    product: true,
+    discussion: true,
+    horoscope: true,
+    report: true,
+    kundli: true,
+    matching: true,
+    app: true,
+  };
+
+  try {
+    const setting = await AdminSettings.findOne({
+      where: { settingKey: "app_share_settings" },
+    });
+
+    if (!setting || !setting.isActive || !setting.settingValue) {
+      return res.status(200).json({
+        success: true,
+        settings: defaultFlags,
+      });
+    }
+
+    let parsed = {};
+    try {
+      parsed = JSON.parse(setting.settingValue);
+    } catch (e) {
+      console.warn("[HomeFeed] Failed to parse app_share_settings value:", e.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      settings: {
+        ...defaultFlags,
+        ...parsed,
+      },
+    });
+  } catch (error) {
+    console.error("[HomeFeed] getShareSettings error:", error);
+    return res.status(200).json({
+      success: true,
+      settings: defaultFlags,
+    });
+  }
+};
+
+module.exports = {
+  getHomeFeed,
+  getShareSettings,
+};
