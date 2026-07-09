@@ -38,6 +38,10 @@ const {
   toggleHomeCard,
 } = require("../../controller/admin/homeCardController");
 const {
+  getShareSettingsAdmin,
+  updateShareSettingsAdmin,
+} = require("../../controller/admin/shareSettingsController");
+const {
   getAstrologerPayoutRequests,
   markPayoutRequestPaid,
   rejectPayoutRequest,
@@ -349,6 +353,20 @@ router.post(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   toggleHomeCard
+);
+
+// App Share Visibility settings routes
+router.get(
+  "/share-settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getShareSettingsAdmin
+);
+router.put(
+  "/share-settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateShareSettingsAdmin
 );
 
 // WhatsApp auth settings routes
