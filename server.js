@@ -193,6 +193,7 @@ const palmReadingRoute = require("./routes/palm/palmReadingRoute");
 const reportPurchaseRoute = require("./routes/report/reportPurchaseRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
 const tempOtpRoute = require("./routes/internal/tempOtpRoute");
+const homeFeedRoute = require("./routes/home/homeFeedRoute");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -230,6 +231,7 @@ app.use("/api/palm-reading", palmReadingRoute);
 app.use("/api/report-purchases", reportPurchaseRoute);
 app.use("/api/internal", internalLogRoute);
 app.use("/api/internal/temp-otp", tempOtpRoute);
+app.use("/api/home", homeFeedRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 // Temporarily disabled because attaching a separate ws server to the same HTTP
