@@ -49,7 +49,9 @@ function authenticateSocket(socket, next) {
       return next(new Error("Invalid or expired token"));
     }
 
-    socket.user = payload; // { id, role }
+    socket.data = socket.data || {};
+    socket.data.user = payload;
+    socket.user = payload; // Keep for backward compatibility
     next();
   } catch (error) {
     console.error("Socket auth error:", error);
@@ -643,9 +645,14 @@ function initializeChatSocket(io) {
   scheduleExistingWalletLimitSessions(io);
 
   io.on("connection", (socket) => {
-    const { id: authId, role } = socket?.user || {};
+    const userPayload = socket?.data?.user || socket?.user || {};
+    const { id: authId, role } = userPayload;
     if (!authId) {
-      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket", socket?.user);
+      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket", { 
+        hasDataUser: !!socket?.data?.user, 
+        hasSocketUser: !!socket?.user, 
+        auth: socket?.handshake?.auth 
+      });
       socket.disconnect(true);
       return;
     }
