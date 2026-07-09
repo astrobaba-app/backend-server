@@ -631,6 +631,18 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
+    const tokenSessionVersion = Number.isInteger(refreshPayload.sessionVersion)
+      ? refreshPayload.sessionVersion
+      : 0;
+
+    if (tokenSessionVersion !== (astrologer.sessionVersion || 0)) {
+      clearTokenCookieAstrologer(res);
+      return res.status(401).json({
+        success: false,
+        message: "Session expired on this device because you logged in elsewhere.",
+      });
+    }
+
     const authPayload = {
       id: astrologer.id,
       role: "astrologer",

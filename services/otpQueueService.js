@@ -200,7 +200,7 @@ const createAndQueueOtp = async ({ actorType, mobile, templateId, includeAppHash
     createdAt: Date.now(),
   });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
-  // console.log("[OTPQueue] OTP queued", { actorType, mobile, otp });
+  console.log("[OTPQueue] OTP queued", { actorType, mobile, otp });
   await enqueueOtp({ actorType, mobile, otp, templateId, includeAppHash });
 };
 
@@ -233,7 +233,7 @@ const createAndQueueMobileOtp = async ({ actorType, mobile }) => {
   });
 };
 
-const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
+const verifyQueuedOtp = async ({ actorType, mobile, otp, deleteOtp = true }) => {
   const otpKey = getOtpKey({ actorType, mobile });
   const verifyAttemptsKey = getVerifyAttemptsKey({ actorType, mobile });
   await checkOtpVerifyLimits({ actorType, mobile });
@@ -246,8 +246,10 @@ const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
     throw error;
   }
 
-  await redis.del(otpKey);
-  await redis.del(verifyAttemptsKey);
+  if (deleteOtp) {
+    await redis.del(otpKey);
+    await redis.del(verifyAttemptsKey);
+  }
   return true;
 };
 
@@ -277,17 +279,17 @@ const drainOtpQueue = async () => {
       }
 
       try {
-        await sendMsg91Otp({
-          mobile: `91${job.mobile}`,
-          otp: job.otp,
-          templateId: job.templateId,
-          variables: {
-            otp: job.otp,
-            ...(job.includeAppHash && ANDROID_SMS_RETRIEVER_HASH
-              ? { app_hash: ANDROID_SMS_RETRIEVER_HASH }
-              : {}),
-          },
-        });
+        // await sendMsg91Otp({
+        //   mobile: `91${job.mobile}`,
+        //   otp: job.otp,
+        //   templateId: job.templateId,
+        //   variables: {
+        //     otp: job.otp,
+        //     ...(job.includeAppHash && ANDROID_SMS_RETRIEVER_HASH
+        //       ? { app_hash: ANDROID_SMS_RETRIEVER_HASH }
+        //       : {}),
+        //   },
+        // });
         console.log("[OTPQueue] OTP sent successfully");
       } catch (error) {
         const attempts = Number(job.attempts || 0) + 1;

@@ -49,6 +49,29 @@ function authenticateSocket(socket, next) {
       return next(new Error("Invalid or expired token"));
     }
 
+    // Optional: Validate sessionVersion for astrologers asynchronously
+    if (payload.role === "astrologer") {
+      Astrologer.findByPk(payload.id, { attributes: ["id", "sessionVersion"] })
+        .then((astrologer) => {
+          if (!astrologer) {
+            return next(new Error("Astrologer not found"));
+          }
+          const tokenVersion = Number.isInteger(payload.sessionVersion) ? payload.sessionVersion : 0;
+          if (tokenVersion !== (astrologer.sessionVersion || 0)) {
+            return next(new Error("Session expired due to login on another device"));
+          }
+          socket.data = socket.data || {};
+          socket.data.user = payload;
+          socket.user = payload;
+          next();
+        })
+        .catch((err) => {
+          console.error("Socket session validation error:", err);
+          next(new Error("Authentication failed"));
+        });
+      return;
+    }
+
     socket.data = socket.data || {};
     socket.data.user = payload;
     socket.user = payload; // Keep for backward compatibility
@@ -582,6 +605,8 @@ async function createAndBroadcastMessage({
     sessionId: session.id,
     message: messagePayload,
   });
+
+  
 
   // Update chat lists for both sides
   io.to(getUserRoom(session.userId)).emit("chat:updated", {
