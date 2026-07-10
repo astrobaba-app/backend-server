@@ -16,6 +16,9 @@ const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
 const { startOtpQueueWorker } = require("./services/otpQueueService");
+const {
+  startFreeChatGrantNotificationWorker,
+} = require("./services/freeChatGrantNotificationQueue");
 const { startAiChatQueueWorker } = require("./controller/aiChat/aiChatController");
 const scheduledNotificationService = require("./services/scheduledNotificationService");
 
@@ -184,6 +187,7 @@ const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const appleAuthRoute = require("./routes/authRoute/appleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
+const freeChatRoute = require("./routes/freeChat/freeChatRoute");
 const interestRoute = require("./routes/interest/interestRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
@@ -222,6 +226,7 @@ app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
+app.use("/api/free-chat", freeChatRoute);
 app.use("/api/interests", interestRoute);
 app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
@@ -324,6 +329,7 @@ initDB(() => {
     startInterestClassificationWorker();
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
+    startFreeChatGrantNotificationWorker();
     startAiChatQueueWorker();
     const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
     startReportWorkerScheduler();

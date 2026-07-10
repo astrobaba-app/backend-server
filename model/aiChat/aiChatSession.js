@@ -89,6 +89,22 @@ const AIChatSession = sequelize.define(
       allowNull: true,
       comment: "AI-usable wallet balance captured at session start",
     },
+    billingSource: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "wallet",
+      comment: "wallet or free_chat",
+    },
+    freeChatAllocationId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: "Free chat allocation applied to this AI chat session",
+    },
+    freeChatMinutes: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "Allocated free chat minutes for this session",
+    },
     endReason: {
       type: DataTypes.STRING(80),
       allowNull: true,

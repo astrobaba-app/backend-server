@@ -27,6 +27,7 @@ const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
 const ChatHistorySession = require("../chat/chatHistorySession");
 const ChatHistoryMessage = require("../chat/chatHistoryMessage");
+const FreeChatAllocation = require("../freeChat/freeChatAllocation");
 const LiveSession = require("../live/liveSession");
 const LiveParticipant = require("../live/liveParticipant");
 const CallSession = require("../call/callSession");
@@ -1027,6 +1028,37 @@ const PalmOrder = require("../palm/palmOrder");
   AIChatMessage.belongsTo(AIChatSession, {
     foreignKey: "sessionId",
     as: "session",
+  });
+
+  User.hasMany(FreeChatAllocation, {
+    foreignKey: "userId",
+    as: "freeChatAllocations",
+    onDelete: "CASCADE",
+  });
+
+  FreeChatAllocation.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Admin.hasMany(FreeChatAllocation, {
+    foreignKey: "grantedByAdminId",
+    as: "grantedFreeChatAllocations",
+  });
+
+  FreeChatAllocation.belongsTo(Admin, {
+    foreignKey: "grantedByAdminId",
+    as: "grantedByAdmin",
+  });
+
+  Admin.hasMany(FreeChatAllocation, {
+    foreignKey: "revokedByAdminId",
+    as: "revokedFreeChatAllocations",
+  });
+
+  FreeChatAllocation.belongsTo(Admin, {
+    foreignKey: "revokedByAdminId",
+    as: "revokedByAdmin",
   });
 
   User.hasMany(InterestIntentResult, {

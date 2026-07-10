@@ -27,6 +27,12 @@ const {
   queueAiChatInterestFinalization,
 } = require("../../services/aiChatInterestService");
 const {
+  CHAT_BILLING_SOURCES,
+  buildFreeChatSessionFields,
+  consumeFreeChatAllocation,
+  getAvailableFreeChatAllocation,
+} = require("../../services/freeChatService");
+const {
   generateAiChatEngineResponse,
   upsertAiChatEngineKundliCache,
   clearAiChatEngineKundliCache,
@@ -110,6 +116,9 @@ const formatAiSession = (session) => ({
   totalCost: session.totalCost || 0,
   billedAmount: session.billedAmount || 0,
   pricePerMinute: session.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE,
+  billingSource: session.billingSource || CHAT_BILLING_SOURCES.WALLET,
+  freeChatAllocationId: session.freeChatAllocationId || null,
+  freeChatMinutes: session.freeChatMinutes || null,
   maxDurationSeconds: session.maxDurationSeconds,
   maxEndTime: session.maxEndTime,
   walletBalanceAtStart: session.walletBalanceAtStart,
@@ -231,7 +240,12 @@ const completeAiChatSessionWithBilling = async (
       ? new Date(lockedSession.startTime)
       : new Date(lockedSession.createdAt);
     const durationMs = Math.max(0, endTime - startTime);
-    const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
+    const isFreeChatSession =
+      lockedSession.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT &&
+      Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10) > 0;
+    const currentMinutes = isFreeChatSession
+      ? Math.max(1, Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10))
+      : Math.max(1, Math.ceil(durationMs / (1000 * 60)));
     const pricePerMinute = toAmount(
       lockedSession.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE
     );
@@ -239,56 +253,58 @@ const completeAiChatSessionWithBilling = async (
     let billedAmount = 0;
     let updatedWalletBalance = null;
 
-    const wallet = await Wallet.findOne({
-      where: { userId: lockedSession.userId },
-      transaction: dbTransaction,
-      lock: dbTransaction.LOCK.UPDATE,
-    });
+    if (!isFreeChatSession) {
+      const wallet = await Wallet.findOne({
+        where: { userId: lockedSession.userId },
+        transaction: dbTransaction,
+        lock: dbTransaction.LOCK.UPDATE,
+      });
 
-    if (wallet && currentCost > 0) {
-      const walletBreakdown = getWalletBalanceBreakdown(wallet);
-      billedAmount = Math.min(walletBreakdown.balance, currentCost);
-      billedAmount = roundCurrency(billedAmount);
+      if (wallet && currentCost > 0) {
+        const walletBreakdown = getWalletBalanceBreakdown(wallet);
+        billedAmount = Math.min(walletBreakdown.balance, currentCost);
+        billedAmount = roundCurrency(billedAmount);
 
-      if (billedAmount > 0) {
-        const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
-          allowSignupBonusUsage: true,
-        });
-        updatedWalletBalance = debitPlan.nextBalance;
+        if (billedAmount > 0) {
+          const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
+            allowSignupBonusUsage: true,
+          });
+          updatedWalletBalance = debitPlan.nextBalance;
 
-        await wallet.update(
-          {
-            balance: debitPlan.nextBalance,
-            signupBonusBalance: debitPlan.nextSignupBonusBalance,
-            totalSpent: roundCurrency(toAmount(wallet.totalSpent) + billedAmount),
-          },
-          { transaction: dbTransaction }
-        );
-
-        await WalletTransaction.create(
-          {
-            userId: lockedSession.userId,
-            walletId: wallet.id,
-            amount: billedAmount,
-            type: "debit",
-            status: "completed",
-            paymentMethod: "manual",
-            description: `AI chat usage - ${currentMinutes} minutes`,
-            balanceBefore: debitPlan.previousBalance,
-            balanceAfter: debitPlan.nextBalance,
-            metadata: {
-              usageType: "ai_chat",
-              aiChatSessionId: lockedSession.id,
-              astrologerId: lockedSession.astrologerId,
-              durationMinutes: currentMinutes,
-              pricePerMinute,
-              rechargeConsumed: debitPlan.rechargeConsumed,
-              signupBonusConsumed: debitPlan.signupBonusConsumed,
-              endReason: reason,
+          await wallet.update(
+            {
+              balance: debitPlan.nextBalance,
+              signupBonusBalance: debitPlan.nextSignupBonusBalance,
+              totalSpent: roundCurrency(toAmount(wallet.totalSpent) + billedAmount),
             },
-          },
-          { transaction: dbTransaction }
-        );
+            { transaction: dbTransaction }
+          );
+
+          await WalletTransaction.create(
+            {
+              userId: lockedSession.userId,
+              walletId: wallet.id,
+              amount: billedAmount,
+              type: "debit",
+              status: "completed",
+              paymentMethod: "manual",
+              description: `AI chat usage - ${currentMinutes} minutes`,
+              balanceBefore: debitPlan.previousBalance,
+              balanceAfter: debitPlan.nextBalance,
+              metadata: {
+                usageType: "ai_chat",
+                aiChatSessionId: lockedSession.id,
+                astrologerId: lockedSession.astrologerId,
+                durationMinutes: currentMinutes,
+                pricePerMinute,
+                rechargeConsumed: debitPlan.rechargeConsumed,
+                signupBonusConsumed: debitPlan.signupBonusConsumed,
+                endReason: reason,
+              },
+            },
+            { transaction: dbTransaction }
+          );
+        }
       }
     }
 
@@ -342,13 +358,17 @@ const enforceActiveAiSession = async (session) => {
   }
 
   if (session.maxEndTime && new Date(session.maxEndTime).getTime() <= Date.now()) {
+    const reason =
+      session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT
+        ? "free_chat_time_limit"
+        : "wallet_time_limit";
     const finalized = await completeAiChatSessionWithBilling(
       session,
-      "wallet_time_limit"
+      reason
     );
     return {
       ended: true,
-      reason: "wallet_time_limit",
+      reason,
       billing: finalized.billing,
       session: finalized.session,
     };
@@ -1548,25 +1568,58 @@ const createChatSession = async (req, res) => {
   try {
     const userId = req.user.id;
     const { astrologerId } = req.body; // Get astrologer ID from request
+    const dbTransaction = await sequelize.transaction();
 
-    // Create new session with astrologer ID
-    const session = await AIChatSession.create({
-      userId,
-      astrologerId: astrologerId || null,
-      title: "New Chat",
-      isActive: true,
-      lastMessageAt: new Date(),
-    });
+    try {
+      const freeChatAllocation = await getAvailableFreeChatAllocation(
+        userId,
+        "ai",
+        dbTransaction
+      );
+      const now = new Date();
+      const session = await AIChatSession.create(
+        {
+          userId,
+          astrologerId: astrologerId || null,
+          title: "New Chat",
+          isActive: true,
+          status: "active",
+          startTime: now,
+          lastMessageAt: now,
+          pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+          ...(freeChatAllocation
+            ? buildFreeChatSessionFields(freeChatAllocation, now)
+            : {}),
+        },
+        { transaction: dbTransaction }
+      );
 
-    res.status(201).json({
-      success: true,
-      message: "Chat session created successfully",
-      session: {
-        id: session.id,
-        title: session.title,
-        createdAt: session.createdAt,
-      },
-    });
+      if (freeChatAllocation) {
+        await consumeFreeChatAllocation(
+          {
+            allocationId: freeChatAllocation.id,
+            userId,
+            sessionId: session.id,
+            sessionKind: "ai_chat",
+            chatType: "ai",
+          },
+          dbTransaction
+        );
+      }
+
+      await dbTransaction.commit();
+      scheduleAiChatInactivityAutoEnd(session);
+
+      return res.status(201).json({
+        success: true,
+        message: "Chat session created successfully",
+        session: formatAiSession(session),
+        astrologer: buildPublicAiAstrologerProfile(session.astrologerId),
+      });
+    } catch (error) {
+      await dbTransaction.rollback();
+      throw error;
+    }
   } catch (error) {
     console.error("Create chat session error:", error);
     res.status(500).json({
@@ -1634,40 +1687,72 @@ const createChatSessionV2 = async (req, res) => {
     const userId = req.user.id;
     const { astrologerId } = req.body;
     const pricePerMinute = AI_CHAT_PRICE_PER_MINUTE;
-    const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
-
-    if (breakdown.balance < pricePerMinute) {
-      await dbTransaction.rollback();
-      return res.status(402).json({
-        success: false,
-        code: "INSUFFICIENT_AI_BALANCE",
-        message: "Out of balance. Recharge more to chat with AI astrologer.",
-        wallet: {
-          balance: breakdown.balance,
-          aiUsableBalance: breakdown.balance,
-          required: pricePerMinute,
-        },
-      });
-    }
-
-    const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
     const now = new Date();
-    const session = await AIChatSession.create(
-      {
-        userId,
-        astrologerId: astrologerId || null,
-        title: "New Chat",
-        isActive: true,
-        status: "active",
-        startTime: now,
-        lastMessageAt: now,
-        pricePerMinute,
+    const freeChatAllocation = await getAvailableFreeChatAllocation(
+      userId,
+      "ai",
+      dbTransaction
+    );
+    let sessionPayload = {
+      userId,
+      astrologerId: astrologerId || null,
+      title: "New Chat",
+      isActive: true,
+      status: "active",
+      startTime: now,
+      lastMessageAt: now,
+      pricePerMinute,
+    };
+
+    if (freeChatAllocation) {
+      sessionPayload = {
+        ...sessionPayload,
+        ...buildFreeChatSessionFields(freeChatAllocation, now),
+        walletBalanceAtStart: null,
+      };
+    } else {
+      const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
+
+      if (breakdown.balance < pricePerMinute) {
+        await dbTransaction.rollback();
+        return res.status(402).json({
+          success: false,
+          code: "INSUFFICIENT_AI_BALANCE",
+          message: "Out of balance. Recharge more to chat with AI astrologer.",
+          wallet: {
+            balance: breakdown.balance,
+            aiUsableBalance: breakdown.balance,
+            required: pricePerMinute,
+          },
+        });
+      }
+
+      const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
+      sessionPayload = {
+        ...sessionPayload,
         maxDurationSeconds: walletLimit.maxDurationSeconds,
         maxEndTime: walletLimit.maxEndTime,
         walletBalanceAtStart: walletLimit.walletBalanceAtStart,
-      },
+      };
+    }
+
+    const session = await AIChatSession.create(
+      sessionPayload,
       { transaction: dbTransaction }
     );
+
+    if (freeChatAllocation) {
+      await consumeFreeChatAllocation(
+        {
+          allocationId: freeChatAllocation.id,
+          userId,
+          sessionId: session.id,
+          sessionKind: "ai_chat",
+          chatType: "ai",
+        },
+        dbTransaction
+      );
+    }
 
     await dbTransaction.commit();
 
@@ -1757,7 +1842,9 @@ const sendMessage = async (req, res) => {
           message:
             sessionState.reason === "wallet_time_limit"
               ? "Out of balance. Recharge more to continue chatting."
-              : "This AI chat has ended.",
+              : sessionState.reason === "free_chat_time_limit"
+                ? "Your free chat session has ended."
+                : "This AI chat has ended.",
           session: formatAiSession(sessionState.session),
           billing: sessionState.billing,
         });
@@ -3123,7 +3210,9 @@ const sendMessageV3 = async (req, res) => {
         message:
           sessionState.reason === "wallet_time_limit"
             ? "Out of balance. Recharge more to continue chatting."
-            : "This AI chat has ended.",
+            : sessionState.reason === "free_chat_time_limit"
+              ? "Your free chat session has ended."
+              : "This AI chat has ended.",
         session: formatAiSession(sessionState.session),
         billing: sessionState.billing,
       });

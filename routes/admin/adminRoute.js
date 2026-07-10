@@ -82,6 +82,11 @@ const {
   cleanupPalmQueue,
 } = require("../../controller/admin/palmRefundAdminController");
 const {
+  getAdminFreeChatAllocations,
+  grantAdminFreeChatAllocations,
+  revokeAdminFreeChatAllocation,
+} = require("../../controller/admin/freeChatAdminController");
+const {
   createJob,
   getAdminJobs,
   updateJobStatus,
@@ -212,6 +217,24 @@ router.put(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   updateUserWhatsappChatLimit
+);
+router.get(
+  "/free-chat-allocations",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/grant",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  grantAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/:allocationId/revoke",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  revokeAdminFreeChatAllocation
 );
 router.get(
   "/astrologers",
