@@ -8,6 +8,9 @@ const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const agoraService = require("../../services/agoraService");
 const notificationService = require("../../services/notificationService");
 const { Op } = require("sequelize");
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../../utils/platformCommission");
 
 // Create/Schedule live session (Astrologer only)
 const createLiveSession = async (req, res) => {
@@ -480,7 +483,7 @@ const endLiveSession = async (req, res) => {
 
           // Credit to astrologer earnings
           const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
-          const commissionPercentage = 10; // 10% platform commission
+          const commissionPercentage = ASTROLOGER_PLATFORM_COMMISSION_PERCENT;
           const platformCommission = deductionAmount * (commissionPercentage / 100);
           const netEarning = deductionAmount - platformCommission;
 

@@ -42,6 +42,7 @@ const CallSession = require("../model/call/callSession");
 // Chat models
 const ChatMessage = require("../model/chat/chatMessage");
 const ChatSession = require("../model/chat/chatSession");
+const FreeChatAllocation = require("../model/freeChat/freeChatAllocation");
 
 // Coupon models
 const Coupon = require("../model/coupon/coupon");
@@ -220,6 +221,37 @@ async function ensureChatSessionColumns() {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: true,
         comment: "Recharge wallet balance used to calculate max chat duration",
+      })
+    );
+  }
+
+  if (!table.billing_source && !table.billingSource) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "billing_source", {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: "wallet",
+        comment: "wallet or free_chat",
+      })
+    );
+  }
+
+  if (!table.free_chat_allocation_id && !table.freeChatAllocationId) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "free_chat_allocation_id", {
+        type: DataTypes.UUID,
+        allowNull: true,
+        comment: "Free chat allocation applied to this chat session",
+      })
+    );
+  }
+
+  if (!table.free_chat_minutes && !table.freeChatMinutes) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "free_chat_minutes", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: "Allocated free chat minutes for this session",
       })
     );
   }
@@ -446,6 +478,9 @@ async function ensureAIChatSessionColumns() {
       ["maxDurationSeconds", { type: DataTypes.INTEGER, allowNull: true }],
       ["maxEndTime", { type: DataTypes.DATE, allowNull: true }],
       ["walletBalanceAtStart", { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+      ["billingSource", { type: DataTypes.STRING(20), allowNull: false, defaultValue: "wallet" }],
+      ["freeChatAllocationId", { type: DataTypes.UUID, allowNull: true }],
+      ["freeChatMinutes", { type: DataTypes.INTEGER, allowNull: true }],
       ["endReason", { type: DataTypes.STRING(80), allowNull: true }],
       ["lastMessagePreview", { type: DataTypes.STRING(255), allowNull: true }],
     ];
@@ -650,6 +685,32 @@ async function ensureWalletColumns() {
     }
   } catch (error) {
     console.log("wallets table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureFreeChatAllocationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("free_chat_allocations");
+    const grantAdminColumn = table.grantedByAdminId
+      ? "grantedByAdminId"
+      : table.granted_by_admin_id
+        ? "granted_by_admin_id"
+        : null;
+
+    if (grantAdminColumn) {
+      await queryInterface.changeColumn("free_chat_allocations", grantAdminColumn, {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+          model: "admins",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+      });
+    }
+  } catch (error) {
+    console.log("free_chat_allocations table will be created by sequelize.sync()");
   }
 }
 
@@ -1955,6 +2016,7 @@ const initDB = (callback) => {
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureInterestIndexes())
     .then(() => ensureWalletColumns())
+    .then(() => ensureFreeChatAllocationColumns())
     .then(() => ensureAstroProductTrackingColumns())
     .then(() => ensureCouponAssignmentColumns())
     .then(() => ensureKundliShareColumns())

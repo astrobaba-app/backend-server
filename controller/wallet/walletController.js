@@ -57,8 +57,8 @@ const buildWalletPayload = (wallet) => {
 
   return {
     balance,
-    signupBonusBalance,
-    humanChatBalance: rechargeBalance,
+    signupBonusBalance: 0,
+    humanChatBalance: balance,
     aiUsableBalance: balance,
     totalRecharge: toAmount(wallet?.totalRecharge),
     totalSpent: toAmount(wallet?.totalSpent),

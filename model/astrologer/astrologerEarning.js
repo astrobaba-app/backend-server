@@ -1,5 +1,8 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../../utils/platformCommission");
 
 const AstrologerEarning = sequelize.define(
   "AstrologerEarning",
@@ -81,7 +84,7 @@ const AstrologerEarning = sequelize.define(
     commissionPercentage: {
       type: DataTypes.DECIMAL(5, 2),
       allowNull: false,
-      defaultValue: 10,
+      defaultValue: ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
       comment: "Platform commission percentage at time of session",
       validate: {
         min: 0,

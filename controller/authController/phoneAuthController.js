@@ -11,7 +11,9 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const { parse } = require("cookie");
-const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  grantWelcomeFreeChatForUser,
+} = require("../../services/freeChatService");
 const {
   validateWhatsappApiKey,
 } = require("../../services/whatsappAuthSettingsService");
@@ -148,20 +150,22 @@ const verifyOtp = async (req, res) => {
       invalidateTotalUsers: isNewUser,
     });
 
-    // Apply signup bonus for new users
-    let bonusInfo = null;
+    let welcomeFreeChatInfo = null;
     if (isNewUser) {
       try {
-        const bonusResult = await applySignupBonus(user.id, "phone");
-        if (bonusResult.bonusApplied) {
-          bonusInfo = {
-            amount: bonusResult.amount,
-            message: bonusResult.message,
-          };
-        }
+        const welcomeGrant = await grantWelcomeFreeChatForUser(user.id, {
+          loginMethod: "phone",
+        });
+        const grantedMinutes = welcomeGrant.minutes || 2;
+        welcomeFreeChatInfo = {
+          minutes: grantedMinutes,
+          applicableChatType: "both",
+          message: `You received ${grantedMinutes} free chat minute${
+            grantedMinutes === 1 ? "" : "s"
+          } on your first login.`,
+        };
       } catch (error) {
-        console.error("Failed to apply signup bonus:", error);
-        // Don't fail the registration if bonus fails
+        console.error("Failed to grant welcome free chat:", error);
       }
     }
 
@@ -174,7 +178,8 @@ const verifyOtp = async (req, res) => {
       isNewUser: profileIncomplete,
       token: token,
       middlewareToken: middlewareToken,
-      bonusInfo: bonusInfo,
+      bonusInfo: null,
+      welcomeFreeChatInfo,
       user: {
         id: user.id,
         fullName: user.fullName,
@@ -335,11 +340,13 @@ const whatsappRegisterOrCheck = async (req, res) => {
     // Keep response path fast; bonus credit is best-effort in background.
     setImmediate(async () => {
       try {
-        await applySignupBonus(createdUser.id, "whatsapp");
-      } catch (bonusError) {
-        console.error("Failed to apply WhatsApp signup bonus:", bonusError);
-      }
-    });
+          await grantWelcomeFreeChatForUser(createdUser.id, {
+            loginMethod: "phone",
+          });
+        } catch (welcomeError) {
+          console.error("Failed to grant WhatsApp welcome free chat:", welcomeError);
+        }
+      });
 
     return res.status(201).json({
       success: true,

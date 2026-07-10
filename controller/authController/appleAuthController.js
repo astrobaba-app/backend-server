@@ -11,7 +11,9 @@ const {
   createRefreshToken,
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
-const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  grantWelcomeFreeChatForUser,
+} = require("../../services/freeChatService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const {
   handleNewUserOnboarding,
@@ -223,9 +225,11 @@ const appleCallback = async (req, res) => {
     // ── 5. Signup bonus for new users ────────────────────────────────────────
     if (isNewUser) {
       try {
-        await applySignupBonus(user.id, "apple");
+        await grantWelcomeFreeChatForUser(user.id, {
+          loginMethod: "apple",
+        });
       } catch (err) {
-        console.error("Failed to apply signup bonus:", err);
+        console.error("Failed to grant welcome free chat:", err);
       }
 
       try {

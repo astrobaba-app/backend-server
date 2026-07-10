@@ -33,11 +33,6 @@ const {
   resendAstrologerBroadcast,
 } = require("../../controller/admin/adminAstrologerNotificationController");
 const {
-  getSignupBonusSettings,
-  updateSignupBonusSettings,
-  toggleSignupBonus,
-} = require("../../controller/admin/signupBonusController");
-const {
   getHomeCardSettings,
   updateHomeCardSettings,
   toggleHomeCard,
@@ -81,6 +76,11 @@ const {
   getPalmFailureCandidates,
   cleanupPalmQueue,
 } = require("../../controller/admin/palmRefundAdminController");
+const {
+  getAdminFreeChatAllocations,
+  grantAdminFreeChatAllocations,
+  revokeAdminFreeChatAllocation,
+} = require("../../controller/admin/freeChatAdminController");
 const {
   createJob,
   getAdminJobs,
@@ -214,6 +214,24 @@ router.put(
   updateUserWhatsappChatLimit
 );
 router.get(
+  "/free-chat-allocations",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/grant",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  grantAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/:allocationId/revoke",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  revokeAdminFreeChatAllocation
+);
+router.get(
   "/astrologers",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
@@ -336,26 +354,6 @@ router.delete(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   deleteScheduledNotificationBatch
-);
-
-// Signup bonus settings routes
-router.get(
-  "/signup-bonus/settings",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  getSignupBonusSettings
-);
-router.put(
-  "/signup-bonus/settings",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  updateSignupBonusSettings
-);
-router.post(
-  "/signup-bonus/toggle",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  toggleSignupBonus
 );
 
 // Home card settings routes

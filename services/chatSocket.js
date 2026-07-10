@@ -12,6 +12,10 @@ const {
 const { queueArchiveAndDeleteSession } = require("./chatHistoryService");
 const { getWalletBalanceBreakdown } = require("./walletService");
 const pushNotificationService = require("./pushNotificationService");
+const {
+  CHAT_BILLING_SOURCES,
+  calculateFreeChatWindow,
+} = require("./freeChatService");
 
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
@@ -106,6 +110,9 @@ function toSessionAccessSnapshot(session) {
     astrologerId: json.astrologerId,
     requestStatus: json.requestStatus,
     status: json.status,
+    billingSource: json.billingSource || CHAT_BILLING_SOURCES.WALLET,
+    freeChatAllocationId: json.freeChatAllocationId || null,
+    freeChatMinutes: json.freeChatMinutes || null,
     maxDurationSeconds: json.maxDurationSeconds || null,
     maxEndTime: json.maxEndTime || null,
     walletBalanceAtApproval: json.walletBalanceAtApproval || null,
@@ -313,11 +320,15 @@ async function endSessionForWalletTimeLimit(io, session) {
   await session.reload();
   clearUserInactivityAutoEnd(session.id);
   clearWalletLimitAutoEnd(session.id);
+  const endReason =
+    session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT
+      ? "free_chat_time_limit"
+      : "wallet_time_limit";
 
   if (io) {
     emitChatEnded(io, session, {
       endedBy: "system",
-      reason: "wallet_time_limit",
+      reason: endReason,
       currentMinutes: billing.currentMinutes,
       currentCost: billing.currentCost,
       totalMinutes: billing.totalMinutes,
@@ -339,7 +350,7 @@ async function endSessionForWalletTimeLimit(io, session) {
   }
 
   queueArchiveAndDeleteSession(session.id, {
-    endReason: "wallet_time_limit",
+    endReason,
     billedAmount: billing.billedAmount,
   });
 
@@ -519,6 +530,9 @@ function mapSession(session, viewerRole) {
     totalMinutes: json.totalMinutes,
     totalCost: json.totalCost,
     pricePerMinute: json.pricePerMinute,
+    billingSource: json.billingSource || CHAT_BILLING_SOURCES.WALLET,
+    freeChatAllocationId: json.freeChatAllocationId || null,
+    freeChatMinutes: json.freeChatMinutes || null,
     maxDurationSeconds: json.maxDurationSeconds || null,
     maxEndTime: json.maxEndTime || null,
     walletBalanceAtApproval: json.walletBalanceAtApproval || null,
@@ -850,18 +864,11 @@ function initializeChatSocket(io) {
             if (walletBreakdown.rechargeBalance <= 0) {
               await endSessionForInsufficientBalance(io, session);
 
-              const isBonusOnlyBalance =
-                walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
-
               if (callback) {
                 callback({
                   success: false,
-                  error: isBonusOnlyBalance
-                    ? "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers."
-                    : "Insufficient wallet balance. Chat ended.",
-                  code: isBonusOnlyBalance
-                    ? "RECHARGE_REQUIRED_FOR_HUMAN_CHAT"
-                    : "INSUFFICIENT_BALANCE",
+                  error: "Insufficient wallet balance. Chat ended.",
+                  code: "INSUFFICIENT_BALANCE",
                 });
               }
               return;
@@ -1052,32 +1059,43 @@ function initializeChatSocket(io) {
         if (!session || session.astrologerId !== authId) return;
 
         const approvalStartTime = new Date();
-        const wallet = await Wallet.findOne({ where: { userId: session.userId } });
-        const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
         const pricePerMinute = parseFloat(session.pricePerMinute || 0);
+        const isFreeChatSession =
+          session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT;
+        let walletLimit = null;
 
-        if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
-          if (callback) {
-            callback({
-              success: false,
-              error:
-                "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.",
-              code: "RECHARGE_REQUIRED_FOR_HUMAN_CHAT",
-              wallet: {
-                balance: walletBreakdown.balance,
-                signupBonusBalance: walletBreakdown.signupBonusBalance,
-                humanChatBalance: walletBreakdown.rechargeBalance,
-              },
-            });
+        if (isFreeChatSession) {
+          walletLimit = calculateFreeChatWindow(
+            session.freeChatMinutes || 1,
+            approvalStartTime
+          );
+        } else {
+          const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+          const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+
+          if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
+              if (callback) {
+                callback({
+                  success: false,
+                  error:
+                    "Insufficient wallet balance. Recharge to start or continue this chat.",
+                  code: "INSUFFICIENT_BALANCE",
+                  wallet: {
+                    balance: walletBreakdown.balance,
+                    signupBonusBalance: 0,
+                    humanChatBalance: walletBreakdown.balance,
+                  },
+                });
+              }
+            return;
           }
-          return;
-        }
 
-        const walletLimit = calculateWalletLimitedChatTime({
-          rechargeBalance: walletBreakdown.rechargeBalance,
-          pricePerMinute,
-          startTime: approvalStartTime,
-        });
+          walletLimit = calculateWalletLimitedChatTime({
+            rechargeBalance: walletBreakdown.rechargeBalance,
+            pricePerMinute,
+            startTime: approvalStartTime,
+          });
+        }
 
         await session.update({
           requestStatus: "approved",
@@ -1086,7 +1104,9 @@ function initializeChatSocket(io) {
           endTime: null,
           maxDurationSeconds: walletLimit.maxDurationSeconds,
           maxEndTime: walletLimit.maxEndTime,
-          walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
+          walletBalanceAtApproval: isFreeChatSession
+            ? null
+            : walletLimit.walletBalanceAtApproval,
         });
         await session.reload();
 
