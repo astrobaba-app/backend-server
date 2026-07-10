@@ -33,11 +33,6 @@ const {
   resendAstrologerBroadcast,
 } = require("../../controller/admin/adminAstrologerNotificationController");
 const {
-  getSignupBonusSettings,
-  updateSignupBonusSettings,
-  toggleSignupBonus,
-} = require("../../controller/admin/signupBonusController");
-const {
   getHomeCardSettings,
   updateHomeCardSettings,
   toggleHomeCard,
@@ -359,26 +354,6 @@ router.delete(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   deleteScheduledNotificationBatch
-);
-
-// Signup bonus settings routes
-router.get(
-  "/signup-bonus/settings",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  getSignupBonusSettings
-);
-router.put(
-  "/signup-bonus/settings",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  updateSignupBonusSettings
-);
-router.post(
-  "/signup-bonus/toggle",
-  checkForAuthenticationCookie(),
-  authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  toggleSignupBonus
 );
 
 // Home card settings routes

@@ -12,51 +12,32 @@ const roundCurrency = (value) => Math.round((toAmount(value) + Number.EPSILON) *
 
 const getWalletBalanceBreakdown = (walletLike) => {
   const balance = Math.max(0, toAmount(walletLike?.balance));
-  const rawSignupBonusBalance = Math.max(0, toAmount(walletLike?.signupBonusBalance));
-  const signupBonusBalance = Math.min(rawSignupBonusBalance, balance);
-  const rechargeBalance = Math.max(0, balance - signupBonusBalance);
 
   return {
     balance: roundCurrency(balance),
-    signupBonusBalance: roundCurrency(signupBonusBalance),
-    rechargeBalance: roundCurrency(rechargeBalance),
+    signupBonusBalance: 0,
+    rechargeBalance: roundCurrency(balance),
   };
 };
 
-const buildWalletDebitPlan = (walletLike, amount, options = {}) => {
-  const { allowSignupBonusUsage = true } = options;
+const buildWalletDebitPlan = (walletLike, amount) => {
   const debitAmount = roundCurrency(amount);
 
   if (debitAmount <= 0) {
     throw new Error("Invalid debit amount");
   }
 
-  const { balance, signupBonusBalance, rechargeBalance } =
-    getWalletBalanceBreakdown(walletLike);
+  const { balance, rechargeBalance } = getWalletBalanceBreakdown(walletLike);
 
   if (balance < debitAmount) {
     throw new Error("Insufficient balance");
   }
 
-  let rechargeConsumed = Math.min(rechargeBalance, debitAmount);
-  let remaining = roundCurrency(debitAmount - rechargeConsumed);
-  let signupBonusConsumed = 0;
-
-  if (remaining > 0) {
-    if (!allowSignupBonusUsage) {
-      throw new Error("Insufficient recharge balance");
-    }
-
-    signupBonusConsumed = Math.min(signupBonusBalance, remaining);
-    remaining = roundCurrency(remaining - signupBonusConsumed);
-  }
-
-  if (remaining > 0) {
-    throw new Error("Insufficient balance");
-  }
+  const rechargeConsumed = Math.min(rechargeBalance, debitAmount);
+  const signupBonusConsumed = 0;
 
   const nextBalance = roundCurrency(balance - debitAmount);
-  const nextSignupBonusBalance = roundCurrency(signupBonusBalance - signupBonusConsumed);
+  const nextSignupBonusBalance = 0;
   const nextRechargeBalance = roundCurrency(nextBalance - nextSignupBonusBalance);
 
   return {
@@ -64,7 +45,7 @@ const buildWalletDebitPlan = (walletLike, amount, options = {}) => {
     rechargeConsumed: roundCurrency(rechargeConsumed),
     signupBonusConsumed: roundCurrency(signupBonusConsumed),
     previousBalance: balance,
-    previousSignupBonusBalance: signupBonusBalance,
+      previousSignupBonusBalance: 0,
     previousRechargeBalance: rechargeBalance,
     nextBalance,
     nextSignupBonusBalance,

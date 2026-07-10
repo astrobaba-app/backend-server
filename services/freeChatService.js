@@ -22,6 +22,15 @@ const CHAT_BILLING_SOURCES = Object.freeze({
   FREE_CHAT: "free_chat",
 });
 
+const WELCOME_FREE_CHAT_MINUTES = Math.max(
+  1,
+  Number.parseInt(process.env.WELCOME_FREE_CHAT_MINUTES || "2", 10) || 2
+);
+
+const WELCOME_FREE_CHAT_CAMPAIGN = "welcome_free_chat";
+
+let cachedSystemGrantAdminId = null;
+
 const normalizeFreeChatType = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === FREE_CHAT_TYPES.AI) return FREE_CHAT_TYPES.AI;
@@ -284,6 +293,27 @@ const resolveGrantTargetUserIds = async ({ targetMode, userIds = [], filters = {
   );
 };
 
+const resolveSystemGrantAdminId = async () => {
+  if (cachedSystemGrantAdminId) {
+    return cachedSystemGrantAdminId;
+  }
+
+  const envAdminId = String(process.env.SYSTEM_FREE_CHAT_ADMIN_ID || "").trim();
+  if (envAdminId) {
+    cachedSystemGrantAdminId = envAdminId;
+    return cachedSystemGrantAdminId;
+  }
+
+  const fallbackAdmin = await Admin.findOne({
+    attributes: ["id"],
+    order: [["createdAt", "ASC"], ["id", "ASC"]],
+    raw: true,
+  });
+
+  cachedSystemGrantAdminId = fallbackAdmin?.id || null;
+  return cachedSystemGrantAdminId;
+};
+
 const grantFreeChatAllocations = async ({
   adminId,
   targetMode = "single",
@@ -363,6 +393,66 @@ const grantFreeChatAllocations = async ({
   return {
     allocations: created,
     targetUserIds,
+  };
+};
+
+const grantWelcomeFreeChatForUser = async (
+  userId,
+  { loginMethod = "unknown", minutes = WELCOME_FREE_CHAT_MINUTES } = {}
+) => {
+  if (!userId) {
+    return {
+      granted: false,
+      reason: "missing_user_id",
+      allocation: null,
+    };
+  }
+
+  const normalizedMinutes = Math.max(
+    1,
+    Number.parseInt(String(minutes), 10) || WELCOME_FREE_CHAT_MINUTES
+  );
+  const systemGrantAdminId = await resolveSystemGrantAdminId();
+
+  const existingAllocation = await FreeChatAllocation.findOne({
+    where: {
+      userId,
+      campaignName: WELCOME_FREE_CHAT_CAMPAIGN,
+    },
+    order: [["createdAt", "DESC"], ["id", "DESC"]],
+  });
+
+  if (existingAllocation) {
+    return {
+      granted: false,
+      reason: "already_granted",
+      allocation: existingAllocation,
+      minutes:
+        Number(existingAllocation.minutes || normalizedMinutes) || normalizedMinutes,
+    };
+  }
+
+  const allocation = await FreeChatAllocation.create({
+    userId,
+    grantedByAdminId: systemGrantAdminId,
+    minutes: normalizedMinutes,
+    applicableChatType: FREE_CHAT_TYPES.BOTH,
+    status: FREE_CHAT_STATUSES.ACTIVE,
+    targetMode: "single",
+    campaignName: WELCOME_FREE_CHAT_CAMPAIGN,
+    reason: "Welcome free chat on first login",
+    metadata: {
+      grantSource: "system_welcome_login",
+      systemGrantAdminId,
+      loginMethod,
+      grantedAt: new Date().toISOString(),
+    },
+  });
+
+  return {
+    granted: true,
+    allocation,
+    minutes: normalizedMinutes,
   };
 };
 
@@ -480,8 +570,11 @@ module.exports = {
   getAvailableFreeChatAllocation,
   getUserFreeChatSummary,
   grantFreeChatAllocations,
+  grantWelcomeFreeChatForUser,
   isFreeChatSession,
   listFreeChatAllocationsForAdmin,
   normalizeFreeChatType,
   revokeFreeChatAllocation,
+  WELCOME_FREE_CHAT_CAMPAIGN,
+  WELCOME_FREE_CHAT_MINUTES,
 };

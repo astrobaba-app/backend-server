@@ -5,7 +5,9 @@ const {
   createRefreshToken,
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
-const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  grantWelcomeFreeChatForUser,
+} = require("../../services/freeChatService");
 const {
   normalizeIndianMobile,
 } = require("../../services/firebasePhoneAuthService");
@@ -101,18 +103,22 @@ const verifyOtpV2 = async (req, res) => {
       invalidateTotalUsers: isNewUser,
     });
 
-    let bonusInfo = null;
+    let welcomeFreeChatInfo = null;
     if (isNewUser) {
       try {
-        const bonusResult = await applySignupBonus(user.id, "phone");
-        if (bonusResult.bonusApplied) {
-          bonusInfo = {
-            amount: bonusResult.amount,
-            message: bonusResult.message,
-          };
-        }
+        const welcomeGrant = await grantWelcomeFreeChatForUser(user.id, {
+          loginMethod: "phone",
+        });
+        const grantedMinutes = welcomeGrant.minutes || 2;
+        welcomeFreeChatInfo = {
+          minutes: grantedMinutes,
+          applicableChatType: "both",
+          message: `You received ${grantedMinutes} free chat minute${
+            grantedMinutes === 1 ? "" : "s"
+          } on your first login.`,
+        };
       } catch (error) {
-        console.error("Failed to apply signup bonus:", error);
+        console.error("Failed to grant welcome free chat:", error);
       }
     }
 
@@ -126,7 +132,8 @@ const verifyOtpV2 = async (req, res) => {
       token: token,
       middlewareToken: middlewareToken,
       refreshToken,
-      bonusInfo: bonusInfo,
+      bonusInfo: null,
+      welcomeFreeChatInfo,
       user: {
         id: user.id,
         fullName: user.fullName,

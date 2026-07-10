@@ -31,7 +31,7 @@ const CHAT_END_REASON_ALLOWLIST = new Set([
 ]);
 const HUMAN_CHAT_RECHARGE_REQUIRED_CODE = "RECHARGE_REQUIRED_FOR_HUMAN_CHAT";
 const HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE =
-  "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.";
+  "Insufficient wallet balance. Recharge to start or continue this chat.";
 const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "id",
   "fullName",
@@ -363,11 +363,10 @@ const startChatSession = async (req, res) => {
             success: false,
             message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
             code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
-            redirectTo: "/aichat",
             wallet: {
               balance: walletBreakdown.balance,
-              signupBonusBalance: walletBreakdown.signupBonusBalance,
-              humanChatBalance: walletBreakdown.rechargeBalance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
               required: requiredBalance,
             },
           });
@@ -795,31 +794,23 @@ const sendMessage = async (req, res) => {
         const { endSessionForInsufficientBalance } = require("../../services/chatSocket");
         const billing = await endSessionForInsufficientBalance(io, session);
 
-        const isBonusOnlyBalance =
-          walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
-
-        return res.status(402).json({
-          success: false,
-          message: isBonusOnlyBalance
-            ? HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE
-            : "Insufficient wallet balance. Chat ended. Please recharge to continue.",
-          code: isBonusOnlyBalance
-            ? HUMAN_CHAT_RECHARGE_REQUIRED_CODE
-            : "INSUFFICIENT_BALANCE",
-          redirectTo: isBonusOnlyBalance ? "/aichat" : undefined,
-          session: {
-            id: session.id,
-            totalMinutes: billing.totalMinutes,
-            totalCost: billing.totalCost,
-            billedAmount: billing.billedAmount,
-            pricePerMinute: parseFloat(session.pricePerMinute || 0),
-          },
-          wallet: {
-            balance: walletBreakdown.balance,
-            signupBonusBalance: walletBreakdown.signupBonusBalance,
-            humanChatBalance: walletBreakdown.rechargeBalance,
-          },
-        });
+          return res.status(402).json({
+            success: false,
+            message: "Insufficient wallet balance. Chat ended. Please recharge to continue.",
+            code: "INSUFFICIENT_BALANCE",
+            session: {
+              id: session.id,
+              totalMinutes: billing.totalMinutes,
+              totalCost: billing.totalCost,
+              billedAmount: billing.billedAmount,
+              pricePerMinute: parseFloat(session.pricePerMinute || 0),
+            },
+            wallet: {
+              balance: walletBreakdown.balance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
+            },
+          });
       }
     }
 
@@ -1439,13 +1430,12 @@ const approveChatRequest = async (req, res) => {
           success: false,
           message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
           code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
-          redirectTo: "/aichat",
-          wallet: {
-            balance: walletBreakdown.balance,
-            signupBonusBalance: walletBreakdown.signupBonusBalance,
-            humanChatBalance: walletBreakdown.rechargeBalance,
-          },
-        });
+            wallet: {
+              balance: walletBreakdown.balance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
+            },
+          });
       }
 
       walletLimit = calculateWalletLimitedChatTime({

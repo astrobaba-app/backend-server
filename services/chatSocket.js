@@ -864,18 +864,11 @@ function initializeChatSocket(io) {
             if (walletBreakdown.rechargeBalance <= 0) {
               await endSessionForInsufficientBalance(io, session);
 
-              const isBonusOnlyBalance =
-                walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
-
               if (callback) {
                 callback({
                   success: false,
-                  error: isBonusOnlyBalance
-                    ? "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers."
-                    : "Insufficient wallet balance. Chat ended.",
-                  code: isBonusOnlyBalance
-                    ? "RECHARGE_REQUIRED_FOR_HUMAN_CHAT"
-                    : "INSUFFICIENT_BALANCE",
+                  error: "Insufficient wallet balance. Chat ended.",
+                  code: "INSUFFICIENT_BALANCE",
                 });
               }
               return;
@@ -1081,19 +1074,19 @@ function initializeChatSocket(io) {
           const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
 
           if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
-            if (callback) {
-              callback({
-                success: false,
-                error:
-                  "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.",
-                code: "RECHARGE_REQUIRED_FOR_HUMAN_CHAT",
-                wallet: {
-                  balance: walletBreakdown.balance,
-                  signupBonusBalance: walletBreakdown.signupBonusBalance,
-                  humanChatBalance: walletBreakdown.rechargeBalance,
-                },
-              });
-            }
+              if (callback) {
+                callback({
+                  success: false,
+                  error:
+                    "Insufficient wallet balance. Recharge to start or continue this chat.",
+                  code: "INSUFFICIENT_BALANCE",
+                  wallet: {
+                    balance: walletBreakdown.balance,
+                    signupBonusBalance: 0,
+                    humanChatBalance: walletBreakdown.balance,
+                  },
+                });
+              }
             return;
           }
 

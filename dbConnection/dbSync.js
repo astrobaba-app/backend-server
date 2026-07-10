@@ -688,6 +688,32 @@ async function ensureWalletColumns() {
   }
 }
 
+async function ensureFreeChatAllocationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("free_chat_allocations");
+    const grantAdminColumn = table.grantedByAdminId
+      ? "grantedByAdminId"
+      : table.granted_by_admin_id
+        ? "granted_by_admin_id"
+        : null;
+
+    if (grantAdminColumn) {
+      await queryInterface.changeColumn("free_chat_allocations", grantAdminColumn, {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+          model: "admins",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+      });
+    }
+  } catch (error) {
+    console.log("free_chat_allocations table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureAstroProductTrackingColumns() {
   const queryInterface = sequelize.getQueryInterface();
   const trackedTables = [
@@ -1990,6 +2016,7 @@ const initDB = (callback) => {
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureInterestIndexes())
     .then(() => ensureWalletColumns())
+    .then(() => ensureFreeChatAllocationColumns())
     .then(() => ensureAstroProductTrackingColumns())
     .then(() => ensureCouponAssignmentColumns())
     .then(() => ensureKundliShareColumns())

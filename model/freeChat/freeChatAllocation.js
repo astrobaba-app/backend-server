@@ -19,13 +19,13 @@ const FreeChatAllocation = sequelize.define(
       onDelete: "CASCADE",
       onUpdate: "CASCADE",
     },
-    grantedByAdminId: {
-      type: DataTypes.UUID,
-      allowNull: false,
-      references: {
-        model: "admins",
-        key: "id",
-      },
+      grantedByAdminId: {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+          model: "admins",
+          key: "id",
+        },
       onDelete: "RESTRICT",
       onUpdate: "CASCADE",
     },
