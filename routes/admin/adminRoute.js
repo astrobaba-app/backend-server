@@ -28,6 +28,11 @@ const {
   getOpenAIRequestLogs,
 } = require("../../controller/admin/adminController");
 const {
+  sendAstrologerNotification,
+  getAstrologerBroadcastHistory,
+  resendAstrologerBroadcast,
+} = require("../../controller/admin/adminAstrologerNotificationController");
+const {
   getSignupBonusSettings,
   updateSignupBonusSettings,
   toggleSignupBonus,
@@ -240,17 +245,35 @@ router.post(
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   broadcastNotification
 );
+router.post(
+  "/astrologer-notifications",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  sendAstrologerNotification
+);
 router.get(
   "/broadcast-history",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getBroadcastHistory
 );
+router.get(
+  "/astrologer-notifications/history",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAstrologerBroadcastHistory
+);
 router.post(
   "/broadcast-resend/:logId",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   resendBroadcast
+);
+router.post(
+  "/astrologer-notifications/resend/:logId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  resendAstrologerBroadcast
 );
 
 router.get(

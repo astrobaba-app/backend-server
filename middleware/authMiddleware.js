@@ -1,6 +1,7 @@
 const { validateToken } = require("../services/authService");
 const { parse } = require("cookie");
 const Astrologer = require("../model/astrologer/astrologer");
+const Admin = require("../model/admin/admin");
 
 
 function checkForAuthenticationCookie() {
@@ -39,10 +40,10 @@ function checkForAuthenticationCookie() {
       req.user = userPayload;
       if (userPayload.role === "astrologer") {
         const astrologer = await Astrologer.findByPk(userPayload.id, {
-          attributes: ["id", "sessionVersion"],
+          attributes: ["id", "sessionVersion", "isActive"],
         });
 
-        if (!astrologer) {
+        if (!astrologer || astrologer.isActive === false) {
           return res.status(401).json({ error: "Invalid or expired token." });
         }
 
@@ -51,6 +52,14 @@ function checkForAuthenticationCookie() {
           : 0;
 
         if (tokenSessionVersion !== (astrologer.sessionVersion || 0)) {
+          return res.status(401).json({ error: "Invalid or expired token." });
+        }
+      } else if (["admin", "superadmin", "masteradmin"].includes(userPayload.role)) {
+        const admin = await Admin.findByPk(userPayload.id, {
+          attributes: ["id", "isActive", "isApproved"],
+        });
+
+        if (!admin || admin.isActive === false || admin.isApproved === false) {
           return res.status(401).json({ error: "Invalid or expired token." });
         }
       }

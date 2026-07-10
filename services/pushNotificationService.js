@@ -224,6 +224,54 @@ class PushNotificationService {
     }
   }
 
+  async sendToMultipleAstrologers(
+    astrologerIds,
+    { title, body, data = {}, imageUrl = null }
+  ) {
+    try {
+      const results = await Promise.allSettled(
+        astrologerIds.map((astrologerId) =>
+          this.sendToAstrologer(astrologerId, {
+            title,
+            body,
+            data,
+            imageUrl,
+          })
+        )
+      );
+
+      const deliveredAstrologerIds = [];
+      const failedAstrologerIds = [];
+
+      results.forEach((result, index) => {
+        const astrologerId = astrologerIds[index];
+        const delivered =
+          result.status === "fulfilled" &&
+          result.value.success &&
+          (result.value.successCount ?? 0) > 0;
+
+        if (delivered) {
+          deliveredAstrologerIds.push(astrologerId);
+        } else {
+          failedAstrologerIds.push(astrologerId);
+        }
+      });
+
+      return {
+        success: true,
+        totalAstrologers: astrologerIds.length,
+        successCount: deliveredAstrologerIds.length,
+        failureCount: failedAstrologerIds.length,
+        attemptedAstrologerIds: astrologerIds,
+        deliveredAstrologerIds,
+        failedAstrologerIds,
+      };
+    } catch (error) {
+      console.error("[FCM] Error sending to multiple astrologers:", error);
+      throw error;
+    }
+  }
+
   /**
    * Broadcast push notification to all users with active tokens
    */
@@ -259,6 +307,38 @@ class PushNotificationService {
       };
     } catch (error) {
       console.error("[FCM] Error broadcasting to all:", error);
+      throw error;
+    }
+  }
+
+  async broadcastToAllAstrologers({ title, body, data = {}, imageUrl = null }) {
+    try {
+      const activeAstrologers = await AstrologerDeviceToken.findAll({
+        where: { isActive: true },
+        attributes: ["astrologerId"],
+        group: ["astrologerId"],
+        raw: true,
+      });
+
+      const astrologerIds = activeAstrologers.map((item) => item.astrologerId);
+
+      if (!astrologerIds.length) {
+        return { success: false, message: "No active astrologers found" };
+      }
+
+      const result = await this.sendToMultipleAstrologers(astrologerIds, {
+        title,
+        body,
+        data,
+        imageUrl,
+      });
+
+      return {
+        ...result,
+        activeAstrologerIds: astrologerIds,
+      };
+    } catch (error) {
+      console.error("[FCM] Error broadcasting to astrologers:", error);
       throw error;
     }
   }

@@ -301,10 +301,15 @@ app.use("/api/home", homeFeedRoute);
 initDB(() => {
   initializeChatSocket(io);
   
-  const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
   initializeLiveStreamSocket(io);
-  
-  setInterval(syncLiveViewerCounts, 30000);
+
+  const liveViewerCountSyncEnabled =
+    String(process.env.LIVE_VIEWER_COUNT_SYNC_ENABLED || "").toLowerCase() ===
+    "true";
+  if (liveViewerCountSyncEnabled) {
+    const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
+    setInterval(syncLiveViewerCounts, 30000);
+  }
 
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
@@ -322,6 +327,10 @@ initDB(() => {
     startAiChatQueueWorker();
     const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
     startReportWorkerScheduler();
-    console.log("Live viewer count sync enabled (every 30 seconds)");
+    console.log(
+      liveViewerCountSyncEnabled
+        ? "Live viewer count sync enabled (every 30 seconds)"
+        : "Live viewer count sync disabled"
+    );
   });
 });

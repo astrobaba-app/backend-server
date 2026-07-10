@@ -50,6 +50,11 @@ const User = sequelize.define(
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
     isOnboarded: {
       type: DataTypes.BOOLEAN,
       allowNull: false,
@@ -152,6 +157,11 @@ const User = sequelize.define(
     lastLogoutAt: {
       type: DataTypes.DATE,
       allowNull: true,
+    },
+    sessionVersion: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
     },
   },
   {

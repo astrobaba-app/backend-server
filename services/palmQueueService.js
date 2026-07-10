@@ -8,6 +8,9 @@ const ReportGenerationRequest = require("../model/report/reportGenerationRequest
 const { analyzePalm } = require("./palmReadingService");
 const { enqueueReportPdfRequest } = require("./reportGenerationQueueService");
 const {
+  notifyReportGenerationStatus,
+} = require("./reportNotificationService");
+const {
   loadUserRequestForPalm,
   ensureKundliForUserRequest,
   buildPalmKundliContext,
@@ -493,6 +496,7 @@ const processNextPalmJob = async ({ chain = false } = {}) => {
             error: friendlyReason || message,
             completedAt: new Date(),
           });
+          await notifyReportGenerationStatus(reportGenerationRequest, "failed");
         }
         await activeJob.update({
           status: "failed",

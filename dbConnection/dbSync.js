@@ -70,6 +70,8 @@ const LiveSession = require("../model/live/liveSession");
 
 // Notification models
 const Notification = require("../model/notification/notification");
+const AstrologerNotification = require("../model/notification/astrologerNotification");
+const AstrologerBroadcastLog = require("../model/admin/astrologerBroadcastLog");
 
 // Review models
 const Review = require("../model/review/review");
@@ -922,7 +924,6 @@ async function ensureUserPreferenceColumns() {
         })
       );
     }
-
 
     if (!table.isOnboarded && !table.is_onboarded) {
       operations.push(
