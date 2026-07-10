@@ -19,35 +19,46 @@ async function resolveActorType(req) {
 const getNotifications = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { page = 1, limit = 50, isRead } = req.query;
+    const { isRead } = req.query;
+    const rawPage = Number.parseInt(req.query.page, 10);
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(rawLimit, 50)
+      : 20;
     const offset = (page - 1) * limit;
+    const includeUnreadCount = req.query.includeUnreadCount === "true";
 
     const where = { userId };
     if (isRead !== undefined) {
       where.isRead = isRead === "true";
     }
 
-    const { rows: notifications, count } = await Notification.findAndCountAll({
+    const rows = await Notification.findAll({
       where,
       order: [["createdAt", "DESC"]],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: limit + 1,
+      offset,
     });
+    const hasMore = rows.length > limit;
+    const notifications = hasMore ? rows.slice(0, limit) : rows;
 
-    // Count unread
-    const unreadCount = await Notification.count({
-      where: { userId, isRead: false },
-    });
+    let unreadCount;
+    if (includeUnreadCount) {
+      unreadCount = await Notification.count({
+        where: { userId, isRead: false },
+      });
+    }
 
     res.status(200).json({
       success: true,
       notifications,
       unreadCount,
       pagination: {
-        total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        page,
+        limit,
+        hasMore,
+        nextPage: hasMore ? page + 1 : null,
       },
     });
   } catch (error) {

@@ -15,6 +15,7 @@ const Wallet = require("../wallet/wallet");
 const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
 const AstrologerDeviceToken = require("../astrologer/astrologerDeviceToken");
+const AstrologerNotification = require("../notification/astrologerNotification");
 const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
@@ -559,6 +560,17 @@ const PalmOrder = require("../palm/palmOrder");
   Notification.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
+  });
+
+  Astrologer.hasMany(AstrologerNotification, {
+    foreignKey: "astrologerId",
+    as: "notifications",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerNotification.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
   });
 
   Astrologer.hasMany(AstrologerWebPushSubscription, {
