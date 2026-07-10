@@ -14,8 +14,9 @@ const {
   enqueueHumanConsultationInterestClassification,
 } = require("./interestQueueService");
 const redis = require("../config/redis/redis");
-
-const PLATFORM_COMMISSION_PERCENTAGE = 10;
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../utils/platformCommission");
 
 async function deleteSessionCreatedKundlis(session, transaction) {
   if (!session?.id || !session?.astrologerId) {
@@ -200,7 +201,8 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
         );
 
         // Chat sessions are reused per user+astrologer pair; create one earning per billed completion.
-        const platformCommission = billedAmount * (PLATFORM_COMMISSION_PERCENTAGE / 100);
+        const platformCommission =
+          billedAmount * (ASTROLOGER_PLATFORM_COMMISSION_PERCENT / 100);
         const netEarning = billedAmount - platformCommission;
 
         await AstrologerEarning.create(
@@ -214,7 +216,7 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
             pricePerMinute,
             totalAmount: billedAmount,
             platformCommission,
-            commissionPercentage: PLATFORM_COMMISSION_PERCENTAGE,
+            commissionPercentage: ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
             netEarning,
             paymentStatus: "pending",
             sessionStartTime: startTime,

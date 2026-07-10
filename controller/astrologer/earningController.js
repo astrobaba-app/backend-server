@@ -4,8 +4,9 @@ const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const AstrologerPayoutRequest = require("../../model/astrologer/astrologerPayoutRequest");
 const ChatSession = require("../../model/chat/chatSession");
 const User = require("../../model/user/userAuth");
-
-const PLATFORM_FEE_PERCENTAGE = 10;
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../../utils/platformCommission");
 
 const toNumber = (value) => {
   const parsed = parseFloat(value);
@@ -117,7 +118,9 @@ const getAstrologerEarningsDashboard = async (req, res) => {
       const pricePerMinute = toNumber(session.pricePerMinute);
       return sum + minutes * pricePerMinute;
     }, 0);
-    const ongoingChatEarning = ongoingChatGross * ((100 - PLATFORM_FEE_PERCENTAGE) / 100);
+    const ongoingChatEarning =
+      ongoingChatGross *
+      ((100 - ASTROLOGER_PLATFORM_COMMISSION_PERCENT) / 100);
 
     const activePayoutRequest = await AstrologerPayoutRequest.findOne({
       where: {
@@ -143,7 +146,7 @@ const getAstrologerEarningsDashboard = async (req, res) => {
         totalPaidOut: toNumber(summary.totalPaidOut.toFixed(2)),
         availableForPayout: toNumber(summary.availableForPayout.toFixed(2)),
         processingPayoutAmount: toNumber(summary.processingPayoutAmount.toFixed(2)),
-        platformFeePercentage: PLATFORM_FEE_PERCENTAGE,
+        platformFeePercentage: ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
       },
       activePayoutRequest,
       earnings: rows,
@@ -235,7 +238,7 @@ const createPayoutRequest = async (req, res) => {
           payoutAt: new Date().toISOString(),
           totalSessions: pendingEarnings.length,
           breakdown,
-          platformFeePercentage: PLATFORM_FEE_PERCENTAGE,
+          platformFeePercentage: ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
         },
       },
       { transaction }
