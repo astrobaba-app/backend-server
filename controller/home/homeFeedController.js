@@ -23,16 +23,16 @@ const redis = require("../../config/redis/redis");
 const AdminSettings = require("../../model/admin/adminSettings");
 
 // ─── Cache keys & TTLs ────────────────────────────────────────────────────────
-const STATIC_CACHE_KEY = "home:feed:static:v1";   // blogs + products + discussions
-const ASTRO_CACHE_KEY  = "home:feed:astro:v1";    // astrologers (isOnline sensitive)
-const STATIC_TTL_SEC   = 10 * 60;                 // 10 minutes
-const ASTRO_TTL_SEC    = 30;                       // 30 seconds
+const STATIC_CACHE_KEY = "home:feed:static:v2";   // blogs + products + discussions
+const ASTRO_CACHE_KEY = "home:feed:astro:v1";    // astrologers (isOnline sensitive)
+const STATIC_TTL_SEC = 10 * 60;                 // 10 minutes
+const ASTRO_TTL_SEC = 30;                       // 30 seconds
 
 // ─── Home-card limits ─────────────────────────────────────────────────────────
-const ASTRO_LIMIT       = 3;
-const BLOG_LIMIT        = 2;
-const DISCUSSION_LIMIT  = 1;
-const PRODUCT_LIMIT     = 6;
+const ASTRO_LIMIT = 3;
+const BLOG_LIMIT = 2;
+const DISCUSSION_LIMIT = 1;
+const PRODUCT_LIMIT = 6;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,16 +103,24 @@ const fetchStaticFromDB = async () => {
       limit: PRODUCT_LIMIT,
     }),
 
-    // Latest 4 active discussions — only preview fields
+    // Latest active discussions — all fields for preview card
     ForumPost.findAll({
       where: { isActive: true },
       attributes: [
         "id",
+        "authorUserId",
         "title",
-        "authorName",
+        "description",
+        "image",
+        "images",
+        "tags",
         "authorDisplayMode",
+        "authorName",
+        "authorAvatarSeed",
+        "authorAnonymousHash",
         "likeCount",
         "commentCount",
+        "shareCount",
         "createdAt",
       ],
       order: [["createdAt", "DESC"]],
@@ -143,7 +151,7 @@ const fetchAstrologersFromDB = async () => {
     // Online-first, then by rating
     order: [
       ["isOnline", "DESC"],
-      ["rating",   "DESC"],
+      ["rating", "DESC"],
     ],
     limit: ASTRO_LIMIT,
   });
@@ -182,12 +190,12 @@ const getHomeFeed = async (req, res) => {
     // ── 2. Resolve each source (cache hit or DB fallback) ───────────────────
     let staticData;
     let astrologers;
-    let staticCachedAt   = null;
-    let astroCachedAt    = null;
+    let staticCachedAt = null;
+    let astroCachedAt = null;
 
     if (cachedStatic) {
-      staticData      = cachedStatic.data;
-      staticCachedAt  = cachedStatic.cachedAt;
+      staticData = cachedStatic.data;
+      staticCachedAt = cachedStatic.cachedAt;
     } else {
       staticData = await fetchStaticFromDB();
       // Fire-and-forget cache write — doesn't block the response
@@ -195,7 +203,7 @@ const getHomeFeed = async (req, res) => {
     }
 
     if (cachedAstro) {
-      astrologers   = cachedAstro.data;
+      astrologers = cachedAstro.data;
       astroCachedAt = cachedAstro.cachedAt;
     } else {
       astrologers = await fetchAstrologersFromDB();
@@ -203,12 +211,43 @@ const getHomeFeed = async (req, res) => {
       safeRedisSet(ASTRO_CACHE_KEY, { data: astrologers, cachedAt: now }, ASTRO_TTL_SEC);
     }
 
-    // ── 3. Return aggregated response ────────────────────────────────────────
+    // ── 3. Check for authorization header and dynamically annotate isLikedByCurrentUser ──
+    let userId = null;
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7);
+      const { validateToken } = require("../../services/authService");
+      const decoded = validateToken(token);
+      if (decoded && decoded.id) {
+        userId = decoded.id;
+      }
+    }
+
+    const discussions = staticData.discussions || [];
+    let likedPostIds = new Set();
+    if (userId && discussions.length > 0) {
+      const ForumPostLike = require("../../model/forum/forumPostLike");
+      const likes = await ForumPostLike.findAll({
+        where: {
+          userId,
+          postId: discussions.map((d) => d.id),
+        },
+        attributes: ["postId"],
+      });
+      likedPostIds = new Set(likes.map((l) => l.postId));
+    }
+
+    const annotatedDiscussions = discussions.map((d) => ({
+      ...d,
+      isLikedByCurrentUser: likedPostIds.has(d.id),
+    }));
+
+    // ── 4. Return aggregated response ────────────────────────────────────────
     return res.status(200).json({
       success:     true,
       astrologers,
       blogs:       staticData.blogs,
-      discussions: staticData.discussions,
+      discussions: annotatedDiscussions,
       products:    staticData.products,
       meta: {
         cachedAt:            staticCachedAt  || now,
