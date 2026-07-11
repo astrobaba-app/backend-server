@@ -37,8 +37,31 @@ const {
   upsertAiChatEngineKundliCache,
   clearAiChatEngineKundliCache,
 } = require("../../services/aiChatEngineClient");
+const {
+  getPendingChatFeedbackPrompt,
+  dismissPendingChatFeedbackPrompt,
+  getSessionDurationSeconds: getChatFeedbackPromptSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("../../services/chatFeedbackPromptService");
 
 const AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS = new Set();
+const MIN_CHAT_FEEDBACK_SECONDS = 60;
+
+const getAiChatSessionDurationSeconds = (session) => {
+  const startMs = session?.startTime ? new Date(session.startTime).getTime() : NaN;
+  const endMs = session?.endTime ? new Date(session.endTime).getTime() : NaN;
+
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+    return Math.floor((endMs - startMs) / 1000);
+  }
+
+  const totalMinutes = Number(session?.totalMinutes || 0);
+  if (Number.isFinite(totalMinutes) && totalMinutes > 0) {
+    return Math.round(totalMinutes * 60);
+  }
+
+  return 0;
+};
 
 const cacheAiChatKundliContext = async (sessionId, kundli, userRequest) => {
   if (!sessionId || (!kundli && !userRequest)) return null;
@@ -310,6 +333,7 @@ const completeAiChatSessionWithBilling = async (
 
     await lockedSession.update(
       {
+        isActive: false,
         status: reason === "cancelled" ? "cancelled" : "completed",
         endTime,
         totalMinutes: currentMinutes,
@@ -2136,7 +2160,13 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
   }
 };
 
-const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
+const finalizeAiChatSession = async ({
+  userId,
+  sessionId,
+  successMessage,
+  endReason = "user_ended_ai_chat",
+  nextStatus = "completed",
+}) => {
   const session = await AIChatSession.findOne({
     where: { id: sessionId, userId },
   });
@@ -2151,7 +2181,29 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
     };
   }
 
-  await session.update({ isActive: false });
+  await session.update({
+    isActive: false,
+    status: nextStatus,
+    endReason: endReason || session.endReason || null,
+    endTime: session.endTime || new Date(),
+  });
+  if (nextStatus === "completed") {
+    await queueChatFeedbackPrompt({
+      userId: session.userId,
+      targetType: "ai",
+      astrologerId: session.astrologerId,
+      astrologerName: null,
+      sessionId: session.id,
+      durationSeconds: getChatFeedbackPromptSessionDurationSeconds({
+        ...session.toJSON(),
+        endTime: session.endTime || new Date(),
+        status: nextStatus,
+        endReason: endReason || session.endReason || null,
+      }),
+    }).catch((promptError) => {
+      console.error("AI chat feedback prompt queue error:", promptError);
+    });
+  }
   await clearAiChatKundliContext(sessionId);
   console.log("[InterestCohort][AI] AI chat session ended");
   queueAiChatInterestFinalization({
@@ -2165,6 +2217,7 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
     body: {
       success: true,
       message: successMessage,
+      session: formatAiSession(session),
     },
   };
 };
@@ -2174,10 +2227,13 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
  */
 const endChatSession = async (req, res) => {
   try {
+    const { reason = "user_ended_ai_chat" } = req.body || {};
     const result = await finalizeAiChatSession({
       userId: req.user.id,
       sessionId: req.params.sessionId,
       successMessage: "Chat session ended successfully",
+      endReason: reason,
+      nextStatus: "completed",
     });
 
     return res.status(result.status).json(result.body);
@@ -2621,6 +2677,23 @@ const endChatSessionV2 = async (req, res) => {
     }
 
     const finalized = await completeAiChatSessionWithBilling(session, reason);
+    const finalizedSessionSnapshot = finalized?.session?.toJSON
+      ? finalized.session.toJSON()
+      : finalized.session;
+
+    if ((finalizedSessionSnapshot?.status || "") === "completed") {
+      await queueChatFeedbackPrompt({
+        userId,
+        targetType: "ai",
+        astrologerId: finalizedSessionSnapshot?.astrologerId,
+        astrologerName: null,
+        sessionId: finalizedSessionSnapshot?.id || sessionId,
+        durationSeconds:
+          getChatFeedbackPromptSessionDurationSeconds(finalizedSessionSnapshot),
+      }).catch((promptError) => {
+        console.error("AI chat feedback prompt v2 queue error:", promptError);
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -3304,6 +3377,8 @@ const deleteChatSession = async (req, res) => {
       userId: req.user.id,
       sessionId: req.params.sessionId,
       successMessage: "Chat session deleted successfully",
+      endReason: "user_deleted_ai_chat",
+      nextStatus: "cancelled",
     });
 
     return res.status(result.status).json(result.body);
@@ -3527,6 +3602,211 @@ const greetSession = async (req, res) => {
   }
 };
 
+const getSessionFeedback = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+      attributes: [
+        "id",
+        "astrologerId",
+        "isActive",
+        "status",
+        "startTime",
+        "endTime",
+        "totalMinutes",
+        "feedbackRating",
+        "feedbackReview",
+        "feedbackSubmittedAt",
+      ],
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      feedback:
+        session.feedbackRating
+          ? {
+              rating: session.feedbackRating,
+              review: session.feedbackReview || "",
+              submittedAt: session.feedbackSubmittedAt,
+            }
+          : null,
+    });
+  } catch (error) {
+    console.error("Get AI chat session feedback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI chat feedback",
+      error: error.message,
+    });
+  }
+};
+
+const getAiAstrologerReviews = async (req, res) => {
+  try {
+    const { astrologerId } = req.params;
+
+    const sessions = await AIChatSession.findAll({
+      where: {
+        astrologerId,
+        feedbackSubmittedAt: { [Op.ne]: null },
+        feedbackRating: { [Op.ne]: null },
+      },
+      attributes: [
+        "id",
+        "userId",
+        "feedbackRating",
+        "feedbackReview",
+        "feedbackSubmittedAt",
+        "createdAt",
+      ],
+      order: [["feedbackSubmittedAt", "DESC"]],
+      limit: 20,
+    });
+
+    const userIds = [...new Set(sessions.map((session) => session.userId).filter(Boolean))];
+    const users = userIds.length
+      ? await User.findAll({
+          where: { id: userIds },
+          attributes: ["id", "fullName"],
+        })
+      : [];
+
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+    let totalRating = 0;
+
+    sessions.forEach((session) => {
+      const rating = Number(session.feedbackRating || 0);
+      if (distribution[rating] !== undefined) {
+        distribution[rating] += 1;
+      }
+      totalRating += rating;
+    });
+
+    const recentReviews = sessions.slice(0, 5).map((session) => ({
+      id: session.id,
+      rating: Number(session.feedbackRating || 0),
+      review: session.feedbackReview || "",
+      createdAt: session.feedbackSubmittedAt || session.createdAt,
+      user: userMap.get(session.userId)
+        ? {
+            id: session.userId,
+            fullName: userMap.get(session.userId).fullName || "User",
+          }
+        : {
+            id: session.userId,
+            fullName: "User",
+          },
+    }));
+
+    return res.status(200).json({
+      success: true,
+      ratingStats: {
+        total: sessions.length,
+        average: sessions.length
+          ? Number((totalRating / sessions.length).toFixed(1))
+          : 0,
+        distribution,
+      },
+      reviews: recentReviews,
+    });
+  } catch (error) {
+    console.error("Get AI astrologer reviews error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI astrologer reviews",
+      error: error.message,
+    });
+  }
+};
+
+const submitSessionFeedback = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const { rating, review } = req.body;
+
+    const parsedRating = Number(rating);
+    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be an integer between 1 and 5",
+      });
+    }
+
+    const reviewText = typeof review === "string" ? review.trim() : "";
+    if (reviewText.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback must be 1000 characters or less",
+      });
+    }
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    if ((session.status || "active") === "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback can be submitted only after the chat ends",
+      });
+    }
+
+    if (session.isActive) {
+      await session.update({ isActive: false });
+    }
+
+    const durationSeconds = getAiChatSessionDurationSeconds(session);
+    if (durationSeconds < MIN_CHAT_FEEDBACK_SECONDS) {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback is available only for chats longer than one minute",
+      });
+    }
+
+    await session.update({
+      feedbackRating: parsedRating,
+      feedbackReview: reviewText || null,
+      feedbackSubmittedAt: new Date(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "AI chat feedback submitted successfully",
+      feedback: {
+        rating: session.feedbackRating,
+        review: session.feedbackReview || "",
+        submittedAt: session.feedbackSubmittedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Submit AI chat session feedback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit AI chat feedback",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createChatSession,
   createChatSessionV2,
@@ -3544,8 +3824,11 @@ module.exports = {
   clearChatSession,
   attachKundliToSession,
   greetSession,
+  getAiAstrologerReviews,
+  getSessionFeedback,
   getAutoFollowUpQuestion,
   getAiChatQueueStatus,
+  submitSessionFeedback,
   startAiChatQueueWorker,
 };
 

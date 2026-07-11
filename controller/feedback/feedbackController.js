@@ -2,6 +2,10 @@ const Feedback = require("../../model/feedback/feedback");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
 const { Op } = require("sequelize");
+const {
+  dismissPendingChatFeedbackPrompt,
+  getPendingChatFeedbackPrompt,
+} = require("../../services/chatFeedbackPromptService");
 
 const ONE_WEEK_IN_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -189,7 +193,61 @@ const createFeedback = async (req, res) => {
   }
 };
 
+const getPendingFeedbackPrompt = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const prompt = await getPendingChatFeedbackPrompt(userId);
+
+    if (!prompt) {
+      return res.status(200).json({
+        success: true,
+        prompt: null,
+      });
+    }
+
+    if (Number(prompt.availableAt || 0) > Date.now()) {
+      return res.status(200).json({
+        success: true,
+        prompt: null,
+        pending: true,
+        availableAt: prompt.availableAt,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      prompt,
+    });
+  } catch (error) {
+    console.error("Get pending feedback prompt error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch pending feedback prompt",
+      error: error.message,
+    });
+  }
+};
+
+const dismissFeedbackPrompt = async (req, res) => {
+  try {
+    await dismissPendingChatFeedbackPrompt(req.user.id);
+    return res.status(200).json({
+      success: true,
+      message: "Feedback prompt dismissed",
+    });
+  } catch (error) {
+    console.error("Dismiss feedback prompt error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to dismiss feedback prompt",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
+  dismissFeedbackPrompt,
   getFeedbackStatus,
+  getPendingFeedbackPrompt,
   createFeedback,
 };

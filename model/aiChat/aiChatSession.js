@@ -137,6 +137,25 @@ const AIChatSession = sequelize.define(
       defaultValue: [],
       comment: "Internal per-turn interest signals captured during AI chat for final cohort scoring",
     },
+    feedbackRating: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 5,
+      },
+      comment: "Optional user rating captured after AI chat session ends",
+    },
+    feedbackReview: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: "Optional user feedback text captured after AI chat session ends",
+    },
+    feedbackSubmittedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When the user submitted post-chat AI feedback",
+    },
   },
   {
     tableName: "ai_chat_sessions",

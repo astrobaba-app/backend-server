@@ -23,6 +23,10 @@ const {
   getAvailableFreeChatAllocation,
 } = require("../../services/freeChatService");
 const redis = require("../../config/redis/redis");
+const {
+  getSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("../../services/chatFeedbackPromptService");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
@@ -605,6 +609,17 @@ const endChatSession = async (req, res) => {
     queueArchiveAndDeleteSession(session.id, {
       endReason,
       billedAmount: billing.billedAmount,
+    });
+
+    await queueChatFeedbackPrompt({
+      userId: session.userId,
+      targetType: "real",
+      astrologerId: session.astrologerId,
+      astrologerName: session.astrologer?.fullName || null,
+      sessionId: session.id,
+      durationSeconds: getSessionDurationSeconds(session),
+    }).catch((promptError) => {
+      console.error("Real chat feedback prompt queue error:", promptError);
     });
 
     res.status(200).json({
