@@ -1,10 +1,19 @@
 const AdminSettings = require("../../model/admin/adminSettings");
 const User = require("../../model/user/userAuth");
+const {
+  FREE_CHAT_TYPES,
+  getUserFreeChatSummary,
+} = require("../../services/freeChatService");
 
 // In-memory cache for ultra-fast response without DB hammering
 let cachedSettings = null;
 let cacheTimestamp = 0;
 const CACHE_TTL_MS = 60 * 1000; // 60 seconds
+
+const isAiEligibleAllocation = (allocation) => {
+  const type = String(allocation?.applicableChatType || "").toLowerCase();
+  return type === FREE_CHAT_TYPES.AI || type === FREE_CHAT_TYPES.BOTH;
+};
 
 const invalidateCache = () => {
   cachedSettings = null;
@@ -226,6 +235,7 @@ const getUserHomeCardConfig = async (req, res) => {
 
     let showCard = settings.isEnabled;
     let userName = "User";
+    let freeChatPreview = null;
 
     if (userId) {
       try {
@@ -251,13 +261,29 @@ const getUserHomeCardConfig = async (req, res) => {
             }
           }
         }
+
+        const freeChatPayload = await getUserFreeChatSummary(userId);
+        const matchingAllocation = (freeChatPayload?.allocations || []).find(
+          isAiEligibleAllocation
+        );
+
+        if (matchingAllocation) {
+          freeChatPreview = {
+            id: matchingAllocation.id,
+            minutes: Number(matchingAllocation.minutes || 0) || 0,
+            applicableChatType: matchingAllocation.applicableChatType,
+          };
+        }
+
+        if (!freeChatPreview) {
+          showCard = false;
+        }
       } catch (dbErr) {
         console.error("Error evaluating user condition for home card:", dbErr);
-      }
-    } else {
-      if (showCard && settings.targetCondition === "CUSTOM_USERS") {
         showCard = false;
       }
+    } else {
+      showCard = false;
     }
 
     // Replace {name} placeholder in title
@@ -273,6 +299,7 @@ const getUserHomeCardConfig = async (req, res) => {
         title: processedTitle,
         subtitle: settings.subtitle || DEFAULT_SETTINGS.subtitle,
         buttonText: settings.buttonText || DEFAULT_SETTINGS.buttonText,
+        freeChatPreview,
         fallbackCarouselItems: settings.fallbackCarouselItems || DEFAULT_SETTINGS.fallbackCarouselItems,
         carouselIntervalSeconds: settings.carouselIntervalSeconds || 4,
       },
@@ -283,12 +310,13 @@ const getUserHomeCardConfig = async (req, res) => {
     res.status(200).json({
       success: true,
       config: {
-        showCard: true,
+        showCard: false,
         isEnabled: true,
         targetCondition: "ALL",
         title: "User, facing any confusion?",
         subtitle: "Talk to our verified astrologers and get your first question answered for free.",
         buttonText: "Free Chat",
+        freeChatPreview: null,
         fallbackCarouselItems: DEFAULT_SETTINGS.fallbackCarouselItems,
         carouselIntervalSeconds: 4,
       },
