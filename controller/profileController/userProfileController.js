@@ -7,19 +7,19 @@ const {
 const isOnboardingProfileComplete = (user) =>
   Boolean(
     user.fullName &&
-      user.gender &&
-      user.dateOfbirth &&
-      user.timeOfbirth &&
-      user.placeOfBirth &&
-      user.latitude !== null &&
-      user.latitude !== undefined &&
-      user.longitude !== null &&
-      user.longitude !== undefined
+    user.gender &&
+    user.dateOfbirth &&
+    user.timeOfbirth &&
+    user.placeOfBirth &&
+    user.latitude !== null &&
+    user.latitude !== undefined &&
+    user.longitude !== null &&
+    user.longitude !== undefined
   );
 
 const getProfile = async (req, res) => {
   try {
-    const userId = req.user.id; 
+    const userId = req.user.id;
 
     const user = await User.findByPk(userId);
 
@@ -142,7 +142,7 @@ const updateProfile = async (req, res) => {
       }
     }
     if (gender !== undefined) user.gender = gender;
-    
+
     // Validate and update dateOfbirth
     if (dateOfbirth !== undefined) {
       if (dateOfbirth === null || dateOfbirth === '') {
@@ -156,7 +156,7 @@ const updateProfile = async (req, res) => {
         });
       }
     }
-    
+
     // Validate and update timeOfbirth
     if (timeOfbirth !== undefined) {
       if (timeOfbirth === null || timeOfbirth === '') {
@@ -170,9 +170,9 @@ const updateProfile = async (req, res) => {
         });
       }
     }
-    
+
     if (placeOfBirth !== undefined) user.placeOfBirth = placeOfBirth;
-    
+
     // Handle latitude and longitude - convert empty strings to null
     if (latitude !== undefined) {
       user.latitude = latitude === "" || latitude === null ? null : parseFloat(latitude);
@@ -180,10 +180,10 @@ const updateProfile = async (req, res) => {
     if (longitude !== undefined) {
       user.longitude = longitude === "" || longitude === null ? null : parseFloat(longitude);
     }
-    
+
     if (currentAddress !== undefined) user.currentAddress = currentAddress;
     if (city !== undefined) user.city = city;
-    
+
     // Validate state if provided
     if (state !== undefined) {
       if (state && !isValidState(state)) {
@@ -194,7 +194,7 @@ const updateProfile = async (req, res) => {
       }
       user.state = state;
     }
-    
+
     // Validate country (only India allowed)
     if (country !== undefined) {
       if (country && country !== "India") {
@@ -205,7 +205,7 @@ const updateProfile = async (req, res) => {
       }
       user.country = country || "India";
     }
-    
+
     // Validate pincode if provided
     if (pincode !== undefined) {
       // Handle empty string or null - convert to null for integer field
@@ -245,7 +245,7 @@ const updateProfile = async (req, res) => {
     if (!user.isOnboarded && isOnboardingProfileComplete(user)) {
       user.isOnboarded = true;
     }
-    
+
     await user.save();
 
     res.status(200).json({
