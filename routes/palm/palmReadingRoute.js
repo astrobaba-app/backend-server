@@ -3,6 +3,7 @@ const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { palmImagesUpload } = require("../../config/uploadConfig/cloudinaryImageUpload");
 const {
   createPalmReadingOrder,
+  validatePalmReadingImages,
   payPalmOrderWithWallet,
   createPalmOrderRazorpay,
   verifyPalmOrderRazorpay,
@@ -20,6 +21,7 @@ const {
 
 const router = express.Router();
 
+router.post("/validate-upload", checkForAuthenticationCookie(), palmImagesUpload, validatePalmReadingImages);
 router.post("/upload", checkForAuthenticationCookie(), palmImagesUpload, createPalmReadingOrder);
 router.post("/orders/:orderId/pay-wallet", checkForAuthenticationCookie(), payPalmOrderWithWallet);
 router.post("/orders/:orderId/create-razorpay", checkForAuthenticationCookie(), createPalmOrderRazorpay);
