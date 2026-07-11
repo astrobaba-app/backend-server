@@ -493,6 +493,128 @@ const buildQualityRejectError = (code, message, checks) => {
   return error;
 };
 
+const getPalmImageQualityFailure = (checks = {}, moderation = null) => {
+  if (moderation?.flagged) {
+    return {
+      code: "rejected_nsfw",
+      reason: "unsafe_content",
+      message:
+        "This image could not be accepted. Please upload only a clear palm photo.",
+    };
+  }
+
+  const rejectReasons = Array.isArray(checks.reject_reasons) ? checks.reject_reasons : [];
+  const normalizedReasons = rejectReasons.map((reason) => String(reason || "").toLowerCase());
+
+  if (checks.multiple_hands || normalizedReasons.some((reason) => reason.includes("multiple"))) {
+    return {
+      code: "multiple_hands_detected",
+      reason: "multiple_hands",
+      message:
+        "Please upload one clear palm image with only a single hand visible.",
+    };
+  }
+
+  if (
+    checks.cartoon_or_illustration ||
+    checks.ai_generated_suspected ||
+    checks.fake_hand_suspected ||
+    normalizedReasons.some((reason) => reason.includes("cartoon") || reason.includes("fake") || reason.includes("ai"))
+  ) {
+    return {
+      code: "invalid_hand_image",
+      reason: "invalid_hand_image",
+      message:
+        "This image does not look like a valid real palm photo. Please upload a fresh clear hand image.",
+    };
+  }
+
+  if (
+    checks.low_quality ||
+    Number(checks.blur_score || 0) >= 55 ||
+    Number(checks.quality_score || 0) < 45 ||
+    normalizedReasons.some(
+      (reason) =>
+        reason.includes("blur") ||
+        reason.includes("quality") ||
+        reason.includes("dark") ||
+        reason.includes("dull") ||
+        reason.includes("unclear"),
+    )
+  ) {
+    return {
+      code: "low_quality_image",
+      reason: "low_quality_image",
+      message:
+        "The palm image is not clear enough. Please upload a brighter, sharper palm photo with the full hand visible.",
+    };
+  }
+
+  if (
+    checks.human_hand_detected === false ||
+    normalizedReasons.some((reason) => reason.includes("hand not detected"))
+  ) {
+    return {
+      code: "hand_not_detected",
+      reason: "hand_not_detected",
+      message:
+        "We could not clearly detect the palm in this image. Please retake the photo with the palm centered and fully visible.",
+    };
+  }
+
+  return {
+    code: "rejected_quality_or_fraud",
+    reason: "rejected_quality_or_fraud",
+    message:
+      "This palm image could not be accepted. Please upload a clearer palm photo and try again.",
+  };
+};
+
+const validatePalmImageQuality = async ({ imageUrls, metadata = {} }) => {
+  const images = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [];
+  if (!images.length) {
+    throw new Error("At least one palm image URL is required");
+  }
+
+  const visionResult = await openaiExtractFeatures(images, metadata);
+  const extracted = visionResult.data;
+  const qualityChecks = extracted.fraud_quality_checks || {};
+  let moderationResult = null;
+
+  if (qualityChecks.unsafe_content_suspected || qualityChecks.needs_moderation_fallback) {
+    moderationResult = await moderationCheck(images, metadata);
+    if (moderationResult.flagged) {
+      const failure = getPalmImageQualityFailure(qualityChecks, moderationResult);
+      return {
+        ok: false,
+        failure,
+        qualityChecks,
+        moderation: moderationResult,
+        tokenUsage: visionResult.tokenUsage,
+      };
+    }
+  }
+
+  if (qualityChecks.reject) {
+    const failure = getPalmImageQualityFailure(qualityChecks, moderationResult);
+    return {
+      ok: false,
+      failure,
+      qualityChecks,
+      moderation: moderationResult,
+      tokenUsage: visionResult.tokenUsage,
+    };
+  }
+
+  return {
+    ok: true,
+    message: "Palm image quality check passed.",
+    qualityChecks,
+    moderation: moderationResult,
+    tokenUsage: visionResult.tokenUsage,
+  };
+};
+
 const analyzePalm = async ({ imageUrls, metadata = {}, kundliContext = null }) => {
   const startedAt = Date.now();
   const images = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [];
@@ -561,4 +683,5 @@ const analyzePalm = async ({ imageUrls, metadata = {}, kundliContext = null }) =
 module.exports = {
   analyzePalm,
   checkPalmEngineHealth,
+  validatePalmImageQuality,
 };
