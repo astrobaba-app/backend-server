@@ -20,12 +20,10 @@ const {
 const {
   normalizeIndianMobile,
 } = require("../../services/phoneNumberService");
-const {
-  createAndQueueOtp,
-  verifyQueuedOtp,
-} = require("../../services/otpQueueService");
+const { createAndQueueOtp, verifyQueuedOtp } = require("../../services/otpQueueService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const { recordUserLogout } = require("../../services/userActivityCohortService");
+const pushNotificationService = require("../../services/pushNotificationService");
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -135,14 +133,61 @@ const verifyOtp = async (req, res) => {
       user = await User.create({
         mobile: verifiedMobile,
         isUserRequested: false,
+        activeDevices: [],
       });
       isNewUser = true;
     }
 
+    const { deviceId, deviceName, deviceType, forceLogout } = req.body;
+    let finalDeviceId = deviceId ? String(deviceId).trim() : null;
+
+    if (finalDeviceId) {
+      let activeDevices = user.activeDevices || [];
+      const existingDeviceIndex = activeDevices.findIndex((d) => d.deviceId === finalDeviceId);
+
+      if (existingDeviceIndex === -1 && activeDevices.length >= 3) {
+        // Sort devices by lastLoginAt ascending to find LRU
+        activeDevices.sort((a, b) => new Date(a.lastLoginAt) - new Date(b.lastLoginAt));
+        const lruDevice = activeDevices[0];
+
+        if (!forceLogout) {
+          return res.status(409).json({
+            success: false,
+            code: "MAX_DEVICES_REACHED",
+            sessionConflict: true,
+            message: `Maximum 3 active devices reached. Would you like to log out from the oldest device (${lruDevice.deviceName || 'Unknown'})?`,
+            lruDevice: lruDevice
+          });
+        }
+
+        // Force logout the LRU device
+        activeDevices.shift(); // Remove LRU
+        // Delete its push token
+        await pushNotificationService.removeDeviceTokenByDeviceId(user.id, lruDevice.deviceId);
+      }
+
+      // Add or update the current device
+      const newDeviceInfo = {
+        deviceId: finalDeviceId,
+        deviceName: deviceName ? String(deviceName).trim() : "Unknown Device",
+        deviceType: deviceType ? String(deviceType).trim() : "unknown",
+        lastLoginAt: new Date().toISOString()
+      };
+
+      if (existingDeviceIndex !== -1) {
+        activeDevices[existingDeviceIndex] = newDeviceInfo;
+      } else {
+        activeDevices.push(newDeviceInfo);
+      }
+      
+      user.activeDevices = activeDevices;
+      await user.save();
+    }
+
     // Generate tokens and set cookies
-    const token = createToken(user);
-    const middlewareToken = createMiddlewareToken(user);
-    const refreshToken = createRefreshToken(user);
+    const token = createToken(user, finalDeviceId);
+    const middlewareToken = createMiddlewareToken(user, finalDeviceId);
+    const refreshToken = createRefreshToken(user, finalDeviceId);
 
     setTokenCookie(res, token, middlewareToken, refreshToken);
 
@@ -397,9 +442,21 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
-    const token = createToken(user);
-    const middlewareToken = createMiddlewareToken(user);
-    const nextRefreshToken = createRefreshToken(user);
+    const tokenDeviceId = refreshPayload.deviceId;
+    if (tokenDeviceId) {
+      const activeDevices = user.activeDevices || [];
+      if (!activeDevices.find((d) => d.deviceId === tokenDeviceId)) {
+        clearTokenCookie(res);
+        return res.status(401).json({
+          success: false,
+          message: "Session logged out on this device.",
+        });
+      }
+    }
+
+    const token = createToken(user, tokenDeviceId);
+    const middlewareToken = createMiddlewareToken(user, tokenDeviceId);
+    const nextRefreshToken = createRefreshToken(user, tokenDeviceId);
 
     setTokenCookie(res, token, middlewareToken, nextRefreshToken);
 
@@ -435,6 +492,18 @@ const logout = async (req, res) => {
     const payload = token ? validateToken(token) : null;
     if (payload?.id && payload?.role !== "astrologer") {
       await recordUserLogout(payload.id);
+
+      const deviceId = req.body.deviceId ? String(req.body.deviceId).trim() : null;
+      if (deviceId) {
+        const user = await User.findByPk(payload.id);
+        if (user) {
+          let activeDevices = user.activeDevices || [];
+          activeDevices = activeDevices.filter(d => d.deviceId !== deviceId);
+          user.activeDevices = activeDevices;
+          await user.save();
+        }
+        await pushNotificationService.removeDeviceTokenByDeviceId(payload.id, deviceId);
+      }
     }
 
     clearTokenCookie(res);

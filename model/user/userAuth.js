@@ -158,6 +158,11 @@ const User = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    activeDevices: {
+      type: DataTypes.JSON,
+      allowNull: false,
+      defaultValue: [],
+    },
     sessionVersion: {
       type: DataTypes.INTEGER,
       allowNull: false,
