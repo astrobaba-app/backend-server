@@ -986,6 +986,16 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.activeDevices && !table.active_devices) {
+      operations.push(
+        queryInterface.addColumn("users", "activeDevices", {
+          type: DataTypes.JSON,
+          allowNull: false,
+          defaultValue: [],
+        })
+      );
+    }
+
     if (!table.isOnboarded && !table.is_onboarded) {
       operations.push(
         queryInterface.addColumn("users", "isOnboarded", {

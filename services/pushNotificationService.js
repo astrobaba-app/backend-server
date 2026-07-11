@@ -437,16 +437,34 @@ class PushNotificationService {
         return existingToken;
       } else {
         // Create new token
-        const newToken = await DeviceToken.create({
-          userId,
-          token,
-          deviceType,
-          deviceId,
-          isActive: true,
-          lastUsedAt: new Date(),
-        });
-        console.log("[FCM] Created new token for user");
-        return newToken;
+        try {
+          const newToken = await DeviceToken.create({
+            userId,
+            token,
+            deviceType,
+            deviceId,
+            isActive: true,
+            lastUsedAt: new Date(),
+          });
+          console.log("[FCM] Created new token for user");
+          return newToken;
+        } catch (createError) {
+          if (createError.name === 'SequelizeUniqueConstraintError') {
+            const tokenRecord = await DeviceToken.findOne({ where: { token } });
+            if (tokenRecord) {
+              await tokenRecord.update({
+                userId,
+                deviceType,
+                deviceId,
+                isActive: true,
+                lastUsedAt: new Date(),
+              });
+              console.log("[FCM] Updated existing token for user (recovered from constraint error)");
+              return tokenRecord;
+            }
+          }
+          throw createError;
+        }
       }
     } catch (error) {
       console.error("[FCM] Error saving device token:", error);
@@ -470,6 +488,23 @@ class PushNotificationService {
     }
   }
 
+  /**
+   * Remove device token by device ID
+   */
+  async removeDeviceTokenByDeviceId(userId, deviceId) {
+    if (!deviceId) return false;
+    try {
+      const result = await DeviceToken.destroy({
+        where: { userId, deviceId },
+      });
+      console.log(`[FCM] Removed token for device ${deviceId}: ${result > 0 ? "success" : "not found"}`);
+      return result > 0;
+    } catch (error) {
+      console.error("[FCM] Error removing device token by deviceId:", error);
+      throw error;
+    }
+  }
+
   async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null, deviceName = null) {
     try {
       const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
@@ -487,17 +522,36 @@ class PushNotificationService {
         return existingToken;
       }
 
-      const newToken = await AstrologerDeviceToken.create({
-        astrologerId,
-        token,
-        deviceType,
-        deviceId,
-        deviceName,
-        isActive: true,
-        lastUsedAt: new Date(),
-      });
-      console.log("[FCM] Created new token for astrologer");
-      return newToken;
+      try {
+        const newToken = await AstrologerDeviceToken.create({
+          astrologerId,
+          token,
+          deviceType,
+          deviceId,
+          deviceName,
+          isActive: true,
+          lastUsedAt: new Date(),
+        });
+        console.log("[FCM] Created new token for astrologer");
+        return newToken;
+      } catch (createError) {
+        if (createError.name === 'SequelizeUniqueConstraintError') {
+          const tokenRecord = await AstrologerDeviceToken.findOne({ where: { token } });
+          if (tokenRecord) {
+            await tokenRecord.update({
+              astrologerId,
+              deviceType,
+              deviceId,
+              deviceName,
+              isActive: true,
+              lastUsedAt: new Date(),
+            });
+            console.log("[FCM] Updated existing token for astrologer (recovered from constraint error)");
+            return tokenRecord;
+          }
+        }
+        throw createError;
+      }
     } catch (error) {
       console.error("[FCM] Error saving astrologer device token:", error);
       throw error;

@@ -20,7 +20,7 @@ const resolveActorType = (user = {}) => {
   return "user";
 };
 
-function createToken(user) {
+function createToken(user, deviceId = null) {
   try {
     if (!process.env.JWT_SECRET) {
       throw new Error("JWT_SECRET is missing in environment variables");
@@ -31,6 +31,7 @@ function createToken(user) {
       role: user.role || null,
       fullName: user.fullName || null,
       sessionVersion: user.sessionVersion,
+      ...(deviceId && { deviceId }),
     };
     return JWT.sign(payload, process.env.JWT_SECRET, { expiresIn: ACCESS_TOKEN_EXPIRES_IN });
   } catch (error) {
@@ -39,19 +40,20 @@ function createToken(user) {
   }
 }
 
-const createMiddlewareToken = (user) => {
+const createMiddlewareToken = (user, deviceId = null) => {
   return JWT.sign(
     { id: user.id,
       role: user.role || null,
       fullName: user.fullName || null,
       sessionVersion: user.sessionVersion,
+      ...(deviceId && { deviceId }),
      }, 
     process.env.JWT_SECRET,
     { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
   );
 };
 
-const createRefreshToken = (user) => {
+const createRefreshToken = (user, deviceId = null) => {
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is missing in environment variables");
   }
@@ -62,6 +64,7 @@ const createRefreshToken = (user) => {
       role: user.role || null,
       actorType: resolveActorType(user),
       sessionVersion: user.sessionVersion,
+      ...(deviceId && { deviceId }),
     },
     process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
     { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
