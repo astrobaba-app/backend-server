@@ -468,6 +468,7 @@ async function ensureAIChatSessionColumns() {
     }
 
     const columnDefinitions = [
+      ["isActive", { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
       ["status", { type: DataTypes.STRING(30), allowNull: false, defaultValue: "active" }],
       ["startTime", { type: DataTypes.DATE, allowNull: true }],
       ["endTime", { type: DataTypes.DATE, allowNull: true }],
@@ -483,6 +484,9 @@ async function ensureAIChatSessionColumns() {
       ["freeChatMinutes", { type: DataTypes.INTEGER, allowNull: true }],
       ["endReason", { type: DataTypes.STRING(80), allowNull: true }],
       ["lastMessagePreview", { type: DataTypes.STRING(255), allowNull: true }],
+      ["feedbackRating", { type: DataTypes.INTEGER, allowNull: true }],
+      ["feedbackReview", { type: DataTypes.TEXT, allowNull: true }],
+      ["feedbackSubmittedAt", { type: DataTypes.DATE, allowNull: true }],
     ];
 
     columnDefinitions.forEach(([columnName, definition]) => {

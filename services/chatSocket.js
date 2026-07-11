@@ -10,6 +10,10 @@ const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
 const { queueArchiveAndDeleteSession } = require("./chatHistoryService");
+const {
+  getSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("./chatFeedbackPromptService");
 const { getWalletBalanceBreakdown } = require("./walletService");
 const pushNotificationService = require("./pushNotificationService");
 const {
@@ -1012,6 +1016,17 @@ function initializeChatSocket(io) {
         queueArchiveAndDeleteSession(session.id, {
           endReason,
           billedAmount: billing.billedAmount,
+        });
+
+        await queueChatFeedbackPrompt({
+          userId: session.userId,
+          targetType: "real",
+          astrologerId: session.astrologerId,
+          astrologerName: null,
+          sessionId: session.id,
+          durationSeconds: getSessionDurationSeconds(session),
+        }).catch((promptError) => {
+          console.error("Real chat feedback prompt socket queue error:", promptError);
         });
 
         if (callback) {

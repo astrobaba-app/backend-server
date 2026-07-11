@@ -3,7 +3,9 @@ const router = express.Router();
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const {
   createFeedback,
+  dismissFeedbackPrompt,
   getFeedbackStatus,
+  getPendingFeedbackPrompt,
 } = require("../../controller/feedback/feedbackController");
 
 const allowFeedbackActors = (req, res, next) => {
@@ -17,6 +19,20 @@ const allowFeedbackActors = (req, res, next) => {
     message: "Unauthorized Access! , You are not authorized to access this resources ",
   });
 };
+
+router.get(
+  "/chat-prompt/pending",
+  checkForAuthenticationCookie(),
+  allowFeedbackActors,
+  getPendingFeedbackPrompt
+);
+
+router.post(
+  "/chat-prompt/dismiss",
+  checkForAuthenticationCookie(),
+  allowFeedbackActors,
+  dismissFeedbackPrompt
+);
 
 router.get(
   "/status",
