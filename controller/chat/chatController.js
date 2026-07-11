@@ -567,6 +567,10 @@ const endChatSession = async (req, res) => {
 
     const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: session.astrologerId },
+    });
 
     if (io) {
       const {
@@ -1887,6 +1891,10 @@ const endAstrologerChatSession = async (req, res) => {
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: session.astrologerId },
+    });
 
     if (io) {
       const {

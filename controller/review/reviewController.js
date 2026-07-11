@@ -80,52 +80,84 @@ const createReview = async (req, res) => {
 const getAstrologerReviews = async (req, res) => {
   try {
     const { astrologerId } = req.params;
-    const { page = 1, limit = 10, rating } = req.query;
-    const offset = (page - 1) * limit;
+    const {
+      page = 1,
+      limit = 10,
+      rating,
+      includeStats = "true",
+      includeReviews = "true",
+    } = req.query;
+    const parsedPage = parseInt(page, 10);
+    const parsedLimit = parseInt(limit, 10);
+    const offset = (parsedPage - 1) * parsedLimit;
+    const shouldIncludeStats = includeStats !== "false";
+    const shouldIncludeReviews = includeReviews !== "false";
 
     const where = { astrologerId };
     if (rating) {
       where.rating = parseInt(rating);
     }
 
-    const { rows: reviews, count } = await Review.findAndCountAll({
-      where,
-      limit: parseInt(limit),
-      offset: parseInt(offset),
-      order: [["createdAt", "DESC"]],
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "fullName", "email"],
-        },
-      ],
-    });
+    let reviews = [];
+    let count = 0;
+
+    if (shouldIncludeReviews) {
+      const reviewsResult = await Review.findAndCountAll({
+        where,
+        limit: parsedLimit,
+        offset,
+        order: [["createdAt", "DESC"]],
+        include: [
+          {
+            model: User,
+            as: "user",
+            attributes: ["id", "fullName", "email"],
+          },
+        ],
+      });
+
+      reviews = reviewsResult.rows;
+      count = reviewsResult.count;
+    } else {
+      count = await Review.count({ where });
+    }
 
     // Calculate rating statistics
-    const allReviews = await Review.findAll({
-      where: { astrologerId },
-      attributes: ["rating"],
-    });
+    let ratingStats = null;
 
-    const ratingStats = {
-      total: allReviews.length,
-      average: 0,
-      distribution: {
-        5: 0,
-        4: 0,
-        3: 0,
-        2: 0,
-        1: 0,
-      },
-    };
+    if (shouldIncludeStats) {
+      const allReviews = await Review.findAll({
+        where: { astrologerId },
+        attributes: ["rating"],
+      });
 
-    if (allReviews.length > 0) {
-      const sum = allReviews.reduce((acc, r) => acc + r.rating, 0);
-      ratingStats.average = (sum / allReviews.length).toFixed(2);
+      ratingStats = {
+        total: allReviews.length,
+        average: 0,
+        pendingReplyCount: 0,
+        distribution: {
+          5: 0,
+          4: 0,
+          3: 0,
+          2: 0,
+          1: 0,
+        },
+      };
 
-      allReviews.forEach((r) => {
-        ratingStats.distribution[r.rating]++;
+      if (allReviews.length > 0) {
+        const sum = allReviews.reduce((acc, r) => acc + r.rating, 0);
+        ratingStats.average = (sum / allReviews.length).toFixed(2);
+
+        allReviews.forEach((r) => {
+          ratingStats.distribution[r.rating]++;
+        });
+      }
+
+      ratingStats.pendingReplyCount = await Review.count({
+        where: {
+          astrologerId,
+          reply: null,
+        },
       });
     }
 
@@ -135,9 +167,9 @@ const getAstrologerReviews = async (req, res) => {
       ratingStats,
       pagination: {
         total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(count / parsedLimit),
       },
     });
   } catch (error) {
@@ -534,7 +566,7 @@ async function updateAstrologerRating(astrologerId) {
 
     if (reviews.length === 0) {
       await Astrologer.update(
-        { rating: 0, totalConsultations: 0 },
+        { rating: 0 },
         { where: { id: astrologerId } }
       );
       return;
@@ -544,7 +576,7 @@ async function updateAstrologerRating(astrologerId) {
     const average = (sum / reviews.length).toFixed(2);
 
     await Astrologer.update(
-      { rating: average, totalConsultations: reviews.length },
+      { rating: average },
       { where: { id: astrologerId } }
     );
   } catch (error) {

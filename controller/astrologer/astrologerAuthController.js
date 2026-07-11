@@ -694,6 +694,8 @@ const logout = async (req, res) => {
 const toggleOnlineStatus = async (req, res) => {
   try {
     const astrologerId = req.user.id;
+    const requestedStatus =
+      typeof req.body?.isOnline === "boolean" ? req.body.isOnline : null;
 
     const astrologer = await Astrologer.findByPk(astrologerId);
 
@@ -704,8 +706,9 @@ const toggleOnlineStatus = async (req, res) => {
       });
     }
 
-    // Toggle the status
-    const newStatus = !astrologer.isOnline;
+    // When the app sends an explicit target state, honor it directly.
+    const newStatus =
+      requestedStatus === null ? !astrologer.isOnline : requestedStatus;
     await astrologer.update({ isOnline: newStatus });
 
     // Send push notification to followers when astrologer goes online

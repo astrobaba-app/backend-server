@@ -6,6 +6,8 @@
     "start": "node server.js",
     "dev": "nodemon server.js",
     "verify:chat-schema": "node scripts/verifyChatSchema.js",
+    "seed:astrologer-social-proof": "node scripts/seedAstrologerSocialProof.js",
+    "seed:ai-astrologer-social-proof": "node scripts/seedAiAstrologerSocialProof.js",
     "install:chrome": "npx puppeteer browsers install chrome"
   },
   "keywords": [],

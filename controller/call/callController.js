@@ -392,6 +392,10 @@ const endCall = async (req, res) => {
       totalCost,
       status: "completed",
     });
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: callSession.astrologerId },
+    });
 
     // Process wallet transactions and astrologer earnings
     if (totalCost > 0) {

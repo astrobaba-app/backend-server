@@ -1684,11 +1684,56 @@ const AI_ASTROLOGER_PUBLIC_DETAILS = {
   },
 };
 
-const buildPublicAiAstrologerProfile = (astrologerId) => {
+const getAiAstrologerAggregateStats = async (astrologerId) => {
+  const [totalConsultations, feedbackSessions] = await Promise.all([
+    AIChatSession.count({
+      where: {
+        astrologerId,
+        status: "completed",
+      },
+    }),
+    AIChatSession.findAll({
+      where: {
+        astrologerId,
+        feedbackSubmittedAt: { [Op.ne]: null },
+        feedbackRating: { [Op.ne]: null },
+      },
+      attributes: ["feedbackRating"],
+    }),
+  ]);
+
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  let totalRating = 0;
+
+  feedbackSessions.forEach((session) => {
+    const rating = Number(session.feedbackRating || 0);
+    if (distribution[rating] !== undefined) {
+      distribution[rating] += 1;
+      totalRating += rating;
+    }
+  });
+
+  const reviewCount = feedbackSessions.length;
+
+  return {
+    totalConsultations,
+    reviewCount,
+    averageRating: reviewCount
+      ? Number((totalRating / reviewCount).toFixed(1))
+      : 0,
+    distribution,
+  };
+};
+
+const buildPublicAiAstrologerProfile = (astrologerId, aggregateStats = null) => {
   const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
   const publicDetails =
     AI_ASTROLOGER_PUBLIC_DETAILS[astrologerId] ||
     AI_ASTROLOGER_PUBLIC_DETAILS["ai-astrologer-devansh"];
+  const rating =
+    aggregateStats && aggregateStats.reviewCount > 0
+      ? aggregateStats.averageRating
+      : publicDetails.rating;
 
   return {
     id: astrologerId || "ai-astrologer-devansh",
@@ -1697,6 +1742,8 @@ const buildPublicAiAstrologerProfile = (astrologerId) => {
     expertise: profile.skills.join(", "),
     skills: profile.skills,
     pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+    rating,
+    totalConsultations: aggregateStats?.totalConsultations || 0,
     ...publicDetails,
   };
 };
@@ -1801,11 +1848,16 @@ const createChatSessionV2 = async (req, res) => {
 
 const getAiAstrologersV2 = async (req, res) => {
   try {
+    const astrologers = await Promise.all(
+      Object.keys(ASTROLOGER_PROFILES).map(async (astrologerId) => {
+        const aggregateStats = await getAiAstrologerAggregateStats(astrologerId);
+        return buildPublicAiAstrologerProfile(astrologerId, aggregateStats);
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      astrologers: Object.keys(ASTROLOGER_PROFILES).map((astrologerId) =>
-        buildPublicAiAstrologerProfile(astrologerId)
-      ),
+      astrologers,
     });
   } catch (error) {
     console.error("Get AI astrologers v2 error:", error);
@@ -3654,8 +3706,13 @@ const getSessionFeedback = async (req, res) => {
 const getAiAstrologerReviews = async (req, res) => {
   try {
     const { astrologerId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    const parsedPage = Math.max(1, Number.parseInt(String(page), 10) || 1);
+    const parsedLimit = Math.max(1, Number.parseInt(String(limit), 10) || 10);
+    const offset = (parsedPage - 1) * parsedLimit;
+    const aggregateStats = await getAiAstrologerAggregateStats(astrologerId);
 
-    const sessions = await AIChatSession.findAll({
+    const { rows: sessions, count } = await AIChatSession.findAndCountAll({
       where: {
         astrologerId,
         feedbackSubmittedAt: { [Op.ne]: null },
@@ -3670,7 +3727,8 @@ const getAiAstrologerReviews = async (req, res) => {
         "createdAt",
       ],
       order: [["feedbackSubmittedAt", "DESC"]],
-      limit: 20,
+      limit: parsedLimit,
+      offset,
     });
 
     const userIds = [...new Set(sessions.map((session) => session.userId).filter(Boolean))];
@@ -3682,18 +3740,7 @@ const getAiAstrologerReviews = async (req, res) => {
       : [];
 
     const userMap = new Map(users.map((user) => [user.id, user]));
-    const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
-    let totalRating = 0;
-
-    sessions.forEach((session) => {
-      const rating = Number(session.feedbackRating || 0);
-      if (distribution[rating] !== undefined) {
-        distribution[rating] += 1;
-      }
-      totalRating += rating;
-    });
-
-    const recentReviews = sessions.slice(0, 5).map((session) => ({
+    const recentReviews = sessions.map((session) => ({
       id: session.id,
       rating: Number(session.feedbackRating || 0),
       review: session.feedbackReview || "",
@@ -3712,11 +3759,16 @@ const getAiAstrologerReviews = async (req, res) => {
     return res.status(200).json({
       success: true,
       ratingStats: {
-        total: sessions.length,
-        average: sessions.length
-          ? Number((totalRating / sessions.length).toFixed(1))
-          : 0,
-        distribution,
+        total: aggregateStats.reviewCount,
+        average: aggregateStats.averageRating,
+        distribution: aggregateStats.distribution,
+      },
+      totalConsultations: aggregateStats.totalConsultations,
+      pagination: {
+        total: count,
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(count / parsedLimit),
       },
       reviews: recentReviews,
     });

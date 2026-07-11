@@ -212,7 +212,7 @@ const createStoredOtp = async ({ actorType, mobile, otp }) => {
     mobile,
     createdAt: Date.now(),
   });
-  console.log("[OTPQueue] OTP stored", { actorType, mobile, otp });
+// console.log("[OTPQueue] OTP stored", { actorType, mobile, otp });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
 };
 
