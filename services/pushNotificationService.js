@@ -505,6 +505,23 @@ class PushNotificationService {
     }
   }
 
+  /**
+   * Remove astrologer device token by device ID
+   */
+  async removeAstrologerDeviceTokenByDeviceId(astrologerId, deviceId) {
+    if (!deviceId) return false;
+    try {
+      const result = await AstrologerDeviceToken.destroy({
+        where: { astrologerId, deviceId },
+      });
+      console.log(`[FCM] Removed astrologer token for device ${deviceId}: ${result > 0 ? "success" : "not found"}`);
+      return result > 0;
+    } catch (error) {
+      console.error("[FCM] Error removing astrologer device token by deviceId:", error);
+      throw error;
+    }
+  }
+
   async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null, deviceName = null) {
     try {
       const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
