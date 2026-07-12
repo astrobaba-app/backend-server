@@ -2009,6 +2009,71 @@ async function ensureMatchingProfileColumns() {
   }
 }
 
+async function ensureUserAuthColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("users");
+    const operations = [];
+
+    if (!table.isActive && !table.is_active) {
+      operations.push(
+        queryInterface.addColumn("users", "isActive", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: true,
+          comment: "Whether the user account is active",
+        })
+      );
+    }
+
+    if (!table.isOnboarded && !table.is_onboarded) {
+      operations.push(
+        queryInterface.addColumn("users", "isOnboarded", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.lastLoginMethod && !table.last_login_method) {
+      operations.push(
+        queryInterface.addColumn("users", "lastLoginMethod", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.activeDevices && !table.active_devices) {
+      operations.push(
+        queryInterface.addColumn("users", "activeDevices", {
+          type: DataTypes.JSON,
+          allowNull: false,
+          defaultValue: [],
+        })
+      );
+    }
+
+    if (!table.sessionVersion && !table.session_version) {
+      operations.push(
+        queryInterface.addColumn("users", "sessionVersion", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured users table auth columns exist");
+    }
+  } catch (error) {
+    console.log("users table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -2052,6 +2117,7 @@ const initDB = (callback) => {
     .then(() => ensureFeedbackColumns())
     .then(() => ensureSupportTicketActorColumns())
     .then(() => ensureMatchingProfileColumns())
+    .then(() => ensureUserAuthColumns())
     .then(() => {
       console.log("All models synced");
       callback();
