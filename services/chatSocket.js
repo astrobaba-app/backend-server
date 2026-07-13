@@ -1,6 +1,7 @@
 const { parse } = require("cookie");
 const { validateToken } = require("./authService");
 const ChatSession = require("../model/chat/chatSession");
+const ChatHistorySession = require("../model/chat/chatHistorySession");
 const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
@@ -726,6 +727,27 @@ function initializeChatSocket(io) {
         });
 
         if (!sessionAccess) {
+          // Fallback: Check if the session was archived (e.g., due to grace period expiration)
+          const archivedSession = await ChatHistorySession.findOne({
+            where: { sourceSessionId: sessionId },
+          });
+
+          if (archivedSession && (archivedSession.userId === authId || archivedSession.astrologerId === authId)) {
+            socket.emit("chat:ended", {
+              sessionId: sessionId,
+              endedBy: "system",
+              reason: archivedSession.endReason || "session_ended",
+            });
+
+            socket.emit("chat:updated", {
+              sessionId: sessionId,
+              session: {
+                ...mapSession(archivedSession, isAstrologer ? "astrologer" : "user"),
+                archived: true,
+                status: archivedSession.status || "completed",
+              },
+            });
+          }
           return;
         }
 
