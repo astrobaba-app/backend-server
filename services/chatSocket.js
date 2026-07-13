@@ -236,7 +236,7 @@ function emitChatMessage(io, session, payload) {
     .emit("message:new", payload);
 }
 
-async function autoEndSessionForDisconnect(io, sessionId) {
+async function autoEndSessionForDisconnect(io, sessionId, disconnectedRole = "user") {
   try {
     const session = await ChatSession.findByPk(sessionId);
     if (!session || session.status !== "active" || session.requestStatus !== "approved") {
@@ -248,7 +248,7 @@ async function autoEndSessionForDisconnect(io, sessionId) {
 
     emitChatEnded(io, session, {
       endedBy: "system",
-      reason: "user_disconnected",
+      reason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
       currentMinutes: billing.currentMinutes,
       currentCost: billing.currentCost,
       totalMinutes: billing.totalMinutes,
@@ -267,7 +267,7 @@ async function autoEndSessionForDisconnect(io, sessionId) {
     });
 
     queueArchiveAndDeleteSession(session.id, {
-      endReason: "user_disconnected",
+      endReason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
       billedAmount: billing.billedAmount,
     });
   } catch (error) {
@@ -1269,7 +1269,7 @@ function initializeChatSocket(io) {
         const timer = setTimeout(() => {
           console.log(`[Socket.IO] Grace period expired for ${timerKey}, ending session`);
           disconnectTimers.delete(timerKey);
-          autoEndSessionForDisconnect(io, activeSessionId);
+          autoEndSessionForDisconnect(io, activeSessionId, isAstrologer ? "astrologer" : "user");
         }, 30000);
         
         disconnectTimers.set(timerKey, timer);
