@@ -26,6 +26,8 @@ const PLACEHOLDER_PATTERNS = [
   /<[^>]+>/g,
 ];
 
+const isArrayIndexSegment = segment => /^\d+$/.test(String(segment));
+
 const readJsonFile = filePath => {
   if (!fs.existsSync(filePath)) {
     return {};
@@ -40,18 +42,29 @@ const writeJsonFile = (filePath, value) => {
 
 const flattenObject = (value, prefix = '', result = {}) => {
   if (Array.isArray(value)) {
-    result[prefix] = value;
+    if (!value.length && prefix) {
+      result[prefix] = [];
+      return result;
+    }
+
+    value.forEach((nestedValue, index) => {
+      const nextPrefix = prefix ? `${prefix}.${index}` : String(index);
+
+      if (nestedValue && typeof nestedValue === 'object') {
+        flattenObject(nestedValue, nextPrefix, result);
+        return;
+      }
+
+      result[nextPrefix] = nestedValue;
+    });
+
     return result;
   }
 
   Object.entries(value || {}).forEach(([key, nestedValue]) => {
     const nextPrefix = prefix ? `${prefix}.${key}` : key;
 
-    if (
-      nestedValue &&
-      typeof nestedValue === 'object' &&
-      !Array.isArray(nestedValue)
-    ) {
+    if (nestedValue && typeof nestedValue === 'object') {
       flattenObject(nestedValue, nextPrefix, result);
       return;
     }
@@ -67,13 +80,31 @@ const setByPath = (target, pathKey, value) => {
   let cursor = target;
 
   segments.forEach((segment, index) => {
+    const arrayIndex = isArrayIndexSegment(segment) ? Number(segment) : null;
+
     if (index === segments.length - 1) {
-      cursor[segment] = value;
+      if (Array.isArray(cursor) && arrayIndex !== null) {
+        cursor[arrayIndex] = value;
+      } else {
+        cursor[segment] = value;
+      }
+      return;
+    }
+
+    const nextSegment = segments[index + 1];
+    const nextContainer = isArrayIndexSegment(nextSegment) ? [] : {};
+
+    if (Array.isArray(cursor) && arrayIndex !== null) {
+      if (!cursor[arrayIndex] || typeof cursor[arrayIndex] !== 'object') {
+        cursor[arrayIndex] = nextContainer;
+      }
+
+      cursor = cursor[arrayIndex];
       return;
     }
 
     if (!cursor[segment] || typeof cursor[segment] !== 'object') {
-      cursor[segment] = {};
+      cursor[segment] = nextContainer;
     }
 
     cursor = cursor[segment];
