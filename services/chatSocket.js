@@ -1,6 +1,7 @@
 const { parse } = require("cookie");
 const { validateToken } = require("./authService");
 const ChatSession = require("../model/chat/chatSession");
+const ChatHistorySession = require("../model/chat/chatHistorySession");
 const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
@@ -235,7 +236,7 @@ function emitChatMessage(io, session, payload) {
     .emit("message:new", payload);
 }
 
-async function autoEndSessionForDisconnect(io, sessionId) {
+async function autoEndSessionForDisconnect(io, sessionId, disconnectedRole = "user") {
   try {
     const session = await ChatSession.findByPk(sessionId);
     if (!session || session.status !== "active" || session.requestStatus !== "approved") {
@@ -247,7 +248,7 @@ async function autoEndSessionForDisconnect(io, sessionId) {
 
     emitChatEnded(io, session, {
       endedBy: "system",
-      reason: "user_disconnected",
+      reason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
       currentMinutes: billing.currentMinutes,
       currentCost: billing.currentCost,
       totalMinutes: billing.totalMinutes,
@@ -266,7 +267,7 @@ async function autoEndSessionForDisconnect(io, sessionId) {
     });
 
     queueArchiveAndDeleteSession(session.id, {
-      endReason: "user_disconnected",
+      endReason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
       billedAmount: billing.billedAmount,
     });
   } catch (error) {
@@ -726,6 +727,27 @@ function initializeChatSocket(io) {
         });
 
         if (!sessionAccess) {
+          // Fallback: Check if the session was archived (e.g., due to grace period expiration)
+          const archivedSession = await ChatHistorySession.findOne({
+            where: { sourceSessionId: sessionId },
+          });
+
+          if (archivedSession && (archivedSession.userId === authId || archivedSession.astrologerId === authId)) {
+            socket.emit("chat:ended", {
+              sessionId: sessionId,
+              endedBy: "system",
+              reason: archivedSession.endReason || "session_ended",
+            });
+
+            socket.emit("chat:updated", {
+              sessionId: sessionId,
+              session: {
+                ...mapSession(archivedSession, isAstrologer ? "astrologer" : "user"),
+                archived: true,
+                status: archivedSession.status || "completed",
+              },
+            });
+          }
           return;
         }
 
@@ -1242,13 +1264,13 @@ function initializeChatSocket(io) {
       const { activeSessionId } = socket.data;
       if (activeSessionId) {
         const timerKey = `${activeSessionId}_${authId}`;
-        console.log(`[Socket.IO] User disconnected, starting 30s grace period for ${timerKey}`);
+        console.log(`[Socket.IO] User disconnected, starting ${process.env.GRACE_PERIOD_TIMEOUT/1000}s grace period for ${timerKey}`);
         
         const timer = setTimeout(() => {
           console.log(`[Socket.IO] Grace period expired for ${timerKey}, ending session`);
           disconnectTimers.delete(timerKey);
-          autoEndSessionForDisconnect(io, activeSessionId);
-        }, 30000);
+          autoEndSessionForDisconnect(io, activeSessionId, isAstrologer ? "astrologer" : "user");
+        }, process.env.GRACE_PERIOD_TIMEOUT);
         
         disconnectTimers.set(timerKey, timer);
       }
