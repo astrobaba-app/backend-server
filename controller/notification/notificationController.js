@@ -6,9 +6,16 @@ const Astrologer = require("../../model/astrologer/astrologer");
 
 async function resolveActorType(req) {
   if (req.user?.role === "astrologer") return "astrologer";
+  if (
+    req.user?.role === "admin" ||
+    req.user?.role === "superadmin" ||
+    req.user?.role === "masteradmin"
+  ) {
+    return "admin";
+  }
 
   if (req.user?.id) {
-    const astrologer = await Astrologer.findByPk(req.user.id, { attributes: ["id"] });
+    const astrologer = await Astrologer.findByPk(req.user.id, { attributes: ["id"] }).catch(() => null);
     if (astrologer) return "astrologer";
   }
 
@@ -145,6 +152,28 @@ const deleteNotification = async (req, res) => {
   }
 };
 
+// Clear all notifications for user
+const clearAllNotifications = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    await Notification.destroy({
+      where: { userId },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "All notifications cleared successfully",
+    });
+  } catch (error) {
+    console.error("Error clearing notifications:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while clearing notifications",
+    });
+  }
+};
+
 // Get unread count
 const getUnreadCount = async (req, res) => {
   try {
@@ -173,9 +202,23 @@ const getUnreadCount = async (req, res) => {
  */
 const registerDeviceToken = async (req, res) => {
   try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
     const { token, deviceType, deviceId, deviceName } = req.body;
     const actorId = req.user.id;
     const actorType = await resolveActorType(req);
+
+    if (actorType === "admin") {
+      return res.status(200).json({
+        success: true,
+        message: "Device token registration not required for admin role",
+      });
+    }
 
     if (!token) {
       return res.status(400).json({

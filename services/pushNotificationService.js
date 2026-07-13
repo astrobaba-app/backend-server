@@ -419,6 +419,17 @@ class PushNotificationService {
    */
   async saveDeviceToken(userId, token, deviceType = "android", deviceId = null) {
     try {
+      if (deviceId) {
+        await DeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+        await AstrologerDeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+      }
+
       // Check if token already exists
       const existingToken = await DeviceToken.findOne({
         where: { token },
@@ -449,7 +460,11 @@ class PushNotificationService {
           console.log("[FCM] Created new token for user");
           return newToken;
         } catch (createError) {
-          if (createError.name === 'SequelizeUniqueConstraintError') {
+          if (
+            createError.name === 'SequelizeUniqueConstraintError' ||
+            createError.name?.includes('Unique') ||
+            String(createError?.original?.code) === '23505'
+          ) {
             const tokenRecord = await DeviceToken.findOne({ where: { token } });
             if (tokenRecord) {
               await tokenRecord.update({
@@ -524,6 +539,17 @@ class PushNotificationService {
 
   async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null, deviceName = null) {
     try {
+      if (deviceId) {
+        await AstrologerDeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+        await DeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+      }
+
       const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
 
       if (existingToken) {
@@ -552,7 +578,11 @@ class PushNotificationService {
         console.log("[FCM] Created new token for astrologer");
         return newToken;
       } catch (createError) {
-        if (createError.name === 'SequelizeUniqueConstraintError') {
+        if (
+          createError.name === 'SequelizeUniqueConstraintError' ||
+          createError.name?.includes('Unique') ||
+          String(createError?.original?.code) === '23505'
+        ) {
           const tokenRecord = await AstrologerDeviceToken.findOne({ where: { token } });
           if (tokenRecord) {
             await tokenRecord.update({
