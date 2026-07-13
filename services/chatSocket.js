@@ -1264,13 +1264,13 @@ function initializeChatSocket(io) {
       const { activeSessionId } = socket.data;
       if (activeSessionId) {
         const timerKey = `${activeSessionId}_${authId}`;
-        console.log(`[Socket.IO] User disconnected, starting 30s grace period for ${timerKey}`);
+        console.log(`[Socket.IO] User disconnected, starting ${process.env.GRACE_PERIOD_TIMEOUT/1000}s grace period for ${timerKey}`);
         
         const timer = setTimeout(() => {
           console.log(`[Socket.IO] Grace period expired for ${timerKey}, ending session`);
           disconnectTimers.delete(timerKey);
           autoEndSessionForDisconnect(io, activeSessionId, isAstrologer ? "astrologer" : "user");
-        }, 30000);
+        }, process.env.GRACE_PERIOD_TIMEOUT);
         
         disconnectTimers.set(timerKey, timer);
       }
