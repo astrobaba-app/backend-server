@@ -3,6 +3,7 @@ const Kundli = require("../model/horoscope/kundli");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const UserRequest = require("../model/user/userRequest");
 const UserInterestScore = require("../model/interest/userInterestScore");
+const User = require("../model/user/userAuth");
 const {
   ASTRO_CATEGORIES,
   COHORT_TYPES,
@@ -26,6 +27,16 @@ function emptyAstroScores() {
     scores[category] = 0;
     return scores;
   }, {});
+}
+
+async function doesUserExist(userId) {
+  if (!userId) return false;
+
+  const user = await User.findByPk(userId, {
+    attributes: ["id"],
+  });
+
+  return Boolean(user);
 }
 
 async function getCurrentAstroScores(userId) {
@@ -117,6 +128,9 @@ function buildAstroProductScores(metrics) {
 
 async function refreshUserAstroProductCohorts(userId) {
   if (!userId) return { updated: false, reason: "missing_user_id" };
+  if (!(await doesUserExist(userId))) {
+    return { updated: false, reason: "user_not_found" };
+  }
 
   const metrics = await calculateAstroProductMetrics(userId);
   const scores = buildAstroProductScores(metrics);
@@ -154,6 +168,9 @@ function queueAstroProductCohortRefresh(userId, reason = "astro_product_event") 
 
 async function recordHoroscopeView(userId, period) {
   if (!userId) return { updated: false, reason: "anonymous_view" };
+  if (!(await doesUserExist(userId))) {
+    return { updated: false, reason: "user_not_found" };
+  }
 
   await incrementUserCohortScore({
     userId,

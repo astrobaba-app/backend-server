@@ -592,6 +592,29 @@ async function ensureCohortStorageColumns() {
   }
 }
 
+async function cleanupOrphanedCohortRows() {
+  if (sequelize.getDialect() !== "postgres") {
+    return;
+  }
+
+  const cleanupTargets = [
+    "user_interest_scores",
+    "user_interest_cohorts",
+  ];
+
+  for (const tableName of cleanupTargets) {
+    await sequelize.query(`
+      DELETE FROM "${tableName}" target
+      WHERE target."userId" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "users" users
+          WHERE users."id" = target."userId"
+        )
+    `);
+  }
+}
+
 async function ensureInterestIndexes() {
   const queryInterface = sequelize.getQueryInterface();
   if (sequelize.getDialect() === "postgres") {
@@ -2094,6 +2117,7 @@ const initDB = (callback) => {
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureInterestIndexes())
+    .then(() => cleanupOrphanedCohortRows())
     .then(() => ensureWalletColumns())
     .then(() => ensureFreeChatAllocationColumns())
     .then(() => ensureAstroProductTrackingColumns())
