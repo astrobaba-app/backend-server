@@ -15,7 +15,11 @@ const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const {
   createAndQueueMobileOtp,
   verifyQueuedOtp,
+  createStoredOtp,
 } = require("../../services/otpQueueService");
+
+const DUMMY_USER_PHONE = "8112590071";
+const DUMMY_USER_OTP = "1111";
 
 const sendOtpV2 = async (req, res) => {
   try {
@@ -36,14 +40,25 @@ const sendOtpV2 = async (req, res) => {
       });
     }
 
-    await createAndQueueMobileOtp({
-      actorType: "user",
-      mobile: normalizedMobile,
-    });
+    if (normalizedMobile === DUMMY_USER_PHONE) {
+      await createStoredOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+        otp: DUMMY_USER_OTP,
+      });
+    } else {
+      await createAndQueueMobileOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+      });
+    }
 
     return res.status(200).json({
       success: true,
-      message: "OTP sent successfully",
+      message:
+        normalizedMobile === DUMMY_USER_PHONE
+          ? "Dummy OTP prepared successfully"
+          : "OTP sent successfully",
       mobile: normalizedMobile,
     });
   } catch (error) {

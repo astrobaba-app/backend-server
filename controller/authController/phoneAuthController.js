@@ -20,7 +20,10 @@ const {
 const {
   normalizeIndianMobile,
 } = require("../../services/phoneNumberService");
-const { createAndQueueOtp, verifyQueuedOtp } = require("../../services/otpQueueService");
+const { createAndQueueOtp, verifyQueuedOtp, createStoredOtp } = require("../../services/otpQueueService");
+
+const DUMMY_USER_PHONE = "8112590071";
+const DUMMY_USER_OTP = "1111";
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const { recordUserLogout } = require("../../services/userActivityCohortService");
 const pushNotificationService = require("../../services/pushNotificationService");
@@ -77,14 +80,25 @@ const generateOtp = async (req, res) => {
       });
     }
 
-    await createAndQueueOtp({
-      actorType: "user",
-      mobile: normalizedMobile,
-    });
+    if (normalizedMobile === DUMMY_USER_PHONE) {
+      await createStoredOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+        otp: DUMMY_USER_OTP,
+      });
+    } else {
+      await createAndQueueOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+      });
+    }
 
     res.status(200).json({
       success: true,
-      message: "OTP sent successfully",
+      message:
+        normalizedMobile === DUMMY_USER_PHONE
+          ? "Dummy OTP prepared successfully"
+          : "OTP sent successfully",
       mobile: normalizedMobile,
     });
   } catch (error) {
