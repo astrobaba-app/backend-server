@@ -53,7 +53,7 @@ const MSG91_MOBILE_OTP_TEMPLATE_ID = String(
   process.env.MSG91_MOBILE_OTP_TEMPLATE_ID || ""
 ).trim();
 const DUMMY_ASTROLOGER_PHONE = "8112590071";
-const DUMMY_USER_PHONE = "8112590071";
+const DUMMY_USER_PHONE = "8112590072";
 const DUMMY_OTP = "1111";
 
 let workerStarted = false;

@@ -166,8 +166,8 @@ const completeGoogleLogin = async (res, user, isNewUser) => {
       const grantedMinutes = welcomeGrant.minutes || 2;
       welcomeFreeChatInfo = {
         minutes: grantedMinutes,
-        applicableChatType: "both",
-        message: `You received ${grantedMinutes} free chat minute${
+        applicableChatType: "ai",
+        message: `You received ${grantedMinutes} free AI chat minute${
           grantedMinutes === 1 ? "" : "s"
         } on your first login.`,
       };

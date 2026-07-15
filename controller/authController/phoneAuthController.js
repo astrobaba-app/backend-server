@@ -22,7 +22,7 @@ const {
 } = require("../../services/phoneNumberService");
 const { createAndQueueOtp, verifyQueuedOtp, createStoredOtp } = require("../../services/otpQueueService");
 
-const DUMMY_USER_PHONE = "8112590071";
+const DUMMY_USER_PHONE = "8112590072";
 const DUMMY_USER_OTP = "1111";
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const { recordUserLogout } = require("../../services/userActivityCohortService");
@@ -218,8 +218,8 @@ const verifyOtp = async (req, res) => {
         const grantedMinutes = welcomeGrant.minutes || 2;
         welcomeFreeChatInfo = {
           minutes: grantedMinutes,
-          applicableChatType: "both",
-          message: `You received ${grantedMinutes} free chat minute${
+          applicableChatType: "ai",
+          message: `You received ${grantedMinutes} free AI chat minute${
             grantedMinutes === 1 ? "" : "s"
           } on your first login.`,
         };

@@ -18,7 +18,7 @@ const {
   createStoredOtp,
 } = require("../../services/otpQueueService");
 
-const DUMMY_USER_PHONE = "8112590071";
+const DUMMY_USER_PHONE = "8112590072";
 const DUMMY_USER_OTP = "1111";
 
 const sendOtpV2 = async (req, res) => {
@@ -127,8 +127,8 @@ const verifyOtpV2 = async (req, res) => {
         const grantedMinutes = welcomeGrant.minutes || 2;
         welcomeFreeChatInfo = {
           minutes: grantedMinutes,
-          applicableChatType: "both",
-          message: `You received ${grantedMinutes} free chat minute${
+          applicableChatType: "ai",
+          message: `You received ${grantedMinutes} free AI chat minute${
             grantedMinutes === 1 ? "" : "s"
           } on your first login.`,
         };
