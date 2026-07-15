@@ -167,9 +167,7 @@ const completeGoogleLogin = async (res, user, isNewUser) => {
       welcomeFreeChatInfo = {
         minutes: grantedMinutes,
         applicableChatType: "ai",
-        message: `You received ${grantedMinutes} free AI chat minute${
-          grantedMinutes === 1 ? "" : "s"
-        } on your first login.`,
+        message: "Talk to an astrologer for free.",
       };
     } catch (error) {
       console.error("Failed to grant welcome free chat:", error);
