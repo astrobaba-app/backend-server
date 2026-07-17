@@ -21,12 +21,58 @@ const normalizeStatus = (status) => {
   return "pending";
 };
 
-const buildLifecycleSteps = (row, source, categoryLabel) => {
+const resolveDeductionSystem = (row, source, rawMethod) => {
+  const m = String(rawMethod || "").trim().toLowerCase();
+  const d = String(row.description || "").toLowerCase();
+
+  if (m === "razorpay" || Boolean(row.razorpayPaymentId) || (Boolean(row.razorpayOrderId) && !m.includes("wallet") && !m.includes("manual"))) {
+    return "Razorpay Gateway";
+  }
+  if (m === "cod") {
+    return "Cash on Delivery (COD)";
+  }
+
+  if (source === "ai_usage" || d.includes("ai chat") || d.includes("chat usage") || row.metadata?.usageType === "ai_chat") {
+    return "Graho AI Chat System (Wallet Debit)";
+  }
+  if (d.includes("assistant") || row.metadata?.assistantChatId) {
+    return "Graho AI Assistant Plan (Wallet Debit)";
+  }
+  if (d.includes("voice call") || d.includes("video call") || row.metadata?.callId || d.includes("call -")) {
+    return "Astrologer Call System (Wallet Debit)";
+  }
+  if (d.includes("live session") || row.metadata?.liveSessionId) {
+    return "Astrologer Live Stream (Wallet Debit)";
+  }
+  if (source === "report_purchase" || d.includes("report purchase") || row.metadata?.reportPurchaseId) {
+    return "Report Engine System (Wallet Debit)";
+  }
+  if (source === "palm_order" || d.includes("palm reading")) {
+    return "Palmistry Analysis System (Wallet Debit)";
+  }
+  if (source === "store_order" || d.includes("store order") || row.metadata?.orderType === "store_purchase") {
+    return "Astro Store System (Wallet Debit)";
+  }
+  if (m === "bonus" || m === "signup_bonus" || d.includes("signup bonus") || d.includes("promotional")) {
+    return "Graho Reward & Bonus System";
+  }
+  if (m === "refund" || d.includes("refund")) {
+    return "Graho Refund Engine";
+  }
+  if (row.type === "credit") {
+    return "Admin System Credit (Adjustment)";
+  }
+
+  return "Graho Wallet System (Direct Debit)";
+};
+
+const buildLifecycleSteps = (row, source, categoryLabel, resolvedMethod) => {
   const status = normalizeStatus(row.status || row.paymentStatus || row.orderStatus);
   const steps = [];
   const amount = Number(row.amount || row.totalAmount || 0);
   const currency = row.currency || "INR";
-  const paymentMethod = row.paymentMethod || "razorpay";
+  const rawMethod = row.paymentMethod || "razorpay";
+  const paymentMethod = resolvedMethod || resolveDeductionSystem(row, source, rawMethod);
   const orderId = row.razorpayOrderId || row.orderNumber || row.id;
 
   // Step 1: Initiated
@@ -47,23 +93,21 @@ const buildLifecycleSteps = (row, source, categoryLabel) => {
   });
 
   // Step 2: Gateway / Verification Proceeded
-  const hasGatewayAttempt = Boolean(
-    row.razorpayOrderId || row.razorpayPaymentId || row.transactionId || paymentMethod === "wallet" || paymentMethod === "cod" || paymentMethod === "manual"
-  );
+  const isInternalSystem = paymentMethod.includes("System") || paymentMethod.includes("Engine") || paymentMethod.includes("Wallet") || paymentMethod.includes("Reward") || paymentMethod.includes("Adjustment");
+  const hasGatewayAttempt = Boolean(row.razorpayOrderId || row.razorpayPaymentId || row.transactionId || isInternalSystem);
+
   steps.push({
     stepNumber: 2,
-    title:
-      paymentMethod === "wallet"
-        ? "Graho Wallet Debit Verification"
-        : paymentMethod === "cod"
-        ? "Cash on Delivery Order Confirmation"
-        : "Razorpay Payment Gateway Processing",
-    description:
-      paymentMethod === "wallet"
-        ? `Verifying user wallet balance (Available: ₹${row.balanceBefore ?? "N/A"})`
-        : paymentMethod === "cod"
-        ? `Order confirmed for Cash on Delivery (Order #${row.orderNumber || row.id})`
-        : `Proceeded to Razorpay Gateway (Order: ${row.razorpayOrderId || row.transactionId || "Pending"})`,
+    title: isInternalSystem
+      ? `${paymentMethod} Verification`
+      : paymentMethod.includes("COD") || paymentMethod === "cod"
+      ? "Cash on Delivery Order Confirmation"
+      : "Razorpay Payment Gateway Processing",
+    description: isInternalSystem
+      ? `System balance deduction & service access verified via ${paymentMethod} (Balance Before: ₹${row.balanceBefore ?? "N/A"})`
+      : paymentMethod.includes("COD") || paymentMethod === "cod"
+      ? `Order confirmed for Cash on Delivery (Order #${row.orderNumber || row.id})`
+      : `Proceeded to Razorpay Gateway (Order: ${row.razorpayOrderId || row.transactionId || "Pending"})`,
     status: hasGatewayAttempt ? "completed" : "pending",
     timestamp: row.metadata?.capturedAt || row.metadata?.failedAt || row.updatedAt || row.createdAt,
     details: {
@@ -267,6 +311,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
 
         const categoryLabel = isRecharge ? "Wallet Recharge" : isAi ? "AI Usage Debit" : "Wallet Payment";
 
+        const resolvedMethod = resolveDeductionSystem(row, source, row.paymentMethod || (isRecharge ? "razorpay" : "manual"));
         allItems.push({
           id: row.id,
           source,
@@ -276,7 +321,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           type: row.type,
           status: normStatus,
           rawStatus: row.status,
-          paymentMethod: row.paymentMethod || (isRecharge ? "razorpay" : "manual"),
+          paymentMethod: resolvedMethod,
           description: row.description || categoryLabel,
           razorpayOrderId: row.razorpayOrderId || null,
           razorpayPaymentId: row.razorpayPaymentId || null,
@@ -286,7 +331,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           balanceAfter: row.balanceAfter ?? null,
           user: formatUserObject(row.user),
           metadata: row.metadata || {},
-          steps: buildLifecycleSteps(row, source, categoryLabel),
+          steps: buildLifecycleSteps(row, source, categoryLabel, resolvedMethod),
         });
       });
     }
@@ -309,7 +354,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
         if (typeFilter && typeFilter !== "all" && typeFilter !== "purchase" && typeFilter !== "debit") return;
 
         const categoryLabel = `${String(row.reportType || "Astrology").charAt(0).toUpperCase() + String(row.reportType || "Astrology").slice(1)} Report Purchase`;
-
+        const resolvedMethod = resolveDeductionSystem(row, "report_purchase", row.paymentMethod || "razorpay");
         allItems.push({
           id: row.id,
           source: "report_purchase",
@@ -319,7 +364,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           type: "purchase",
           status: normStatus,
           rawStatus: row.status,
-          paymentMethod: row.paymentMethod || "razorpay",
+          paymentMethod: resolvedMethod,
           description: `${categoryLabel} (₹${amount})`,
           razorpayOrderId: row.razorpayOrderId || null,
           razorpayPaymentId: row.razorpayPaymentId || null,
@@ -329,7 +374,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           balanceAfter: row.metadata?.walletBalanceAfter ?? null,
           user: formatUserObject(row.user),
           metadata: row.metadata || {},
-          steps: buildLifecycleSteps(row, "report_purchase", categoryLabel),
+          steps: buildLifecycleSteps(row, "report_purchase", categoryLabel, resolvedMethod),
         });
       });
     }
@@ -353,6 +398,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
 
         const categoryLabel = "Palm Reading Order";
 
+        const resolvedMethod = resolveDeductionSystem(row, "palm_order", row.paymentMethod || "razorpay");
         allItems.push({
           id: row.id,
           source: "palm_order",
@@ -362,7 +408,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           type: "purchase",
           status: normStatus,
           rawStatus: row.status,
-          paymentMethod: row.paymentMethod || "razorpay",
+          paymentMethod: resolvedMethod,
           description: `Palm Reading Analysis (₹${amount})`,
           razorpayOrderId: row.razorpayOrderId || null,
           razorpayPaymentId: row.razorpayPaymentId || null,
@@ -376,7 +422,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
             lastFailureReason: row.lastFailureReason,
             idempotencyKey: row.idempotencyKey,
           },
-          steps: buildLifecycleSteps(row, "palm_order", categoryLabel),
+          steps: buildLifecycleSteps(row, "palm_order", categoryLabel, resolvedMethod),
         });
       });
     }
@@ -400,6 +446,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
 
         const categoryLabel = `Store Order (${row.orderNumber || row.id.slice(0, 8)})`;
 
+        const resolvedMethod = resolveDeductionSystem(row, "store_order", row.paymentMethod || "razorpay");
         allItems.push({
           id: row.id,
           source: "store_order",
@@ -409,7 +456,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
           type: "purchase",
           status: normStatus,
           rawStatus: row.paymentStatus || row.orderStatus,
-          paymentMethod: row.paymentMethod || "razorpay",
+          paymentMethod: resolvedMethod,
           description: `E-Commerce Store Order #${row.orderNumber || ""}`,
           razorpayOrderId: typeof row.transactionId === "string" && row.transactionId.startsWith("order_") ? row.transactionId : null,
           razorpayPaymentId: typeof row.transactionId === "string" && row.transactionId.startsWith("pay_") ? row.transactionId : null,
@@ -426,7 +473,7 @@ const getPlatformRazorpayTransactions = async (req, res) => {
             shippingCharges: Number(row.shippingCharges || 0),
             discount: Number(row.discount || 0),
           },
-          steps: buildLifecycleSteps(row, "store_order", categoryLabel),
+          steps: buildLifecycleSteps(row, "store_order", categoryLabel, resolvedMethod),
         });
       });
     }
