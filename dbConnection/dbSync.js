@@ -715,6 +715,84 @@ async function ensureWalletColumns() {
   }
 }
 
+async function ensureWalletTransactionColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("wallet_transactions");
+    const operations = [];
+
+    if (!table.metadata) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "metadata", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Additional transaction data",
+        })
+      );
+    }
+    if (!table.balanceBefore && !table.balance_before) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "balanceBefore", {
+          type: DataTypes.DECIMAL(10, 2),
+          allowNull: true,
+          comment: "Wallet balance before transaction",
+        })
+      );
+    }
+    if (!table.balanceAfter && !table.balance_after) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "balanceAfter", {
+          type: DataTypes.DECIMAL(10, 2),
+          allowNull: true,
+          comment: "Wallet balance after transaction",
+        })
+      );
+    }
+    if (!table.description) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "description", {
+          type: DataTypes.STRING,
+          allowNull: true,
+          comment: "Transaction description",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured wallet_transactions columns exist");
+    }
+
+    // Safely remove any unique index/constraint on razorpayOrderId if present from older syncs
+    try {
+      const indexes = await queryInterface.showIndex("wallet_transactions");
+      for (const idx of indexes) {
+        if (
+          idx.unique &&
+          idx.fields &&
+          idx.fields.some(
+            (f) => f.attribute === "razorpayOrderId" || f.attribute === "razorpay_order_id"
+          )
+        ) {
+          await queryInterface.removeIndex("wallet_transactions", idx.name);
+          console.log(`Removed unique index ${idx.name} from wallet_transactions`);
+        }
+      }
+    } catch (idxErr) {
+      // Index check not supported or already removed
+    }
+
+    try {
+      await queryInterface.removeConstraint("wallet_transactions", "wallet_transactions_razorpayOrderId_key");
+    } catch (cErr) {}
+    try {
+      await queryInterface.removeConstraint("wallet_transactions", "wallet_transactions_razorpay_order_id_key");
+    } catch (cErr) {}
+  } catch (error) {
+    console.log("wallet_transactions table will be created by sequelize.sync()");
+  }
+}
+
 async function ensureFreeChatAllocationColumns() {
   const queryInterface = sequelize.getQueryInterface();
   try {
@@ -2119,6 +2197,7 @@ const initDB = (callback) => {
     .then(() => ensureInterestIndexes())
     .then(() => cleanupOrphanedCohortRows())
     .then(() => ensureWalletColumns())
+    .then(() => ensureWalletTransactionColumns())
     .then(() => ensureFreeChatAllocationColumns())
     .then(() => ensureAstroProductTrackingColumns())
     .then(() => ensureCouponAssignmentColumns())
