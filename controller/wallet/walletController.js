@@ -5,6 +5,7 @@ const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
 const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
 const Razorpay = require("razorpay");
+const { fetchExactRazorpayInstrument } = require("../../services/razorpayInstrumentHelper");
 const crypto = require("crypto");
 const { Op } = require("sequelize");
 const {
@@ -445,6 +446,7 @@ const verifyRecharge = async (req, res) => {
       await transaction.update(
         {
           status: "completed",
+          paymentMethod: "Razorpay Gateway",
           razorpayPaymentId: razorpay_payment_id,
           razorpaySignature: razorpay_signature,
           balanceAfter: newBalance,
@@ -453,6 +455,23 @@ const verifyRecharge = async (req, res) => {
       );
 
       await dbTransaction.commit();
+
+      // Asynchronously fetch exact payment instrument (Google Pay, PhonePe, Card) AFTER commit
+      // so it never slows down or holds database locks during the user's recharge flow
+      try {
+        const exactMethod = await fetchExactRazorpayInstrument(razorpay_payment_id);
+        if (exactMethod && exactMethod !== "Razorpay Gateway") {
+          await transaction.update({
+            paymentMethod: exactMethod,
+            metadata: {
+              ...transaction.metadata,
+              gatewayPaymentMethod: exactMethod,
+            },
+          });
+        }
+      } catch (instrumentErr) {
+        paymentDebug("Non-blocking error fetching exact Razorpay instrument:", instrumentErr.message);
+      }
 
       // Update coupon usage if exists
       const couponUsage = await CouponUsage.findOne({

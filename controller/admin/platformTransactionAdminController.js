@@ -5,6 +5,7 @@ const PalmOrder = require("../../model/palm/palmOrder");
 const Order = require("../../model/store/order");
 const User = require("../../model/user/userAuth");
 const Wallet = require("../../model/wallet/wallet");
+const { fetchExactRazorpayInstrument } = require("../../services/razorpayInstrumentHelper");
 
 const normalizeStatus = (status) => {
   const s = String(status || "").trim().toLowerCase();
@@ -25,6 +26,12 @@ const resolveDeductionSystem = (row, source, rawMethod) => {
   const m = String(rawMethod || "").trim().toLowerCase();
   const d = String(row.description || "").toLowerCase();
 
+  if (row.metadata?.gatewayPaymentMethod) {
+    return row.metadata.gatewayPaymentMethod;
+  }
+  if (m.includes("google pay") || m.includes("phonepe") || m.includes("paytm") || m.includes("amazon pay") || m.includes("upi") || m.includes("card") || m.includes("netbanking")) {
+    return rawMethod;
+  }
   if (m === "razorpay" || Boolean(row.razorpayPaymentId) || (Boolean(row.razorpayOrderId) && !m.includes("wallet") && !m.includes("manual"))) {
     return "Razorpay Gateway";
   }
@@ -288,8 +295,11 @@ const getPlatformRazorpayTransactions = async (req, res) => {
     const shouldFetchWallet = !categoryFilter || categoryFilter === "all" || categoryFilter === "wallet_recharge" || categoryFilter === "ai_usage" || categoryFilter === "consultation";
     if (shouldFetchWallet) {
       const walletWhere = buildWhereClause({ _hasDescription: true });
-      if (categoryFilter === "wallet_recharge") walletWhere.type = "credit";
-      else if (categoryFilter === "ai_usage") walletWhere.type = "debit";
+      if (!categoryFilter || categoryFilter === "all" || categoryFilter === "wallet_recharge") {
+        walletWhere.type = "credit";
+      } else if (categoryFilter === "ai_usage" || categoryFilter === "consultation") {
+        walletWhere.type = "debit";
+      }
 
       const walletRows = await WalletTransaction.findAll({
         where: walletWhere,
@@ -583,6 +593,24 @@ const getPlatformRazorpayTransactions = async (req, res) => {
       });
 
     const paginatedItems = allItems.slice(offset, offset + limit);
+
+    await Promise.all(
+      paginatedItems.map(async (item) => {
+        if (
+          item.razorpayPaymentId &&
+          (item.paymentMethod === "Razorpay Gateway" || item.paymentMethod === "razorpay" || !item.paymentMethod)
+        ) {
+          const exactInstrument = await fetchExactRazorpayInstrument(item.razorpayPaymentId);
+          if (exactInstrument && exactInstrument !== "Razorpay Gateway") {
+            item.paymentMethod = exactInstrument;
+            if (Array.isArray(item.steps) && item.steps.length >= 2) {
+              item.steps[1].title = `Payment Method: ${exactInstrument}`;
+              item.steps[1].description = `Verified payment via Razorpay Gateway (${exactInstrument}). Payment ID: ${item.razorpayPaymentId}`;
+            }
+          }
+        }
+      })
+    );
 
     return res.status(200).json({
       success: true,
