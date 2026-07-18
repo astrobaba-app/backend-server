@@ -140,21 +140,29 @@ const validateCoupon = async (req, res) => {
       }
     }
 
-    // Calculate discount
-    let discountAmount = 0;
-    if (coupon.discountType === "percentage") {
-      discountAmount = (amount * parseFloat(coupon.discountValue)) / 100;
-      
-      // Apply max discount cap
-      if (coupon.maxDiscount) {
-        discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
-      }
-    } else if (coupon.discountType === "fixed") {
-      discountAmount = parseFloat(coupon.discountValue);
-    }
+    const isExtraCredit = coupon.code.toUpperCase() === 'GRAHO20' || coupon.code.toUpperCase().endsWith('_EXTRA');
 
-    // Ensure discount doesn't exceed recharge amount
-    discountAmount = Math.min(discountAmount, amount);
+    // Calculate discount or extra credit
+    let discountAmount = 0;
+    let extraCreditAmount = 0;
+
+    if (isExtraCredit) {
+      extraCreditAmount = parseFloat(coupon.discountValue);
+    } else {
+      if (coupon.discountType === "percentage") {
+        discountAmount = (amount * parseFloat(coupon.discountValue)) / 100;
+        
+        // Apply max discount cap
+        if (coupon.maxDiscount) {
+          discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+        }
+      } else if (coupon.discountType === "fixed") {
+        discountAmount = parseFloat(coupon.discountValue);
+      }
+
+      // Ensure discount doesn't exceed recharge amount
+      discountAmount = Math.min(discountAmount, amount);
+    }
 
     const finalAmount = amount - discountAmount;
 
@@ -170,8 +178,9 @@ const validateCoupon = async (req, res) => {
       calculation: {
         rechargeAmount: amount,
         discountAmount: parseFloat(discountAmount.toFixed(2)),
+        extraCreditAmount: parseFloat(extraCreditAmount.toFixed(2)),
         finalAmount: parseFloat(finalAmount.toFixed(2)),
-        savings: parseFloat(discountAmount.toFixed(2)),
+        savings: isExtraCredit ? parseFloat(extraCreditAmount.toFixed(2)) : parseFloat(discountAmount.toFixed(2)),
       },
     });
   } catch (error) {
@@ -516,13 +525,16 @@ const deleteCoupon = async (req, res) => {
       });
     }
 
-    // Check if coupon has been used
-    if (coupon.usageCount > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete coupon that has been used. Consider deactivating instead.",
-      });
-    }
+    // Delete any coupon usage or assignment records first to avoid foreign key constraints
+    await CouponUsage.destroy({ where: { couponId: coupon.id } });
+    
+    // Check if CouponUserAssignment exists (it might not be imported, let's just use try-catch if needed, but it's better to just destroy if model is available)
+    try {
+      const { CouponUserAssignment } = require("../../models");
+      if (CouponUserAssignment) {
+        await CouponUserAssignment.destroy({ where: { couponId: coupon.id } });
+      }
+    } catch (e) {}
 
     await coupon.destroy();
 

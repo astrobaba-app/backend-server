@@ -130,6 +130,8 @@ const createRechargeOrder = async (req, res) => {
     let finalAmount = rechargeAmount;
     let discountAmount = 0;
     let appliedCoupon = null;
+    let extraCreditAmount = 0;
+    let isExtraCredit = false;
 
     // If coupon code provided, validate and apply
     if (couponCode) {
@@ -194,23 +196,31 @@ const createRechargeOrder = async (req, res) => {
         });
       }
 
-      // Calculate discount
-      if (coupon.discountType === "percentage") {
-        discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
-        if (coupon.maxDiscount) {
-          discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
-        }
+      isExtraCredit = coupon.code.toUpperCase() === 'GRAHO20' || coupon.code.toUpperCase().endsWith('_EXTRA');
+
+      if (isExtraCredit) {
+        extraCreditAmount = parseFloat(coupon.discountValue);
       } else {
-        discountAmount = parseFloat(coupon.discountValue);
+        // Calculate discount
+        if (coupon.discountType === "percentage") {
+          discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
+          if (coupon.maxDiscount) {
+            discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+          }
+        } else {
+          discountAmount = parseFloat(coupon.discountValue);
+        }
+
+        discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
       }
 
-      discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
       finalAmount = roundMoney(rechargeAmount - discountAmount);
 
       appliedCoupon = {
         id: coupon.id,
         code: coupon.code,
         discountAmount,
+        extraCreditAmount,
       };
     }
 
@@ -222,6 +232,10 @@ const createRechargeOrder = async (req, res) => {
 
     const gstAmount = roundMoney(finalAmount * WALLET_RECHARGE_GST_RATE);
     const payableAmount = roundMoney(finalAmount + gstAmount);
+    
+    // Total wallet credit includes any extra credit from cashback coupons
+    const totalWalletCredit = roundMoney(finalAmount + extraCreditAmount);
+
     const normalizedBillingState =
       typeof billingState === "string" && billingState.trim()
         ? billingState.trim()
@@ -244,7 +258,8 @@ const createRechargeOrder = async (req, res) => {
         purpose: "wallet_recharge",
         originalAmount: rechargeAmount,
         discountAmount: discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount: extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         gstRate: WALLET_RECHARGE_GST_RATE,
         gstAmount,
         payableAmount,
@@ -266,18 +281,21 @@ const createRechargeOrder = async (req, res) => {
     const transaction = await WalletTransaction.create({
       userId,
       walletId: wallet.id,
-      amount: finalAmount, // Store final amount to be credited
+      amount: totalWalletCredit, // Store total amount to be credited including bonus
       type: "credit",
       status: "pending",
       paymentMethod: "razorpay",
       razorpayOrderId: razorpayOrder.id,
-      description: couponCode 
-        ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
-        : `Wallet recharge of ₹${amount}`,
+      description: isExtraCredit 
+        ? `Wallet recharge of ₹${amount} (+₹${extraCreditAmount} bonus with ${couponCode})`
+        : couponCode 
+          ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
+          : `Wallet recharge of ₹${amount}`,
       metadata: {
         originalAmount: rechargeAmount,
         discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         gstRate: WALLET_RECHARGE_GST_RATE,
         gstAmount,
         payableAmount,
@@ -563,6 +581,7 @@ const getTransactionHistory = async (req, res) => {
         "description",
         "balanceBefore",
         "balanceAfter",
+        "metadata",
         "createdAt",
       ],
     });
@@ -874,22 +893,31 @@ const createRechargeQrOrder = async (req, res) => {
     let finalAmount = rechargeAmount;
     let appliedCoupon = null;
 
+    let extraCreditAmount = 0;
+    let isExtraCredit = false;
+
     if (couponCode) {
       const coupon = await Coupon.findOne({
         where: { code: couponCode.trim().toUpperCase(), isActive: true },
       });
       if (coupon) {
-        if (coupon.discountType === "percentage") {
-          discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
-          if (coupon.maxDiscount) {
-            discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
-          }
+        isExtraCredit = coupon.code.toUpperCase() === 'GRAHO20' || coupon.code.toUpperCase().endsWith('_EXTRA');
+
+        if (isExtraCredit) {
+          extraCreditAmount = parseFloat(coupon.discountValue);
         } else {
-          discountAmount = parseFloat(coupon.discountValue);
+          if (coupon.discountType === "percentage") {
+            discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
+            if (coupon.maxDiscount) {
+              discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+            }
+          } else {
+            discountAmount = parseFloat(coupon.discountValue);
+          }
+          discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
         }
-        discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
         finalAmount = roundMoney(rechargeAmount - discountAmount);
-        appliedCoupon = { id: coupon.id, code: coupon.code, discountAmount };
+        appliedCoupon = { id: coupon.id, code: coupon.code, discountAmount, extraCreditAmount };
       }
     }
 
@@ -900,6 +928,8 @@ const createRechargeQrOrder = async (req, res) => {
 
     const gstAmount = roundMoney(finalAmount * WALLET_RECHARGE_GST_RATE);
     const payableAmount = roundMoney(finalAmount + gstAmount);
+    const totalWalletCredit = roundMoney(finalAmount + extraCreditAmount);
+    
     const timestamp = Date.now().toString().slice(-8);
     const userIdShort = userId.toString().slice(0, 8);
     const receipt = `rcpt_qr_${userIdShort}_${timestamp}`;
@@ -914,7 +944,8 @@ const createRechargeQrOrder = async (req, res) => {
         purpose: "wallet_recharge_qr",
         originalAmount: rechargeAmount,
         discountAmount: discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount: extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         payableAmount,
       },
     };
@@ -924,17 +955,20 @@ const createRechargeQrOrder = async (req, res) => {
     const transaction = await WalletTransaction.create({
       userId,
       walletId: wallet.id,
-      amount: finalAmount,
+      amount: totalWalletCredit,
       type: "credit",
       status: "pending",
       paymentMethod: "razorpay",
       razorpayOrderId: razorpayOrder.id,
-      description: `Wallet recharge QR of ₹${rechargeAmount}`,
+      description: isExtraCredit 
+        ? `Wallet recharge QR of ₹${rechargeAmount} (+₹${extraCreditAmount} bonus)`
+        : `Wallet recharge QR of ₹${rechargeAmount}`,
       metadata: {
         gatewayPaymentMethod: "upi_qr",
         originalAmount: rechargeAmount,
         discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         payableAmount,
       },
       balanceBefore: wallet.balance,
