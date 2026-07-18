@@ -37,7 +37,8 @@ const handleWebhook = async (req, res) => {
 
     switch (event) {
       case "payment.captured":
-        await handlePaymentCaptured(payload.payment.entity);
+      case "qr_code.credited":
+        await handlePaymentCaptured(payload.payment?.entity || payload.qr_code?.entity);
         break;
 
       case "payment.failed":
@@ -49,7 +50,7 @@ const handleWebhook = async (req, res) => {
         break;
 
       default:
-
+        console.log("Unhandled webhook event:", event);
     }
 
     res.status(200).json({ success: true });
@@ -63,11 +64,21 @@ const handleWebhook = async (req, res) => {
   }
 };
 
+const toAmount = (value) => {
+  const parsed = parseFloat(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const roundMoney = (value) => Math.round(toAmount(value) * 100) / 100;
+
 /**
  * Handle successful payment capture
  */
 const handlePaymentCaptured = async (payment) => {
   const sequelize = require("../../dbConnection/dbConfig").sequelize;
+  const CouponUsage = require("../../model/coupon/couponUsage");
+  const Coupon = require("../../model/coupon/coupon");
+  const { queueWalletCohortRefresh } = require("../../services/walletCohortService");
   let dbTransaction;
   
   try {
@@ -82,7 +93,7 @@ const handlePaymentCaptured = async (payment) => {
 
     // Idempotency check - skip if already processed
     if (transaction.status === "completed") {
-
+      queueWalletCohortRefresh(transaction.userId, "webhook_idempotent");
       return;
     }
 
@@ -96,9 +107,9 @@ const handlePaymentCaptured = async (payment) => {
     // Start database transaction for atomicity
     dbTransaction = await sequelize.transaction();
 
-    // Update wallet balance
-    const newBalance = parseFloat(wallet.balance) + parseFloat(transaction.amount);
-    const newTotalRecharge = parseFloat(wallet.totalRecharge) + parseFloat(transaction.amount);
+    // Update wallet balance with safe rounding to prevent float precision drift
+    const newBalance = roundMoney(toAmount(wallet.balance) + toAmount(transaction.amount));
+    const newTotalRecharge = roundMoney(toAmount(wallet.totalRecharge) + toAmount(transaction.amount));
 
     await wallet.update({
       balance: newBalance,
@@ -119,8 +130,25 @@ const handlePaymentCaptured = async (payment) => {
       },
     }, { transaction: dbTransaction });
 
-    await dbTransaction.commit();
+    // Update coupon usage if exists
+    const couponUsage = await CouponUsage.findOne({
+      where: {
+        orderId: payment.order_id,
+        userId: transaction.userId,
+        status: "pending",
+      },
+    });
 
+    if (couponUsage) {
+      await couponUsage.update({ status: "success" }, { transaction: dbTransaction });
+      const coupon = await Coupon.findByPk(couponUsage.couponId);
+      if (coupon) {
+        await coupon.update({ usageCount: coupon.usageCount + 1 }, { transaction: dbTransaction });
+      }
+    }
+
+    await dbTransaction.commit();
+    queueWalletCohortRefresh(transaction.userId, "webhook_captured");
   } catch (error) {
     if (dbTransaction) {
       await dbTransaction.rollback();
@@ -133,6 +161,7 @@ const handlePaymentCaptured = async (payment) => {
  * Handle failed payment
  */
 const handlePaymentFailed = async (payment) => {
+  const CouponUsage = require("../../model/coupon/couponUsage");
   try {
     const transaction = await WalletTransaction.findOne({
       where: { razorpayOrderId: payment.order_id },
@@ -145,7 +174,6 @@ const handlePaymentFailed = async (payment) => {
 
     // Skip if already processed
     if (transaction.status !== "pending") {
-
       return;
     }
 
@@ -161,7 +189,16 @@ const handlePaymentFailed = async (payment) => {
       },
     });
 
+    const couponUsage = await CouponUsage.findOne({
+      where: {
+        orderId: payment.order_id,
+        status: "pending",
+      },
+    });
 
+    if (couponUsage) {
+      await couponUsage.update({ status: "failed" });
+    }
   } catch (error) {
     console.error("Error handling payment failed:", error);
   }
@@ -172,7 +209,9 @@ const handlePaymentFailed = async (payment) => {
  */
 const handleOrderPaid = async (order, payment) => {
   try {
-    // Additional logic if needed
+    if (payment) {
+      await handlePaymentCaptured(payment);
+    }
   } catch (error) {
     console.error("Error handling order paid:", error);
   }

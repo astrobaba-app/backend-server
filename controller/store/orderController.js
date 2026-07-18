@@ -1205,7 +1205,9 @@ exports.createRazorpayOrder = async (req, res) => {
       },
     };
 
+    console.log('[Backend-Store-Debug]', new Date().toISOString(), 'Creating Razorpay order with options:', razorpayOrderOptions);
     const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+    console.log('[Backend-Store-Debug]', new Date().toISOString(), 'Razorpay order created successfully:', razorpayOrder.id);
 
     return res.status(201).json({
       success: true,
