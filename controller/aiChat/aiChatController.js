@@ -2570,7 +2570,6 @@ const getAiChatHistoryV2 = async (req, res) => {
     const { rows: sessions, count } = await AIChatSession.findAndCountAll({
       where: {
         userId,
-        isActive: true,
         status: { [Op.ne]: "active" },
       },
       order: [["endTime", "DESC"], ["lastMessageAt", "DESC"], ["createdAt", "DESC"]],
