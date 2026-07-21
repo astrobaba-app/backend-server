@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
 
+
 const SupportTicket = sequelize.define(
   "SupportTicket",
   {

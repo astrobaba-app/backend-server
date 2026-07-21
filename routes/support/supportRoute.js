@@ -45,6 +45,7 @@ router.post("/upload", checkForAuthenticationCookie(), ...upload.array("images",
 });
 
 // Admin routes
+
 router.get(
   "/admin/tickets",
   checkForAuthenticationCookie(),
