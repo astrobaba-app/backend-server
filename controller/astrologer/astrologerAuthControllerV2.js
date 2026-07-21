@@ -191,6 +191,7 @@ const verifyOTPV2 = async (req, res) => {
       actorType: "astrologer",
       mobile: phoneNumber,
       otp,
+      deleteOtp: false,
     });
 
     const astrologer = await Astrologer.findOne({ where: { phoneNumber } });
@@ -202,6 +203,7 @@ const verifyOTPV2 = async (req, res) => {
         verifiedAt: Date.now(),
         source: "v2",
       });
+      await redis.del(`astrologer:otp:${phoneNumber}`);
 
       return res.status(200).json({
         success: true,
@@ -270,11 +272,13 @@ const verifyOTPV2 = async (req, res) => {
       role: "astrologer",
       sessionVersion: astrologer.sessionVersion,
     };
-    const token = createToken(authPayload);
-    const astrologerToken = createMiddlewareToken(authPayload);
-    const refreshToken = createRefreshToken(authPayload);
+    const token = createToken(authPayload, deviceId);
+    const astrologerToken = createMiddlewareToken(authPayload, deviceId);
+    const refreshToken = createRefreshToken(authPayload, deviceId);
 
     setTokenCookieAstrologer(res, token, astrologerToken, refreshToken);
+    
+    await redis.del(`astrologer:otp:${phoneNumber}`);
 
     return res
       .status(200)
@@ -318,9 +322,7 @@ const logoutV2 = async (req, res) => {
     if (token) {
       await pushNotificationService.removeAstrologerDeviceToken(token);
     } else if (deviceId) {
-      await pushNotificationService.deactivateAstrologerDeviceTokens(astrologerId, {
-        deviceId,
-      });
+      await pushNotificationService.removeAstrologerDeviceTokenByDeviceId(astrologerId, deviceId);
     }
 
     const shouldClearActiveDevice =

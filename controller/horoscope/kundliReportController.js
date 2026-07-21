@@ -43,6 +43,9 @@ const {
 } = require("../../services/reportGenerationQueueService");
 const { markPalmJobCompletedAfterPdf } = require("../../services/palmQueueService");
 const {
+  notifyReportGenerationStatus,
+} = require("../../services/reportNotificationService");
+const {
   assertReportPurchaseAccess,
   markReportPurchaseConsumed,
 } = require("../../services/reportPurchaseService");
@@ -1298,6 +1301,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
             pdfGeneration: pdfMetadata?.pdfUrl ? "uploaded" : "skipped",
           },
         });
+        await notifyReportGenerationStatus(reportGenerationRequest, "completed");
       }
     } catch (pdfError) {
       console.error("[DailyReport][PDF] Generation/upload failed:", pdfError.message || pdfError);
@@ -1311,6 +1315,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
             pdfGeneration: "failed",
           },
         });
+        await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
       }
     }
 
@@ -1340,6 +1345,7 @@ May this report serve as a source of awareness, reflection, and guidance as you 
               processingStatus: "background_failed",
             },
           });
+          await notifyReportGenerationStatus(reportGenerationRequest, "failed");
         }
       } catch (statusError) {
         console.error("[DailyReport][Background] Failed to update failure status:", statusError.message || statusError);
@@ -1620,6 +1626,7 @@ const generateYearlyPdfInBackground = async (reportRecord, userRequest, reportGe
           pdfGeneration: "uploaded",
         },
       });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
     }
 
     console.log("[Yearly PDF Background] Successfully completed");
@@ -1635,6 +1642,7 @@ const generateYearlyPdfInBackground = async (reportRecord, userRequest, reportGe
           pdfGeneration: "failed",
         },
       });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
     }
   }
 };
@@ -2240,6 +2248,7 @@ const generateWealthPdfInBackground = async (reportRecord, userRequest, reportGe
           pdfGeneration: "uploaded",
         },
       });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
     }
 
     console.log("[Wealth PDF Background] Successfully completed");
@@ -2255,6 +2264,7 @@ const generateWealthPdfInBackground = async (reportRecord, userRequest, reportGe
           pdfGeneration: "failed",
         },
       });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
     }
   }
 };
@@ -3391,6 +3401,7 @@ const generateQueuedReportPdf = async (reportGenerationRequest) => {
       pdfCompletedAt: new Date().toISOString(),
     },
   });
+  await notifyReportGenerationStatus(reportGenerationRequest, "completed");
 
   return pdfMetadata;
 };

@@ -16,6 +16,9 @@ const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
 const { startOtpQueueWorker } = require("./services/otpQueueService");
+const {
+  startFreeChatGrantNotificationWorker,
+} = require("./services/freeChatGrantNotificationQueue");
 const { startAiChatQueueWorker } = require("./controller/aiChat/aiChatController");
 const scheduledNotificationService = require("./services/scheduledNotificationService");
 
@@ -184,6 +187,7 @@ const addressRoute = require("./routes/store/addressRoute");
 const googleAuthRoute = require("./routes/authRoute/googleAuthRoute");
 const appleAuthRoute = require("./routes/authRoute/appleAuthRoute");
 const aiChatRoute = require("./routes/aiChat/aiChatRoute");
+const freeChatRoute = require("./routes/freeChat/freeChatRoute");
 const interestRoute = require("./routes/interest/interestRoute");
 const mapsRoute = require("./routes/maps/mapsRoute");
 const locationRoute = require("./routes/maps/locationRoute");
@@ -193,6 +197,7 @@ const palmReadingRoute = require("./routes/palm/palmReadingRoute");
 const reportPurchaseRoute = require("./routes/report/reportPurchaseRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
 const tempOtpRoute = require("./routes/internal/tempOtpRoute");
+const homeFeedRoute = require("./routes/home/homeFeedRoute");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
 app.use("/api/user", userProfileRoute);
@@ -221,6 +226,7 @@ app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
+app.use("/api/free-chat", freeChatRoute);
 app.use("/api/interests", interestRoute);
 app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
@@ -230,6 +236,7 @@ app.use("/api/palm-reading", palmReadingRoute);
 app.use("/api/report-purchases", reportPurchaseRoute);
 app.use("/api/internal", internalLogRoute);
 app.use("/api/internal/temp-otp", tempOtpRoute);
+app.use("/api/home", homeFeedRoute);
 
 // WebSocket server for AI voice calls (separate from Socket.IO)
 // Temporarily disabled because attaching a separate ws server to the same HTTP
@@ -299,10 +306,15 @@ app.use("/api/internal/temp-otp", tempOtpRoute);
 initDB(() => {
   initializeChatSocket(io);
   
-  const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
   initializeLiveStreamSocket(io);
-  
-  setInterval(syncLiveViewerCounts, 30000);
+
+  const liveViewerCountSyncEnabled =
+    String(process.env.LIVE_VIEWER_COUNT_SYNC_ENABLED || "").toLowerCase() ===
+    "true";
+  if (liveViewerCountSyncEnabled) {
+    const { syncLiveViewerCounts } = require("./services/liveStreamSocket");
+    setInterval(syncLiveViewerCounts, 30000);
+  }
 
   server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
@@ -317,9 +329,14 @@ initDB(() => {
     startInterestClassificationWorker();
     startJobApplicationEmailQueueWorker();
     startOtpQueueWorker();
+    startFreeChatGrantNotificationWorker();
     startAiChatQueueWorker();
     const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
     startReportWorkerScheduler();
-    console.log("Live viewer count sync enabled (every 30 seconds)");
+    console.log(
+      liveViewerCountSyncEnabled
+        ? "Live viewer count sync enabled (every 30 seconds)"
+        : "Live viewer count sync disabled"
+    );
   });
 });

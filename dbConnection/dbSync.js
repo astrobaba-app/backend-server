@@ -42,6 +42,7 @@ const CallSession = require("../model/call/callSession");
 // Chat models
 const ChatMessage = require("../model/chat/chatMessage");
 const ChatSession = require("../model/chat/chatSession");
+const FreeChatAllocation = require("../model/freeChat/freeChatAllocation");
 
 // Coupon models
 const Coupon = require("../model/coupon/coupon");
@@ -70,6 +71,8 @@ const LiveSession = require("../model/live/liveSession");
 
 // Notification models
 const Notification = require("../model/notification/notification");
+const AstrologerNotification = require("../model/notification/astrologerNotification");
+const AstrologerBroadcastLog = require("../model/admin/astrologerBroadcastLog");
 
 // Review models
 const Review = require("../model/review/review");
@@ -218,6 +221,37 @@ async function ensureChatSessionColumns() {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: true,
         comment: "Recharge wallet balance used to calculate max chat duration",
+      })
+    );
+  }
+
+  if (!table.billing_source && !table.billingSource) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "billing_source", {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        defaultValue: "wallet",
+        comment: "wallet or free_chat",
+      })
+    );
+  }
+
+  if (!table.free_chat_allocation_id && !table.freeChatAllocationId) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "free_chat_allocation_id", {
+        type: DataTypes.UUID,
+        allowNull: true,
+        comment: "Free chat allocation applied to this chat session",
+      })
+    );
+  }
+
+  if (!table.free_chat_minutes && !table.freeChatMinutes) {
+    operations.push(
+      queryInterface.addColumn("chat_sessions", "free_chat_minutes", {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        comment: "Allocated free chat minutes for this session",
       })
     );
   }
@@ -434,6 +468,7 @@ async function ensureAIChatSessionColumns() {
     }
 
     const columnDefinitions = [
+      ["isActive", { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }],
       ["status", { type: DataTypes.STRING(30), allowNull: false, defaultValue: "active" }],
       ["startTime", { type: DataTypes.DATE, allowNull: true }],
       ["endTime", { type: DataTypes.DATE, allowNull: true }],
@@ -444,8 +479,14 @@ async function ensureAIChatSessionColumns() {
       ["maxDurationSeconds", { type: DataTypes.INTEGER, allowNull: true }],
       ["maxEndTime", { type: DataTypes.DATE, allowNull: true }],
       ["walletBalanceAtStart", { type: DataTypes.DECIMAL(10, 2), allowNull: true }],
+      ["billingSource", { type: DataTypes.STRING(20), allowNull: false, defaultValue: "wallet" }],
+      ["freeChatAllocationId", { type: DataTypes.UUID, allowNull: true }],
+      ["freeChatMinutes", { type: DataTypes.INTEGER, allowNull: true }],
       ["endReason", { type: DataTypes.STRING(80), allowNull: true }],
       ["lastMessagePreview", { type: DataTypes.STRING(255), allowNull: true }],
+      ["feedbackRating", { type: DataTypes.INTEGER, allowNull: true }],
+      ["feedbackReview", { type: DataTypes.TEXT, allowNull: true }],
+      ["feedbackSubmittedAt", { type: DataTypes.DATE, allowNull: true }],
     ];
 
     columnDefinitions.forEach(([columnName, definition]) => {
@@ -551,6 +592,29 @@ async function ensureCohortStorageColumns() {
   }
 }
 
+async function cleanupOrphanedCohortRows() {
+  if (sequelize.getDialect() !== "postgres") {
+    return;
+  }
+
+  const cleanupTargets = [
+    "user_interest_scores",
+    "user_interest_cohorts",
+  ];
+
+  for (const tableName of cleanupTargets) {
+    await sequelize.query(`
+      DELETE FROM "${tableName}" target
+      WHERE target."userId" IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM "users" users
+          WHERE users."id" = target."userId"
+        )
+    `);
+  }
+}
+
 async function ensureInterestIndexes() {
   const queryInterface = sequelize.getQueryInterface();
   if (sequelize.getDialect() === "postgres") {
@@ -648,6 +712,110 @@ async function ensureWalletColumns() {
     }
   } catch (error) {
     console.log("wallets table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureWalletTransactionColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("wallet_transactions");
+    const operations = [];
+
+    if (!table.metadata) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "metadata", {
+          type: DataTypes.JSON,
+          allowNull: true,
+          comment: "Additional transaction data",
+        })
+      );
+    }
+    if (!table.balanceBefore && !table.balance_before) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "balanceBefore", {
+          type: DataTypes.DECIMAL(10, 2),
+          allowNull: true,
+          comment: "Wallet balance before transaction",
+        })
+      );
+    }
+    if (!table.balanceAfter && !table.balance_after) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "balanceAfter", {
+          type: DataTypes.DECIMAL(10, 2),
+          allowNull: true,
+          comment: "Wallet balance after transaction",
+        })
+      );
+    }
+    if (!table.description) {
+      operations.push(
+        queryInterface.addColumn("wallet_transactions", "description", {
+          type: DataTypes.STRING,
+          allowNull: true,
+          comment: "Transaction description",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured wallet_transactions columns exist");
+    }
+
+    // Safely remove any unique index/constraint on razorpayOrderId if present from older syncs
+    try {
+      const indexes = await queryInterface.showIndex("wallet_transactions");
+      for (const idx of indexes) {
+        if (
+          idx.unique &&
+          idx.fields &&
+          idx.fields.some(
+            (f) => f.attribute === "razorpayOrderId" || f.attribute === "razorpay_order_id"
+          )
+        ) {
+          await queryInterface.removeIndex("wallet_transactions", idx.name);
+          console.log(`Removed unique index ${idx.name} from wallet_transactions`);
+        }
+      }
+    } catch (idxErr) {
+      // Index check not supported or already removed
+    }
+
+    try {
+      await queryInterface.removeConstraint("wallet_transactions", "wallet_transactions_razorpayOrderId_key");
+    } catch (cErr) {}
+    try {
+      await queryInterface.removeConstraint("wallet_transactions", "wallet_transactions_razorpay_order_id_key");
+    } catch (cErr) {}
+  } catch (error) {
+    console.log("wallet_transactions table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureFreeChatAllocationColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("free_chat_allocations");
+    const grantAdminColumn = table.grantedByAdminId
+      ? "grantedByAdminId"
+      : table.granted_by_admin_id
+        ? "granted_by_admin_id"
+        : null;
+
+    if (grantAdminColumn) {
+      await queryInterface.changeColumn("free_chat_allocations", grantAdminColumn, {
+        type: DataTypes.UUID,
+        allowNull: true,
+        references: {
+          model: "admins",
+          key: "id",
+        },
+        onUpdate: "CASCADE",
+      });
+    }
+  } catch (error) {
+    console.log("free_chat_allocations table will be created by sequelize.sync()");
   }
 }
 
@@ -923,6 +1091,15 @@ async function ensureUserPreferenceColumns() {
       );
     }
 
+    if (!table.activeDevices && !table.active_devices) {
+      operations.push(
+        queryInterface.addColumn("users", "activeDevices", {
+          type: DataTypes.JSON,
+          allowNull: false,
+          defaultValue: [],
+        })
+      );
+    }
 
     if (!table.isOnboarded && !table.is_onboarded) {
       operations.push(
@@ -1933,6 +2110,71 @@ async function ensureMatchingProfileColumns() {
   }
 }
 
+async function ensureUserAuthColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("users");
+    const operations = [];
+
+    if (!table.isActive && !table.is_active) {
+      operations.push(
+        queryInterface.addColumn("users", "isActive", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: true,
+          comment: "Whether the user account is active",
+        })
+      );
+    }
+
+    if (!table.isOnboarded && !table.is_onboarded) {
+      operations.push(
+        queryInterface.addColumn("users", "isOnboarded", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+        })
+      );
+    }
+
+    if (!table.lastLoginMethod && !table.last_login_method) {
+      operations.push(
+        queryInterface.addColumn("users", "lastLoginMethod", {
+          type: DataTypes.STRING,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!table.activeDevices && !table.active_devices) {
+      operations.push(
+        queryInterface.addColumn("users", "activeDevices", {
+          type: DataTypes.JSON,
+          allowNull: false,
+          defaultValue: [],
+        })
+      );
+    }
+
+    if (!table.sessionVersion && !table.session_version) {
+      operations.push(
+        queryInterface.addColumn("users", "sessionVersion", {
+          type: DataTypes.INTEGER,
+          allowNull: false,
+          defaultValue: 0,
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured users table auth columns exist");
+    }
+  } catch (error) {
+    console.log("users table will be created by sequelize.sync()");
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -1953,7 +2195,10 @@ const initDB = (callback) => {
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureInterestIndexes())
+    .then(() => cleanupOrphanedCohortRows())
     .then(() => ensureWalletColumns())
+    .then(() => ensureWalletTransactionColumns())
+    .then(() => ensureFreeChatAllocationColumns())
     .then(() => ensureAstroProductTrackingColumns())
     .then(() => ensureCouponAssignmentColumns())
     .then(() => ensureKundliShareColumns())
@@ -1975,6 +2220,7 @@ const initDB = (callback) => {
     .then(() => ensureFeedbackColumns())
     .then(() => ensureSupportTicketActorColumns())
     .then(() => ensureMatchingProfileColumns())
+    .then(() => ensureUserAuthColumns())
     .then(() => {
       console.log("All models synced");
       callback();

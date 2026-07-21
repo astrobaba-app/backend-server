@@ -53,7 +53,6 @@ const WalletTransaction = sequelize.define(
     razorpayOrderId: {
       type: DataTypes.STRING,
       allowNull: true,
-      unique: true,
     },
     razorpayPaymentId: {
       type: DataTypes.STRING,

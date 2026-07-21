@@ -1,5 +1,6 @@
 const redis = require("../config/redis/redis");
 const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
+const { notifyReportGenerationStatus } = require("./reportNotificationService");
 
 const truthy = (value) => ["1", "true", "yes", "on"].includes(String(value || "").toLowerCase());
 
@@ -172,6 +173,10 @@ const drainQueueSnapshot = async ({ queueKey, batchSize, handler, workerName }) 
               lastWorkerError: error.message || String(error),
             },
           });
+          await notifyReportGenerationStatus(
+            reportRequest,
+            `${workerName.toLowerCase()}_failed`
+          );
         }
       }
     }

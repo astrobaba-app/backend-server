@@ -12,6 +12,15 @@ const {
   sendDigitalProductEmail,
   sendOrderStatusUpdateEmail,
 } = require("../../emailService/storeOrderEmail");
+const {
+  buildWalletDebitPlan,
+  getWalletBalanceBreakdown,
+} = require("../../services/walletService");
+
+const toAmount = (value) => {
+  const parsed = parseFloat(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const enrichOrderItems = (order) => {
   if (!order) {
@@ -108,6 +117,9 @@ exports.checkout = async (req, res) => {
         message: "Cart is empty",
       });
     }
+
+    let paymentStatus = "pending";
+    let transactionId = null;
 
     // Validate all products and prepare order items
     const orderItems = [];
@@ -238,26 +250,40 @@ exports.checkout = async (req, res) => {
     // Calculate total
     const totalAmount = parseFloat((subtotal + shippingCharges + taxAmount).toFixed(2));
 
-    // Process payment
-    let paymentStatus = "pending";
-    let transactionId = null;
-
     if (paymentMethod === "wallet") {
       // Check wallet balance
       const wallet = await Wallet.findOne({ where: { userId }, transaction });
-      if (!wallet || wallet.balance < totalAmount) {
+      if (!wallet) {
+        await transaction.rollback();
+        return res.status(404).json({
+          success: false,
+          message: "Wallet not found",
+        });
+      }
+
+      const walletBreakdown = getWalletBalanceBreakdown(wallet);
+
+      if (walletBreakdown.rechargeBalance < totalAmount) {
         await transaction.rollback();
         return res.status(402).json({
           success: false,
           message: "Insufficient wallet balance",
           required: totalAmount,
-          available: wallet?.balance || 0,
+          available: walletBreakdown.rechargeBalance,
         });
       }
 
-      // Deduct from wallet
+      const debitPlan = buildWalletDebitPlan(wallet, totalAmount, {
+        allowSignupBonusUsage: false,
+      });
+
+      // Deduct from wallet using only recharge balance.
       await wallet.update(
-        { balance: wallet.balance - totalAmount },
+        {
+          balance: debitPlan.nextBalance,
+          signupBonusBalance: debitPlan.nextSignupBonusBalance,
+          totalSpent: toAmount(wallet.totalSpent) + debitPlan.debitAmount,
+        },
         { transaction }
       );
 
@@ -267,12 +293,17 @@ exports.checkout = async (req, res) => {
           userId: userId,
           walletId: wallet.id,
           type: "debit",
-          amount: totalAmount,
+          amount: debitPlan.debitAmount,
+          paymentMethod: "manual",
           description: "Store order payment",
-          balanceBefore: wallet.balance,
-          balanceAfter: wallet.balance - totalAmount,
+          balanceBefore: debitPlan.previousBalance,
+          balanceAfter: debitPlan.nextBalance,
           status: "completed",
-          metadata: { orderType: "store_purchase" },
+          metadata: {
+            orderType: "store_purchase",
+            rechargeConsumed: debitPlan.rechargeConsumed,
+            signupBonusConsumed: debitPlan.signupBonusConsumed,
+          },
         },
         { transaction }
       );
@@ -1174,7 +1205,9 @@ exports.createRazorpayOrder = async (req, res) => {
       },
     };
 
+    console.log('[Backend-Store-Debug]', new Date().toISOString(), 'Creating Razorpay order with options:', razorpayOrderOptions);
     const razorpayOrder = await razorpay.orders.create(razorpayOrderOptions);
+    console.log('[Backend-Store-Debug]', new Date().toISOString(), 'Razorpay order created successfully:', razorpayOrder.id);
 
     return res.status(201).json({
       success: true,

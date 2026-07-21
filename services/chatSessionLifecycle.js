@@ -13,8 +13,11 @@ const {
 const {
   enqueueHumanConsultationInterestClassification,
 } = require("./interestQueueService");
-
-const PLATFORM_COMMISSION_PERCENTAGE = 10;
+const redis = require("../config/redis/redis");
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../utils/platformCommission");
+const { CHAT_BILLING_SOURCES } = require("./freeChatService");
 
 async function deleteSessionCreatedKundlis(session, transaction) {
   if (!session?.id || !session?.astrologerId) {
@@ -74,6 +77,10 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
       await deleteSessionCreatedKundlis(lockedSession, dbTransaction);
       await dbTransaction.commit();
       committed = true;
+
+      await redis.del(`user:busy:${lockedSession.userId}`);
+      await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
+
       return {
         endTime: lockedSession.endTime,
         currentMinutes: 0,
@@ -101,6 +108,9 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
       await dbTransaction.commit();
       committed = true;
 
+      await redis.del(`user:busy:${lockedSession.userId}`);
+      await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
+
       return {
         endTime,
         currentMinutes: 0,
@@ -118,7 +128,12 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
         : new Date();
     const startTime = new Date(lockedSession.startTime);
     const durationMs = endTime - startTime;
-    const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
+    const isFreeChatSession =
+      lockedSession.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT &&
+      Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10) > 0;
+    const currentMinutes = isFreeChatSession
+      ? Math.max(1, Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10))
+      : Math.max(1, Math.ceil(durationMs / (1000 * 60)));
     const pricePerMinute = parseFloat(lockedSession.pricePerMinute || 0);
     const currentCost = currentMinutes * pricePerMinute;
 
@@ -143,82 +158,90 @@ async function completeChatSessionWithBilling(session, io, options = {}) {
     let updatedWalletBalance = null;
     let updatedRechargeBalance = null;
 
-    const wallet = await Wallet.findOne({
-      where: { userId: lockedSession.userId },
-      transaction: dbTransaction,
-      lock: dbTransaction.LOCK.UPDATE,
-    });
+    if (!isFreeChatSession) {
+      const wallet = await Wallet.findOne({
+        where: { userId: lockedSession.userId },
+        transaction: dbTransaction,
+        lock: dbTransaction.LOCK.UPDATE,
+      });
 
-    if (wallet && currentCost > 0) {
-      const walletBreakdown = getWalletBalanceBreakdown(wallet);
-      billedAmount = Math.min(walletBreakdown.rechargeBalance, currentCost);
+      if (wallet && currentCost > 0) {
+        const walletBreakdown = getWalletBalanceBreakdown(wallet);
+        billedAmount = Math.min(walletBreakdown.rechargeBalance, currentCost);
 
-      if (billedAmount > 0) {
-        const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
-          allowSignupBonusUsage: false,
-        });
-        updatedWalletBalance = debitPlan.nextBalance;
-        updatedRechargeBalance = debitPlan.nextRechargeBalance;
+        if (billedAmount > 0) {
+          const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
+            allowSignupBonusUsage: false,
+          });
+          updatedWalletBalance = debitPlan.nextBalance;
+          updatedRechargeBalance = debitPlan.nextRechargeBalance;
 
-        await wallet.update(
-          {
-            balance: updatedWalletBalance,
-            signupBonusBalance: debitPlan.nextSignupBonusBalance,
-            totalSpent: parseFloat(wallet.totalSpent || 0) + billedAmount,
-          },
-          { transaction: dbTransaction }
-        );
-
-        await WalletTransaction.create(
-          {
-            userId: lockedSession.userId,
-            walletId: wallet.id,
-            amount: billedAmount,
-            type: "debit",
-            status: "completed",
-            description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
-            balanceBefore: debitPlan.previousBalance,
-            balanceAfter: updatedWalletBalance,
-            metadata: {
-              chatSessionId: lockedSession.id,
-              astrologerId: lockedSession.astrologerId,
-              durationMinutes: currentMinutes,
-              pricePerMinute,
-              rechargeConsumed: debitPlan.rechargeConsumed,
-              signupBonusConsumed: debitPlan.signupBonusConsumed,
+          await wallet.update(
+            {
+              balance: updatedWalletBalance,
+              signupBonusBalance: debitPlan.nextSignupBonusBalance,
+              totalSpent: parseFloat(wallet.totalSpent || 0) + billedAmount,
             },
-          },
-          { transaction: dbTransaction }
-        );
+            { transaction: dbTransaction }
+          );
 
-        // Chat sessions are reused per user+astrologer pair; create one earning per billed completion.
-        const platformCommission = billedAmount * (PLATFORM_COMMISSION_PERCENTAGE / 100);
-        const netEarning = billedAmount - platformCommission;
-
-        await AstrologerEarning.create(
-          {
-            astrologerId: lockedSession.astrologerId,
-            userId: lockedSession.userId,
-            sessionId: lockedSession.id,
-            sessionType: "chat",
-            consultationType: "chat",
-            durationMinutes: currentMinutes,
-            pricePerMinute,
-            totalAmount: billedAmount,
-            platformCommission,
-            commissionPercentage: PLATFORM_COMMISSION_PERCENTAGE,
-            netEarning,
-            paymentStatus: "pending",
-            sessionStartTime: startTime,
-            sessionEndTime: endTime,
-          },
-          { transaction: dbTransaction }
-        );
+          await WalletTransaction.create(
+            {
+              userId: lockedSession.userId,
+              walletId: wallet.id,
+              amount: billedAmount,
+              type: "debit",
+              status: "completed",
+              description: `Chat consultation with astrologer - ${currentMinutes} minutes`,
+              balanceBefore: debitPlan.previousBalance,
+              balanceAfter: updatedWalletBalance,
+              metadata: {
+                chatSessionId: lockedSession.id,
+                astrologerId: lockedSession.astrologerId,
+                durationMinutes: currentMinutes,
+                pricePerMinute,
+                rechargeConsumed: debitPlan.rechargeConsumed,
+                signupBonusConsumed: debitPlan.signupBonusConsumed,
+              },
+            },
+            { transaction: dbTransaction }
+          );
+        }
       }
+    }
+
+    const earningBaseAmount = isFreeChatSession ? 0 : billedAmount;
+    if (earningBaseAmount > 0) {
+      const platformCommission =
+        earningBaseAmount * (ASTROLOGER_PLATFORM_COMMISSION_PERCENT / 100);
+      const netEarning = earningBaseAmount - platformCommission;
+
+      await AstrologerEarning.create(
+        {
+          astrologerId: lockedSession.astrologerId,
+          userId: lockedSession.userId,
+          sessionId: lockedSession.id,
+          sessionType: "chat",
+          consultationType: "chat",
+          durationMinutes: currentMinutes,
+          pricePerMinute,
+          totalAmount: earningBaseAmount,
+          platformCommission,
+          commissionPercentage: ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+          netEarning,
+          paymentStatus: "pending",
+          sessionStartTime: startTime,
+          sessionEndTime: endTime,
+        },
+        { transaction: dbTransaction }
+      );
     }
 
     await dbTransaction.commit();
     committed = true;
+
+    await redis.del(`user:busy:${lockedSession.userId}`);
+    await redis.del(`astrologer:busy:${lockedSession.astrologerId}`);
 
     enqueueHumanConsultationInterestClassification({
       userId: lockedSession.userId,

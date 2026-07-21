@@ -440,6 +440,7 @@ const updateProfile = async (req, res) => {
   try {
     const astrologerId = req.user.id;
     const {
+      email,
       fullName,
       dateOfBirth,
       gender,
@@ -497,6 +498,24 @@ const updateProfile = async (req, res) => {
 
     // Update fields
     const updateData = {};
+    if (email !== undefined) {
+      const normalizedEmail = normalizeEmail(email);
+
+      if (normalizedEmail) {
+        const existingAstrologer = await Astrologer.findOne({
+          where: { email: normalizedEmail },
+        });
+
+        if (existingAstrologer && existingAstrologer.id !== astrologer.id) {
+          return res.status(400).json({
+            success: false,
+            message: "Email is already in use by another astrologer",
+          });
+        }
+      }
+
+      updateData.email = normalizedEmail || null;
+    }
     if (fullName) updateData.fullName = fullName;
     if (req.fileUrl) updateData.photo = req.fileUrl;
     if (dateOfBirth) updateData.dateOfBirth = dateOfBirth;
@@ -547,6 +566,8 @@ const updateProfile = async (req, res) => {
       message: "Profile updated successfully",
       astrologer: {
         id: astrologer.id,
+        phoneNumber: astrologer.phoneNumber,
+        email: astrologer.email,
         fullName: astrologer.fullName,
         photo: astrologer.photo,
         dateOfBirth: astrologer.dateOfBirth,
@@ -610,6 +631,18 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
+    const tokenSessionVersion = Number.isInteger(refreshPayload.sessionVersion)
+      ? refreshPayload.sessionVersion
+      : 0;
+
+    if (tokenSessionVersion !== (astrologer.sessionVersion || 0)) {
+      clearTokenCookieAstrologer(res);
+      return res.status(401).json({
+        success: false,
+        message: "Session expired on this device because you logged in elsewhere.",
+      });
+    }
+
     const authPayload = {
       id: astrologer.id,
       role: "astrologer",
@@ -661,6 +694,8 @@ const logout = async (req, res) => {
 const toggleOnlineStatus = async (req, res) => {
   try {
     const astrologerId = req.user.id;
+    const requestedStatus =
+      typeof req.body?.isOnline === "boolean" ? req.body.isOnline : null;
 
     const astrologer = await Astrologer.findByPk(astrologerId);
 
@@ -671,8 +706,9 @@ const toggleOnlineStatus = async (req, res) => {
       });
     }
 
-    // Toggle the status
-    const newStatus = !astrologer.isOnline;
+    // When the app sends an explicit target state, honor it directly.
+    const newStatus =
+      requestedStatus === null ? !astrologer.isOnline : requestedStatus;
     await astrologer.update({ isOnline: newStatus });
 
     // Send push notification to followers when astrologer goes online

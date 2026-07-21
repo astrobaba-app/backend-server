@@ -89,6 +89,22 @@ const AIChatSession = sequelize.define(
       allowNull: true,
       comment: "AI-usable wallet balance captured at session start",
     },
+    billingSource: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "wallet",
+      comment: "wallet or free_chat",
+    },
+    freeChatAllocationId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      comment: "Free chat allocation applied to this AI chat session",
+    },
+    freeChatMinutes: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      comment: "Allocated free chat minutes for this session",
+    },
     endReason: {
       type: DataTypes.STRING(80),
       allowNull: true,
@@ -120,6 +136,25 @@ const AIChatSession = sequelize.define(
       allowNull: true,
       defaultValue: [],
       comment: "Internal per-turn interest signals captured during AI chat for final cohort scoring",
+    },
+    feedbackRating: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      validate: {
+        min: 1,
+        max: 5,
+      },
+      comment: "Optional user rating captured after AI chat session ends",
+    },
+    feedbackReview: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      comment: "Optional user feedback text captured after AI chat session ends",
+    },
+    feedbackSubmittedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      comment: "When the user submitted post-chat AI feedback",
     },
   },
   {

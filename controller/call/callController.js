@@ -7,6 +7,9 @@ const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
 const agoraService = require("../../services/agoraService");
 const notificationService = require("../../services/notificationService");
 const { Op } = require("sequelize");
+const {
+  ASTROLOGER_PLATFORM_COMMISSION_PERCENT,
+} = require("../../utils/platformCommission");
 
 // Initiate call (User to Astrologer)
 const initiateCall = async (req, res) => {
@@ -389,6 +392,10 @@ const endCall = async (req, res) => {
       totalCost,
       status: "completed",
     });
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: callSession.astrologerId },
+    });
 
     // Process wallet transactions and astrologer earnings
     if (totalCost > 0) {
@@ -424,7 +431,7 @@ const endCall = async (req, res) => {
 
           // Credit to astrologer earnings
           const AstrologerEarning = require("../../model/astrologer/astrologerEarning");
-          const commissionPercentage = 10; // 10% platform commission
+          const commissionPercentage = ASTROLOGER_PLATFORM_COMMISSION_PERCENT;
           const platformCommission = deductionAmount * (commissionPercentage / 100);
           const netEarning = deductionAmount - platformCommission;
 

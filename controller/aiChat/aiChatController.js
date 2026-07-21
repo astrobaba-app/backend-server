@@ -22,16 +22,46 @@ const {
   normalizeClassificationPayload,
   parseInlineAiResponse,
 } = require("../../services/interestCohortService");
+const pushNotificationService = require("../../services/pushNotificationService");
 const {
   queueAiChatInterestFinalization,
 } = require("../../services/aiChatInterestService");
+const {
+  CHAT_BILLING_SOURCES,
+  buildFreeChatSessionFields,
+  consumeFreeChatAllocation,
+  getAvailableFreeChatAllocation,
+} = require("../../services/freeChatService");
 const {
   generateAiChatEngineResponse,
   upsertAiChatEngineKundliCache,
   clearAiChatEngineKundliCache,
 } = require("../../services/aiChatEngineClient");
+const {
+  getPendingChatFeedbackPrompt,
+  dismissPendingChatFeedbackPrompt,
+  getSessionDurationSeconds: getChatFeedbackPromptSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("../../services/chatFeedbackPromptService");
 
 const AI_CHAT_ENGINE_CACHE_FALLBACK_SESSIONS = new Set();
+const MIN_CHAT_FEEDBACK_SECONDS = 60;
+
+const getAiChatSessionDurationSeconds = (session) => {
+  const startMs = session?.startTime ? new Date(session.startTime).getTime() : NaN;
+  const endMs = session?.endTime ? new Date(session.endTime).getTime() : NaN;
+
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+    return Math.floor((endMs - startMs) / 1000);
+  }
+
+  const totalMinutes = Number(session?.totalMinutes || 0);
+  if (Number.isFinite(totalMinutes) && totalMinutes > 0) {
+    return Math.round(totalMinutes * 60);
+  }
+
+  return 0;
+};
 
 const cacheAiChatKundliContext = async (sessionId, kundli, userRequest) => {
   if (!sessionId || (!kundli && !userRequest)) return null;
@@ -109,6 +139,9 @@ const formatAiSession = (session) => ({
   totalCost: session.totalCost || 0,
   billedAmount: session.billedAmount || 0,
   pricePerMinute: session.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE,
+  billingSource: session.billingSource || CHAT_BILLING_SOURCES.WALLET,
+  freeChatAllocationId: session.freeChatAllocationId || null,
+  freeChatMinutes: session.freeChatMinutes || null,
   maxDurationSeconds: session.maxDurationSeconds,
   maxEndTime: session.maxEndTime,
   walletBalanceAtStart: session.walletBalanceAtStart,
@@ -157,6 +190,40 @@ const calculateAiWalletLimit = (balance, pricePerMinute) => {
   };
 };
 
+const aiChatInactivityTimers = new Map();
+const AI_CHAT_INACTIVITY_TIMEOUT_MS = parseInt(process.env.AI_CHAT_INACTIVITY_TIMEOUT_MS, 10) || 120000;
+
+const clearAiChatInactivityAutoEnd = (sessionId) => {
+  const timeout = aiChatInactivityTimers.get(sessionId);
+  if (timeout) {
+    clearTimeout(timeout);
+    aiChatInactivityTimers.delete(sessionId);
+  }
+};
+
+const scheduleAiChatInactivityAutoEnd = (session) => {
+  if (!session || !session.id) return;
+
+  if ((session.status || "active") !== "active") {
+    clearAiChatInactivityAutoEnd(session.id);
+    return;
+  }
+
+  clearAiChatInactivityAutoEnd(session.id);
+
+  const timeout = setTimeout(async () => {
+    aiChatInactivityTimers.delete(session.id);
+    console.log(`[AIChat] Auto-ending session ${session.id} due to inactivity`);
+    try {
+      await completeAiChatSessionWithBilling(session, "user_inactivity_timeout");
+    } catch (err) {
+      console.error(`[AIChat] Failed to auto-end session ${session.id}:`, err.message);
+    }
+  }, AI_CHAT_INACTIVITY_TIMEOUT_MS);
+
+  aiChatInactivityTimers.set(session.id, timeout);
+};
+
 const completeAiChatSessionWithBilling = async (
   session,
   reason = "user_ended_ai_chat"
@@ -165,6 +232,8 @@ const completeAiChatSessionWithBilling = async (
   let committed = false;
 
   try {
+    clearAiChatInactivityAutoEnd(session.id);
+
     const lockedSession = await AIChatSession.findByPk(session.id, {
       transaction: dbTransaction,
       lock: dbTransaction.LOCK.UPDATE,
@@ -194,7 +263,12 @@ const completeAiChatSessionWithBilling = async (
       ? new Date(lockedSession.startTime)
       : new Date(lockedSession.createdAt);
     const durationMs = Math.max(0, endTime - startTime);
-    const currentMinutes = Math.max(1, Math.ceil(durationMs / (1000 * 60)));
+    const isFreeChatSession =
+      lockedSession.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT &&
+      Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10) > 0;
+    const currentMinutes = isFreeChatSession
+      ? Math.max(1, Number.parseInt(String(lockedSession.freeChatMinutes || 0), 10))
+      : Math.max(1, Math.ceil(durationMs / (1000 * 60)));
     const pricePerMinute = toAmount(
       lockedSession.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE
     );
@@ -202,61 +276,64 @@ const completeAiChatSessionWithBilling = async (
     let billedAmount = 0;
     let updatedWalletBalance = null;
 
-    const wallet = await Wallet.findOne({
-      where: { userId: lockedSession.userId },
-      transaction: dbTransaction,
-      lock: dbTransaction.LOCK.UPDATE,
-    });
+    if (!isFreeChatSession) {
+      const wallet = await Wallet.findOne({
+        where: { userId: lockedSession.userId },
+        transaction: dbTransaction,
+        lock: dbTransaction.LOCK.UPDATE,
+      });
 
-    if (wallet && currentCost > 0) {
-      const walletBreakdown = getWalletBalanceBreakdown(wallet);
-      billedAmount = Math.min(walletBreakdown.balance, currentCost);
-      billedAmount = roundCurrency(billedAmount);
+      if (wallet && currentCost > 0) {
+        const walletBreakdown = getWalletBalanceBreakdown(wallet);
+        billedAmount = Math.min(walletBreakdown.balance, currentCost);
+        billedAmount = roundCurrency(billedAmount);
 
-      if (billedAmount > 0) {
-        const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
-          allowSignupBonusUsage: true,
-        });
-        updatedWalletBalance = debitPlan.nextBalance;
+        if (billedAmount > 0) {
+          const debitPlan = buildWalletDebitPlan(wallet, billedAmount, {
+            allowSignupBonusUsage: true,
+          });
+          updatedWalletBalance = debitPlan.nextBalance;
 
-        await wallet.update(
-          {
-            balance: debitPlan.nextBalance,
-            signupBonusBalance: debitPlan.nextSignupBonusBalance,
-            totalSpent: roundCurrency(toAmount(wallet.totalSpent) + billedAmount),
-          },
-          { transaction: dbTransaction }
-        );
-
-        await WalletTransaction.create(
-          {
-            userId: lockedSession.userId,
-            walletId: wallet.id,
-            amount: billedAmount,
-            type: "debit",
-            status: "completed",
-            paymentMethod: "manual",
-            description: `AI chat usage - ${currentMinutes} minutes`,
-            balanceBefore: debitPlan.previousBalance,
-            balanceAfter: debitPlan.nextBalance,
-            metadata: {
-              usageType: "ai_chat",
-              aiChatSessionId: lockedSession.id,
-              astrologerId: lockedSession.astrologerId,
-              durationMinutes: currentMinutes,
-              pricePerMinute,
-              rechargeConsumed: debitPlan.rechargeConsumed,
-              signupBonusConsumed: debitPlan.signupBonusConsumed,
-              endReason: reason,
+          await wallet.update(
+            {
+              balance: debitPlan.nextBalance,
+              signupBonusBalance: debitPlan.nextSignupBonusBalance,
+              totalSpent: roundCurrency(toAmount(wallet.totalSpent) + billedAmount),
             },
-          },
-          { transaction: dbTransaction }
-        );
+            { transaction: dbTransaction }
+          );
+
+          await WalletTransaction.create(
+            {
+              userId: lockedSession.userId,
+              walletId: wallet.id,
+              amount: billedAmount,
+              type: "debit",
+              status: "completed",
+              paymentMethod: "manual",
+              description: `Chat Usage - ${currentMinutes} minutes`,
+              balanceBefore: debitPlan.previousBalance,
+              balanceAfter: debitPlan.nextBalance,
+              metadata: {
+                usageType: "ai_chat",
+                aiChatSessionId: lockedSession.id,
+                astrologerId: lockedSession.astrologerId,
+                durationMinutes: currentMinutes,
+                pricePerMinute,
+                rechargeConsumed: debitPlan.rechargeConsumed,
+                signupBonusConsumed: debitPlan.signupBonusConsumed,
+                endReason: reason,
+              },
+            },
+            { transaction: dbTransaction }
+          );
+        }
       }
     }
 
     await lockedSession.update(
       {
+        isActive: false,
         status: reason === "cancelled" ? "cancelled" : "completed",
         endTime,
         totalMinutes: currentMinutes,
@@ -305,13 +382,17 @@ const enforceActiveAiSession = async (session) => {
   }
 
   if (session.maxEndTime && new Date(session.maxEndTime).getTime() <= Date.now()) {
+    const reason =
+      session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT
+        ? "free_chat_time_limit"
+        : "wallet_time_limit";
     const finalized = await completeAiChatSessionWithBilling(
       session,
-      "wallet_time_limit"
+      reason
     );
     return {
       ended: true,
-      reason: "wallet_time_limit",
+      reason,
       billing: finalized.billing,
       session: finalized.session,
     };
@@ -1511,25 +1592,58 @@ const createChatSession = async (req, res) => {
   try {
     const userId = req.user.id;
     const { astrologerId } = req.body; // Get astrologer ID from request
+    const dbTransaction = await sequelize.transaction();
 
-    // Create new session with astrologer ID
-    const session = await AIChatSession.create({
-      userId,
-      astrologerId: astrologerId || null,
-      title: "New Chat",
-      isActive: true,
-      lastMessageAt: new Date(),
-    });
+    try {
+      const freeChatAllocation = await getAvailableFreeChatAllocation(
+        userId,
+        "ai",
+        dbTransaction
+      );
+      const now = new Date();
+      const session = await AIChatSession.create(
+        {
+          userId,
+          astrologerId: astrologerId || null,
+          title: "New Chat",
+          isActive: true,
+          status: "active",
+          startTime: now,
+          lastMessageAt: now,
+          pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+          ...(freeChatAllocation
+            ? buildFreeChatSessionFields(freeChatAllocation, now)
+            : {}),
+        },
+        { transaction: dbTransaction }
+      );
 
-    res.status(201).json({
-      success: true,
-      message: "Chat session created successfully",
-      session: {
-        id: session.id,
-        title: session.title,
-        createdAt: session.createdAt,
-      },
-    });
+      if (freeChatAllocation) {
+        await consumeFreeChatAllocation(
+          {
+            allocationId: freeChatAllocation.id,
+            userId,
+            sessionId: session.id,
+            sessionKind: "ai_chat",
+            chatType: "ai",
+          },
+          dbTransaction
+        );
+      }
+
+      await dbTransaction.commit();
+      scheduleAiChatInactivityAutoEnd(session);
+
+      return res.status(201).json({
+        success: true,
+        message: "Chat session created successfully",
+        session: formatAiSession(session),
+        astrologer: buildPublicAiAstrologerProfile(session.astrologerId),
+      });
+    } catch (error) {
+      await dbTransaction.rollback();
+      throw error;
+    }
   } catch (error) {
     console.error("Create chat session error:", error);
     res.status(500).json({
@@ -1543,38 +1657,83 @@ const createChatSession = async (req, res) => {
 const AI_ASTROLOGER_PUBLIC_DETAILS = {
   "ai-astrologer-devansh": {
     subtitle: "Timing predictions, career, education, family",
-    rating: 4.9,
-    experienceLabel: "AI Expert",
+    rating: 4.3,
+    experienceLabel: "7+ Years",
     languages: ["Hindi", "English", "Hinglish"],
     availability: "Available now",
-    responseTime: "Replies instantly",
-    bio: "A structured AI astrologer for timing-based guidance around career, education, family matters and long-term direction.",
+    responseTime: "Replies Fast",
+    bio: "A structured astrologer for timing-based guidance around career, education, family matters and long-term direction.",
   },
   "ai-astrologer-ritika": {
     subtitle: "Love, marriage, relationship and emotional clarity",
-    rating: 4.8,
-    experienceLabel: "AI Expert",
+    rating: 4.7,
+    experienceLabel: "6+ Years",
     languages: ["Hindi", "English", "Hinglish"],
     availability: "Available now",
-    responseTime: "Replies instantly",
-    bio: "A warm AI guide for relationship questions, emotional clarity, marriage concerns and intuitive reflection.",
+    responseTime: "Replies Fast",
+    bio: "A warm guide for relationship questions, emotional clarity, marriage concerns and intuitive reflection.",
   },
   "ai-astrologer-arjun": {
     subtitle: "Wealth, health indicators and energy alignment",
-    rating: 4.8,
-    experienceLabel: "AI Expert",
+    rating: 4.5,
+    experienceLabel: "9+ Years",
     languages: ["Hindi", "English", "Hinglish"],
     availability: "Available now",
-    responseTime: "Replies instantly",
-    bio: "A practical AI astrologer focused on wealth patterns, numerology, vastu, palmistry and everyday remedies.",
+    responseTime: "Replies Fast",
+    bio: "A practical astrologer focused on wealth patterns, numerology, vastu, palmistry and everyday remedies.",
   },
 };
 
-const buildPublicAiAstrologerProfile = (astrologerId) => {
+const getAiAstrologerAggregateStats = async (astrologerId) => {
+  const [totalConsultations, feedbackSessions] = await Promise.all([
+    AIChatSession.count({
+      where: {
+        astrologerId,
+        status: "completed",
+      },
+    }),
+    AIChatSession.findAll({
+      where: {
+        astrologerId,
+        feedbackSubmittedAt: { [Op.ne]: null },
+        feedbackRating: { [Op.ne]: null },
+      },
+      attributes: ["feedbackRating"],
+    }),
+  ]);
+
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 };
+  let totalRating = 0;
+
+  feedbackSessions.forEach((session) => {
+    const rating = Number(session.feedbackRating || 0);
+    if (distribution[rating] !== undefined) {
+      distribution[rating] += 1;
+      totalRating += rating;
+    }
+  });
+
+  const reviewCount = feedbackSessions.length;
+
+  return {
+    totalConsultations,
+    reviewCount,
+    averageRating: reviewCount
+      ? Number((totalRating / reviewCount).toFixed(1))
+      : 0,
+    distribution,
+  };
+};
+
+const buildPublicAiAstrologerProfile = (astrologerId, aggregateStats = null) => {
   const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
   const publicDetails =
     AI_ASTROLOGER_PUBLIC_DETAILS[astrologerId] ||
     AI_ASTROLOGER_PUBLIC_DETAILS["ai-astrologer-devansh"];
+  const rating =
+    aggregateStats && aggregateStats.reviewCount > 0
+      ? aggregateStats.averageRating
+      : publicDetails.rating;
 
   return {
     id: astrologerId || "ai-astrologer-devansh",
@@ -1583,6 +1742,8 @@ const buildPublicAiAstrologerProfile = (astrologerId) => {
     expertise: profile.skills.join(", "),
     skills: profile.skills,
     pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+    rating,
+    totalConsultations: aggregateStats?.totalConsultations || 0,
     ...publicDetails,
   };
 };
@@ -1597,42 +1758,76 @@ const createChatSessionV2 = async (req, res) => {
     const userId = req.user.id;
     const { astrologerId } = req.body;
     const pricePerMinute = AI_CHAT_PRICE_PER_MINUTE;
-    const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
-
-    if (breakdown.balance < pricePerMinute) {
-      await dbTransaction.rollback();
-      return res.status(402).json({
-        success: false,
-        code: "INSUFFICIENT_AI_BALANCE",
-        message: "Out of balance. Recharge more to chat with AI astrologer.",
-        wallet: {
-          balance: breakdown.balance,
-          aiUsableBalance: breakdown.balance,
-          required: pricePerMinute,
-        },
-      });
-    }
-
-    const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
     const now = new Date();
-    const session = await AIChatSession.create(
-      {
-        userId,
-        astrologerId: astrologerId || null,
-        title: "New Chat",
-        isActive: true,
-        status: "active",
-        startTime: now,
-        lastMessageAt: now,
-        pricePerMinute,
+    const freeChatAllocation = await getAvailableFreeChatAllocation(
+      userId,
+      "ai",
+      dbTransaction
+    );
+    let sessionPayload = {
+      userId,
+      astrologerId: astrologerId || null,
+      title: "New Chat",
+      isActive: true,
+      status: "active",
+      startTime: now,
+      lastMessageAt: now,
+      pricePerMinute,
+    };
+
+    if (freeChatAllocation) {
+      sessionPayload = {
+        ...sessionPayload,
+        ...buildFreeChatSessionFields(freeChatAllocation, now),
+        walletBalanceAtStart: null,
+      };
+    } else {
+      const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
+
+      if (breakdown.balance < pricePerMinute) {
+        await dbTransaction.rollback();
+        return res.status(402).json({
+          success: false,
+          code: "INSUFFICIENT_AI_BALANCE",
+          message: "Out of balance. Recharge more to chat with AI astrologer.",
+          wallet: {
+            balance: breakdown.balance,
+            aiUsableBalance: breakdown.balance,
+            required: pricePerMinute,
+          },
+        });
+      }
+
+      const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
+      sessionPayload = {
+        ...sessionPayload,
         maxDurationSeconds: walletLimit.maxDurationSeconds,
         maxEndTime: walletLimit.maxEndTime,
         walletBalanceAtStart: walletLimit.walletBalanceAtStart,
-      },
+      };
+    }
+
+    const session = await AIChatSession.create(
+      sessionPayload,
       { transaction: dbTransaction }
     );
 
+    if (freeChatAllocation) {
+      await consumeFreeChatAllocation(
+        {
+          allocationId: freeChatAllocation.id,
+          userId,
+          sessionId: session.id,
+          sessionKind: "ai_chat",
+          chatType: "ai",
+        },
+        dbTransaction
+      );
+    }
+
     await dbTransaction.commit();
+
+    scheduleAiChatInactivityAutoEnd(session);
 
     return res.status(201).json({
       success: true,
@@ -1653,11 +1848,16 @@ const createChatSessionV2 = async (req, res) => {
 
 const getAiAstrologersV2 = async (req, res) => {
   try {
+    const astrologers = await Promise.all(
+      Object.keys(ASTROLOGER_PROFILES).map(async (astrologerId) => {
+        const aggregateStats = await getAiAstrologerAggregateStats(astrologerId);
+        return buildPublicAiAstrologerProfile(astrologerId, aggregateStats);
+      })
+    );
+
     return res.status(200).json({
       success: true,
-      astrologers: Object.keys(ASTROLOGER_PROFILES).map((astrologerId) =>
-        buildPublicAiAstrologerProfile(astrologerId)
-      ),
+      astrologers,
     });
   } catch (error) {
     console.error("Get AI astrologers v2 error:", error);
@@ -1718,7 +1918,9 @@ const sendMessage = async (req, res) => {
           message:
             sessionState.reason === "wallet_time_limit"
               ? "Out of balance. Recharge more to continue chatting."
-              : "This AI chat has ended.",
+              : sessionState.reason === "free_chat_time_limit"
+                ? "Your free chat session has ended."
+                : "This AI chat has ended.",
           session: formatAiSession(sessionState.session),
           billing: sessionState.billing,
         });
@@ -2010,7 +2212,13 @@ IMPORTANT: When user asks about "today", "now", "this year", "current", etc., us
   }
 };
 
-const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
+const finalizeAiChatSession = async ({
+  userId,
+  sessionId,
+  successMessage,
+  endReason = "user_ended_ai_chat",
+  nextStatus = "completed",
+}) => {
   const session = await AIChatSession.findOne({
     where: { id: sessionId, userId },
   });
@@ -2025,7 +2233,29 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
     };
   }
 
-  await session.update({ isActive: false });
+  await session.update({
+    isActive: false,
+    status: nextStatus,
+    endReason: endReason || session.endReason || null,
+    endTime: session.endTime || new Date(),
+  });
+  if (nextStatus === "completed") {
+    await queueChatFeedbackPrompt({
+      userId: session.userId,
+      targetType: "ai",
+      astrologerId: session.astrologerId,
+      astrologerName: null,
+      sessionId: session.id,
+      durationSeconds: getChatFeedbackPromptSessionDurationSeconds({
+        ...session.toJSON(),
+        endTime: session.endTime || new Date(),
+        status: nextStatus,
+        endReason: endReason || session.endReason || null,
+      }),
+    }).catch((promptError) => {
+      console.error("AI chat feedback prompt queue error:", promptError);
+    });
+  }
   await clearAiChatKundliContext(sessionId);
   console.log("[InterestCohort][AI] AI chat session ended");
   queueAiChatInterestFinalization({
@@ -2039,6 +2269,7 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
     body: {
       success: true,
       message: successMessage,
+      session: formatAiSession(session),
     },
   };
 };
@@ -2048,10 +2279,13 @@ const finalizeAiChatSession = async ({ userId, sessionId, successMessage }) => {
  */
 const endChatSession = async (req, res) => {
   try {
+    const { reason = "user_ended_ai_chat" } = req.body || {};
     const result = await finalizeAiChatSession({
       userId: req.user.id,
       sessionId: req.params.sessionId,
       successMessage: "Chat session ended successfully",
+      endReason: reason,
+      nextStatus: "completed",
     });
 
     return res.status(result.status).json(result.body);
@@ -2336,7 +2570,6 @@ const getAiChatHistoryV2 = async (req, res) => {
     const { rows: sessions, count } = await AIChatSession.findAndCountAll({
       where: {
         userId,
-        isActive: true,
         status: { [Op.ne]: "active" },
       },
       order: [["endTime", "DESC"], ["lastMessageAt", "DESC"], ["createdAt", "DESC"]],
@@ -2495,6 +2728,23 @@ const endChatSessionV2 = async (req, res) => {
     }
 
     const finalized = await completeAiChatSessionWithBilling(session, reason);
+    const finalizedSessionSnapshot = finalized?.session?.toJSON
+      ? finalized.session.toJSON()
+      : finalized.session;
+
+    if ((finalizedSessionSnapshot?.status || "") === "completed") {
+      await queueChatFeedbackPrompt({
+        userId,
+        targetType: "ai",
+        astrologerId: finalizedSessionSnapshot?.astrologerId,
+        astrologerName: null,
+        sessionId: finalizedSessionSnapshot?.id || sessionId,
+        durationSeconds:
+          getChatFeedbackPromptSessionDurationSeconds(finalizedSessionSnapshot),
+      }).catch((promptError) => {
+        console.error("AI chat feedback prompt v2 queue error:", promptError);
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -2683,6 +2933,7 @@ const getAiChatQueueStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       sessionId,
+      sessionStatus: session.status,
       queues: {
         sent: Number(sentCount || 0),
         receive: Number(receiveCount || 0),
@@ -2750,12 +3001,25 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
     }
   }
 
+  let quotedMessageText = null;
+  if (userMessage.replyToMessageId) {
+    try {
+      const replyToMsg = await AIChatMessage.findOne({ where: { id: userMessage.replyToMessageId } });
+      if (replyToMsg) {
+        quotedMessageText = replyToMsg.content;
+      }
+    } catch (err) {
+      console.error("Failed to load replied message context:", err.message);
+    }
+  }
+
   const publicAstrologer = buildPublicAiAstrologerProfile(session.astrologerId);
   let engineResponse = null;
   try {
     engineResponse = await generateAiChatEngineResponse({
       session_id: job.sessionId,
       user_message: userMessage.content,
+      reply_to_content: quotedMessageText,
       astrologer: {
         id: publicAstrologer.id,
         name: publicAstrologer.name,
@@ -2839,6 +3103,12 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
       (userMessage.content.length > 50 ? "..." : "");
   }
   await session.update(updatePayload);
+
+  pushNotificationService.sendToUser(job.userId, {
+    title: "Astrologer replied",
+    body: "Open to see full message",
+    data: { type: "ai_chat_message", sessionId: String(job.sessionId) },
+  }).catch(err => console.error("Push error (ai chat):", err));
 
   return {
     createdAssistantMessages,
@@ -3064,7 +3334,9 @@ const sendMessageV3 = async (req, res) => {
         message:
           sessionState.reason === "wallet_time_limit"
             ? "Out of balance. Recharge more to continue chatting."
-            : "This AI chat has ended.",
+            : sessionState.reason === "free_chat_time_limit"
+              ? "Your free chat session has ended."
+              : "This AI chat has ended.",
         session: formatAiSession(sessionState.session),
         billing: sessionState.billing,
       });
@@ -3076,6 +3348,7 @@ const sendMessageV3 = async (req, res) => {
       sessionId,
       userId,
       message: trimmedMessage,
+      replyToMessageId: requestBody.replyToMessageId || null,
       queuedAt: Date.now(),
     };
     const sentQueueKey = aiChatSentQueueKey(sessionId);
@@ -3087,6 +3360,7 @@ const sendMessageV3 = async (req, res) => {
       sessionId,
       role: "user",
       content: trimmedMessage,
+      replyToMessageId: requestBody.replyToMessageId || null,
     });
 
     await removeQueuedPayload(sentQueueKey, sentQueuePayload);
@@ -3103,6 +3377,9 @@ const sendMessageV3 = async (req, res) => {
     };
 
     await redis.rpush(receiveQueueKey, JSON.stringify(receiveQueuePayload));
+
+    scheduleAiChatInactivityAutoEnd(session);
+
     setImmediate(() => {
       void processAiChatReceiveQueue(sessionId);
     });
@@ -3116,6 +3393,7 @@ const sendMessageV3 = async (req, res) => {
         sessionId: userMessage.sessionId,
         role: "user",
         content: userMessage.content,
+        replyToMessageId: userMessage.replyToMessageId,
         createdAt: userMessage.createdAt,
         updatedAt: userMessage.updatedAt,
       },
@@ -3150,6 +3428,8 @@ const deleteChatSession = async (req, res) => {
       userId: req.user.id,
       sessionId: req.params.sessionId,
       successMessage: "Chat session deleted successfully",
+      endReason: "user_deleted_ai_chat",
+      nextStatus: "cancelled",
     });
 
     return res.status(result.status).json(result.body);
@@ -3373,6 +3653,211 @@ const greetSession = async (req, res) => {
   }
 };
 
+const getSessionFeedback = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+      attributes: [
+        "id",
+        "astrologerId",
+        "isActive",
+        "status",
+        "startTime",
+        "endTime",
+        "totalMinutes",
+        "feedbackRating",
+        "feedbackReview",
+        "feedbackSubmittedAt",
+      ],
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      feedback:
+        session.feedbackRating
+          ? {
+              rating: session.feedbackRating,
+              review: session.feedbackReview || "",
+              submittedAt: session.feedbackSubmittedAt,
+            }
+          : null,
+    });
+  } catch (error) {
+    console.error("Get AI chat session feedback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI chat feedback",
+      error: error.message,
+    });
+  }
+};
+
+const getAiAstrologerReviews = async (req, res) => {
+  try {
+    const { astrologerId } = req.params;
+    const { page = 1, limit = 10 } = req.query;
+    const parsedPage = Math.max(1, Number.parseInt(String(page), 10) || 1);
+    const parsedLimit = Math.max(1, Number.parseInt(String(limit), 10) || 10);
+    const offset = (parsedPage - 1) * parsedLimit;
+    const aggregateStats = await getAiAstrologerAggregateStats(astrologerId);
+
+    const { rows: sessions, count } = await AIChatSession.findAndCountAll({
+      where: {
+        astrologerId,
+        feedbackSubmittedAt: { [Op.ne]: null },
+        feedbackRating: { [Op.ne]: null },
+      },
+      attributes: [
+        "id",
+        "userId",
+        "feedbackRating",
+        "feedbackReview",
+        "feedbackSubmittedAt",
+        "createdAt",
+      ],
+      order: [["feedbackSubmittedAt", "DESC"]],
+      limit: parsedLimit,
+      offset,
+    });
+
+    const userIds = [...new Set(sessions.map((session) => session.userId).filter(Boolean))];
+    const users = userIds.length
+      ? await User.findAll({
+          where: { id: userIds },
+          attributes: ["id", "fullName"],
+        })
+      : [];
+
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const recentReviews = sessions.map((session) => ({
+      id: session.id,
+      rating: Number(session.feedbackRating || 0),
+      review: session.feedbackReview || "",
+      createdAt: session.feedbackSubmittedAt || session.createdAt,
+      user: userMap.get(session.userId)
+        ? {
+            id: session.userId,
+            fullName: userMap.get(session.userId).fullName || "User",
+          }
+        : {
+            id: session.userId,
+            fullName: "User",
+          },
+    }));
+
+    return res.status(200).json({
+      success: true,
+      ratingStats: {
+        total: aggregateStats.reviewCount,
+        average: aggregateStats.averageRating,
+        distribution: aggregateStats.distribution,
+      },
+      totalConsultations: aggregateStats.totalConsultations,
+      pagination: {
+        total: count,
+        page: parsedPage,
+        limit: parsedLimit,
+        totalPages: Math.ceil(count / parsedLimit),
+      },
+      reviews: recentReviews,
+    });
+  } catch (error) {
+    console.error("Get AI astrologer reviews error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch AI astrologer reviews",
+      error: error.message,
+    });
+  }
+};
+
+const submitSessionFeedback = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+    const { rating, review } = req.body;
+
+    const parsedRating = Number(rating);
+    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: "Rating must be an integer between 1 and 5",
+      });
+    }
+
+    const reviewText = typeof review === "string" ? review.trim() : "";
+    if (reviewText.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback must be 1000 characters or less",
+      });
+    }
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    if ((session.status || "active") === "active") {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback can be submitted only after the chat ends",
+      });
+    }
+
+    if (session.isActive) {
+      await session.update({ isActive: false });
+    }
+
+    const durationSeconds = getAiChatSessionDurationSeconds(session);
+    if (durationSeconds < MIN_CHAT_FEEDBACK_SECONDS) {
+      return res.status(400).json({
+        success: false,
+        message: "Feedback is available only for chats longer than one minute",
+      });
+    }
+
+    await session.update({
+      feedbackRating: parsedRating,
+      feedbackReview: reviewText || null,
+      feedbackSubmittedAt: new Date(),
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "AI chat feedback submitted successfully",
+      feedback: {
+        rating: session.feedbackRating,
+        review: session.feedbackReview || "",
+        submittedAt: session.feedbackSubmittedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Submit AI chat session feedback error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to submit AI chat feedback",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createChatSession,
   createChatSessionV2,
@@ -3390,8 +3875,11 @@ module.exports = {
   clearChatSession,
   attachKundliToSession,
   greetSession,
+  getAiAstrologerReviews,
+  getSessionFeedback,
   getAutoFollowUpQuestion,
   getAiChatQueueStatus,
+  submitSessionFeedback,
   startAiChatQueueWorker,
 };
 

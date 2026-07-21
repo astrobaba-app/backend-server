@@ -11,8 +11,9 @@ const crypto = require("crypto");
 const axios = require("axios");
 const { Op } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
+const redis = require("../../config/redis/redis");
 const { enqueuePalmJob } = require("../../services/palmQueueService");
-const { checkPalmEngineHealth } = require("../../services/palmReadingService");
+const { checkPalmEngineHealth, validatePalmImageQuality } = require("../../services/palmReadingService");
 const { generatePalmReportPDF } = require("../../services/palmReportPdfService");
 const { uploadPdfBuffer } = require("../../config/uploadConfig/cloudinaryPdfUpload");
 const { findOrCreateUserRequestForPalm } = require("../../services/palmKundliContextService");
@@ -143,12 +144,42 @@ const toMaxRetries = (value) => {
 
 const PALM_READY_MESSAGE =
   "Your palm report request has been accepted. Your report will be available within 24-48 hours. Check status in Profile > Reports.";
+const PALM_IMAGE_VALIDATION_LIMIT = 4;
+const PALM_IMAGE_VALIDATION_TTL_SECONDS = 2 * 60 * 60;
+const PALM_IMAGE_VALIDATION_LIMIT_MESSAGE =
+  "You have reached the image quality check limit for now. Please try again with a new palm image after 2 hours.";
+
+const getPalmImageValidationLimitKey = (userId) => `palm:image-validation:failed:${userId}`;
 
 const sendPdfBuffer = (res, pdfBuffer, fileName) => {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   res.setHeader("Content-Length", pdfBuffer.length);
   return res.send(pdfBuffer);
+};
+
+const incrementPalmImageValidationFailures = async (userId) => {
+  const key = getPalmImageValidationLimitKey(userId);
+  const count = await redis.incr(key);
+  if (count === 1) {
+    await redis.expire(key, PALM_IMAGE_VALIDATION_TTL_SECONDS);
+  }
+  return Number(count || 0);
+};
+
+const clearPalmImageValidationFailures = async (userId) => {
+  await redis.del(getPalmImageValidationLimitKey(userId));
+};
+
+const assertPalmImageValidationWindow = async (userId) => {
+  const key = getPalmImageValidationLimitKey(userId);
+  const currentCount = Number((await redis.get(key)) || 0);
+  if (currentCount >= PALM_IMAGE_VALIDATION_LIMIT) {
+    const error = new Error(PALM_IMAGE_VALIDATION_LIMIT_MESSAGE);
+    error.statusCode = 429;
+    error.code = "palm_image_validation_limit_reached";
+    throw error;
+  }
 };
 
 const proxyPdfDownload = async (res, pdfUrl, fileName) => {
@@ -512,6 +543,85 @@ const createPalmReadingOrder = async (req, res) => {
   }
 };
 
+const validatePalmReadingImages = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const uploadedPalmImages = req.uploadedPalmImages || [];
+
+    if (!uploadedPalmImages.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Please upload at least one palm image.",
+      });
+    }
+
+    await assertPalmImageValidationWindow(userId);
+
+    const dominantHand = String(req.body.dominantHand || "right").trim().toLowerCase();
+    if (dominantHand !== "right") {
+      return res.status(400).json({
+        success: false,
+        message: "Please upload a clear right-hand palm image for this report.",
+      });
+    }
+
+    const health = await checkPalmEngineHealth();
+    if (!health.ok) {
+      return res.status(503).json({
+        success: false,
+        message: "Palm image quality check is temporarily unavailable. Please try again shortly.",
+      });
+    }
+
+    const validationResult = await validatePalmImageQuality({
+      imageUrls: uploadedPalmImages.map((item) => item.url),
+      metadata: {
+        userId,
+        dominantHand: "right",
+        imageHash: uploadedPalmImages[0]?.hash || null,
+      },
+    });
+
+    if (!validationResult.ok) {
+      const failedAttempts = await incrementPalmImageValidationFailures(userId);
+      const remainingAttempts = Math.max(0, PALM_IMAGE_VALIDATION_LIMIT - failedAttempts);
+      const limitReached = failedAttempts >= PALM_IMAGE_VALIDATION_LIMIT;
+
+      return res.status(limitReached ? 429 : 422).json({
+        success: false,
+        code: validationResult.failure.code,
+        message: limitReached
+          ? PALM_IMAGE_VALIDATION_LIMIT_MESSAGE
+          : validationResult.failure.message,
+        palmImageValidation: {
+          passed: false,
+          reason: validationResult.failure.reason,
+          remainingAttempts,
+          retryAfterHours: limitReached ? 2 : undefined,
+        },
+      });
+    }
+
+    await clearPalmImageValidationFailures(userId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Palm image quality check passed.",
+      palmImageValidation: {
+        passed: true,
+        qualityScore: Number(validationResult.qualityChecks?.quality_score || 0),
+        blurScore: Number(validationResult.qualityChecks?.blur_score || 0),
+        remainingAttempts: PALM_IMAGE_VALIDATION_LIMIT,
+      },
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to validate palm image quality",
+    });
+  }
+};
+
 const payPalmOrderWithWallet = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -846,6 +956,7 @@ const getPalmReadingHistory = async (req, res) => {
             stage: item.aiJob.stage,
             progress: item.aiJob.progress,
             stageMessage: item.aiJob.stageMessage,
+            error: item.aiJob.error || null,
             completedAt: item.aiJob.completedAt,
           }
         : null,
@@ -1087,6 +1198,7 @@ const getPalmReadingTrustIndicator = async (_req, res) => {
 
 module.exports = {
   createPalmReadingOrder,
+  validatePalmReadingImages,
   payPalmOrderWithWallet,
   createPalmOrderRazorpay,
   verifyPalmOrderRazorpay,

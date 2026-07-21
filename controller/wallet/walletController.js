@@ -5,6 +5,7 @@ const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
 const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
 const Razorpay = require("razorpay");
+const { fetchExactRazorpayInstrument } = require("../../services/razorpayInstrumentHelper");
 const crypto = require("crypto");
 const { Op } = require("sequelize");
 const {
@@ -26,7 +27,9 @@ const razorpay = new Razorpay({
 
 
 
-const paymentDebug = (...args) => {};
+const paymentDebug = (...args) => {
+  console.log('[Backend-Wallet-Debug]', new Date().toISOString(), ...args);
+};
 
 const toAmount = (value) => {
   const parsed = parseFloat(value ?? 0);
@@ -57,8 +60,8 @@ const buildWalletPayload = (wallet) => {
 
   return {
     balance,
-    signupBonusBalance,
-    humanChatBalance: rechargeBalance,
+    signupBonusBalance: 0,
+    humanChatBalance: balance,
     aiUsableBalance: balance,
     totalRecharge: toAmount(wallet?.totalRecharge),
     totalSpent: toAmount(wallet?.totalSpent),
@@ -127,6 +130,8 @@ const createRechargeOrder = async (req, res) => {
     let finalAmount = rechargeAmount;
     let discountAmount = 0;
     let appliedCoupon = null;
+    let extraCreditAmount = 0;
+    let isExtraCredit = false;
 
     // If coupon code provided, validate and apply
     if (couponCode) {
@@ -191,23 +196,31 @@ const createRechargeOrder = async (req, res) => {
         });
       }
 
-      // Calculate discount
-      if (coupon.discountType === "percentage") {
-        discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
-        if (coupon.maxDiscount) {
-          discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
-        }
+      isExtraCredit = coupon.code.toUpperCase() === 'GRAHO20' || coupon.code.toUpperCase().endsWith('_EXTRA');
+
+      if (isExtraCredit) {
+        extraCreditAmount = parseFloat(coupon.discountValue);
       } else {
-        discountAmount = parseFloat(coupon.discountValue);
+        // Calculate discount
+        if (coupon.discountType === "percentage") {
+          discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
+          if (coupon.maxDiscount) {
+            discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+          }
+        } else {
+          discountAmount = parseFloat(coupon.discountValue);
+        }
+
+        discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
       }
 
-      discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
       finalAmount = roundMoney(rechargeAmount - discountAmount);
 
       appliedCoupon = {
         id: coupon.id,
         code: coupon.code,
         discountAmount,
+        extraCreditAmount,
       };
     }
 
@@ -219,6 +232,10 @@ const createRechargeOrder = async (req, res) => {
 
     const gstAmount = roundMoney(finalAmount * WALLET_RECHARGE_GST_RATE);
     const payableAmount = roundMoney(finalAmount + gstAmount);
+    
+    // Total wallet credit includes any extra credit from cashback coupons
+    const totalWalletCredit = roundMoney(finalAmount + extraCreditAmount);
+
     const normalizedBillingState =
       typeof billingState === "string" && billingState.trim()
         ? billingState.trim()
@@ -241,7 +258,8 @@ const createRechargeOrder = async (req, res) => {
         purpose: "wallet_recharge",
         originalAmount: rechargeAmount,
         discountAmount: discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount: extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         gstRate: WALLET_RECHARGE_GST_RATE,
         gstAmount,
         payableAmount,
@@ -263,18 +281,21 @@ const createRechargeOrder = async (req, res) => {
     const transaction = await WalletTransaction.create({
       userId,
       walletId: wallet.id,
-      amount: finalAmount, // Store final amount to be credited
+      amount: totalWalletCredit, // Store total amount to be credited including bonus
       type: "credit",
       status: "pending",
       paymentMethod: "razorpay",
       razorpayOrderId: razorpayOrder.id,
-      description: couponCode 
-        ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
-        : `Wallet recharge of ₹${amount}`,
+      description: isExtraCredit 
+        ? `Wallet recharge of ₹${amount} (+₹${extraCreditAmount} bonus with ${couponCode})`
+        : couponCode 
+          ? `Wallet recharge of ₹${amount} (₹${discountAmount} discount with ${couponCode})`
+          : `Wallet recharge of ₹${amount}`,
       metadata: {
         originalAmount: rechargeAmount,
         discountAmount,
-        walletCreditAmount: finalAmount,
+        extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
         gstRate: WALLET_RECHARGE_GST_RATE,
         gstAmount,
         payableAmount,
@@ -445,14 +466,36 @@ const verifyRecharge = async (req, res) => {
       await transaction.update(
         {
           status: "completed",
+          paymentMethod: "razorpay",
           razorpayPaymentId: razorpay_payment_id,
           razorpaySignature: razorpay_signature,
           balanceAfter: newBalance,
+          metadata: {
+            ...transaction.metadata,
+            gatewayPaymentMethod: "Razorpay Gateway",
+          },
         },
         { transaction: dbTransaction }
       );
 
       await dbTransaction.commit();
+
+      // Asynchronously fetch exact payment instrument (Google Pay, PhonePe, Card) AFTER commit
+      // so it never slows down or holds database locks during the user's recharge flow
+      try {
+        const exactMethod = await fetchExactRazorpayInstrument(razorpay_payment_id);
+        if (exactMethod && exactMethod !== "Razorpay Gateway") {
+          await transaction.update({
+            paymentMethod: "razorpay",
+            metadata: {
+              ...transaction.metadata,
+              gatewayPaymentMethod: exactMethod,
+            },
+          });
+        }
+      } catch (instrumentErr) {
+        paymentDebug("Non-blocking error fetching exact Razorpay instrument:", instrumentErr.message);
+      }
 
       // Update coupon usage if exists
       const couponUsage = await CouponUsage.findOne({
@@ -515,7 +558,12 @@ const getTransactionHistory = async (req, res) => {
 
     const where = { userId };
     if (type) where.type = type;
-    if (status) where.status = status;
+    if (status) {
+      where.status = status;
+    } else {
+      // Exclude pending prefetch placeholders from user transaction history
+      where.status = { [Op.ne]: "pending" };
+    }
 
     const offset = (page - 1) * limit;
 
@@ -533,6 +581,7 @@ const getTransactionHistory = async (req, res) => {
         "description",
         "balanceBefore",
         "balanceAfter",
+        "metadata",
         "createdAt",
       ],
     });
@@ -766,11 +815,264 @@ const deductForAIUsage = async (req, res) => {
   }
 };
 
+const cancelRechargeOrder = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { orderId, reason } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required to cancel recharge",
+      });
+    }
+
+    const transaction = await WalletTransaction.findOne({
+      where: { razorpayOrderId: orderId, userId },
+    });
+
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: "Transaction not found",
+      });
+    }
+
+    if (transaction.status === "pending") {
+      await transaction.update({
+        status: "failed",
+        metadata: {
+          ...transaction.metadata,
+          cancelled: true,
+          cancelledAt: new Date().toISOString(),
+          cancelReason: reason || "User cancelled checkout",
+        },
+      });
+
+      const couponUsage = await CouponUsage.findOne({
+        where: {
+          orderId,
+          userId,
+          status: "pending",
+        },
+      });
+
+      if (couponUsage) {
+        await couponUsage.update({ status: "failed" });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Recharge order marked as cancelled",
+    });
+  } catch (error) {
+    console.error("Cancel recharge order error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel recharge order",
+      error: error.message,
+    });
+  }
+};
+
+const createRechargeQrOrder = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.userId || req.user;
+    const { amount, couponCode, billingState } = req.body;
+    const rechargeAmount = roundMoney(toAmount(amount));
+
+    if (!rechargeAmount || rechargeAmount < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid recharge amount. Minimum recharge is ₹1",
+      });
+    }
+
+    let discountAmount = 0;
+    let finalAmount = rechargeAmount;
+    let appliedCoupon = null;
+
+    let extraCreditAmount = 0;
+    let isExtraCredit = false;
+
+    if (couponCode) {
+      const coupon = await Coupon.findOne({
+        where: { code: couponCode.trim().toUpperCase(), isActive: true },
+      });
+      if (coupon) {
+        isExtraCredit = coupon.code.toUpperCase() === 'GRAHO20' || coupon.code.toUpperCase().endsWith('_EXTRA');
+
+        if (isExtraCredit) {
+          extraCreditAmount = parseFloat(coupon.discountValue);
+        } else {
+          if (coupon.discountType === "percentage") {
+            discountAmount = (rechargeAmount * parseFloat(coupon.discountValue)) / 100;
+            if (coupon.maxDiscount) {
+              discountAmount = Math.min(discountAmount, parseFloat(coupon.maxDiscount));
+            }
+          } else {
+            discountAmount = parseFloat(coupon.discountValue);
+          }
+          discountAmount = roundMoney(Math.min(discountAmount, rechargeAmount));
+        }
+        finalAmount = roundMoney(rechargeAmount - discountAmount);
+        appliedCoupon = { id: coupon.id, code: coupon.code, discountAmount, extraCreditAmount };
+      }
+    }
+
+    let wallet = await Wallet.findOne({ where: { userId } });
+    if (!wallet) {
+      wallet = await Wallet.create({ userId });
+    }
+
+    const gstAmount = roundMoney(finalAmount * WALLET_RECHARGE_GST_RATE);
+    const payableAmount = roundMoney(finalAmount + gstAmount);
+    const totalWalletCredit = roundMoney(finalAmount + extraCreditAmount);
+    
+    const timestamp = Date.now().toString().slice(-8);
+    const userIdShort = userId.toString().slice(0, 8);
+    const receipt = `rcpt_qr_${userIdShort}_${timestamp}`;
+
+    const options = {
+      amount: Math.round(payableAmount * 100),
+      currency: "INR",
+      receipt: receipt,
+      notes: {
+        userId,
+        walletId: wallet.id,
+        purpose: "wallet_recharge_qr",
+        originalAmount: rechargeAmount,
+        discountAmount: discountAmount,
+        extraCreditAmount: extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
+        payableAmount,
+      },
+    };
+
+    const razorpayOrder = await razorpay.orders.create(options);
+
+    const transaction = await WalletTransaction.create({
+      userId,
+      walletId: wallet.id,
+      amount: totalWalletCredit,
+      type: "credit",
+      status: "pending",
+      paymentMethod: "razorpay",
+      razorpayOrderId: razorpayOrder.id,
+      description: isExtraCredit 
+        ? `Wallet recharge QR of ₹${rechargeAmount} (+₹${extraCreditAmount} bonus)`
+        : `Wallet recharge QR of ₹${rechargeAmount}`,
+      metadata: {
+        gatewayPaymentMethod: "upi_qr",
+        originalAmount: rechargeAmount,
+        discountAmount,
+        extraCreditAmount,
+        walletCreditAmount: totalWalletCredit,
+        payableAmount,
+      },
+      balanceBefore: wallet.balance,
+    });
+
+    if (appliedCoupon) {
+      await CouponUsage.create({
+        couponId: appliedCoupon.id,
+        userId,
+        rechargeAmount,
+        discountAmount,
+        finalAmount: payableAmount,
+        orderId: razorpayOrder.id,
+        status: "pending",
+      });
+    }
+
+    const upiUri = `upi://pay?pa=graho.razorpay@hdfcbank&pn=Graho&am=${payableAmount}&cu=INR&tr=${transaction.id}&tn=Graho_Wallet_Recharge`;
+    let imageUrl = null;
+
+    try {
+      if (razorpay.qrCode && typeof razorpay.qrCode.create === "function") {
+        const qr = await razorpay.qrCode.create({
+          type: "upi_qr",
+          name: "Graho Wallet Recharge",
+          usage: "single_use",
+          fixed_amount: true,
+          payment_amount: Math.round(payableAmount * 100),
+          description: `Wallet recharge ₹${payableAmount}`,
+          notes: { orderId: razorpayOrder.id, transactionId: transaction.id },
+        });
+        if (qr && qr.image_url) {
+          imageUrl = qr.image_url;
+        }
+      }
+    } catch (e) {
+      const errReason =
+        e?.error?.description || e?.description || e?.message || JSON.stringify(e);
+      console.log("Razorpay qrCode.create fallback to upiUri due to API/Test-mode note:", errReason);
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "QR recharge order created successfully",
+      data: {
+        orderId: razorpayOrder.id,
+        transactionId: transaction.id,
+        payableAmount,
+        walletCreditAmount: finalAmount,
+        upiUri,
+        imageUrl,
+      },
+    });
+  } catch (error) {
+    console.error("Create recharge QR order error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create QR order",
+      error: error.message,
+    });
+  }
+};
+
+const checkRechargeStatus = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.userId || req.user;
+    const { transactionId } = req.query;
+    if (!transactionId) {
+      return res.status(400).json({ success: false, message: "transactionId required" });
+    }
+    const transaction = await WalletTransaction.findOne({
+      where: { id: transactionId, userId },
+    });
+    if (!transaction) {
+      return res.status(404).json({ success: false, message: "Transaction not found" });
+    }
+    if (transaction.status === "completed" || transaction.status === "success") {
+      const wallet = await Wallet.findOne({ where: { userId } });
+      return res.status(200).json({
+        success: true,
+        status: "success",
+        transaction: {
+          id: transaction.id,
+          amount: parseFloat(transaction.amount),
+          status: transaction.status,
+        },
+        wallet: wallet ? buildWalletPayload(wallet) : null,
+      });
+    }
+    return res.status(200).json({ success: true, status: transaction.status });
+  } catch (error) {
+    console.error("Check recharge status error:", error);
+    return res.status(500).json({ success: false, message: "Check status error" });
+  }
+};
+
 module.exports = {
   getWalletBalance,
   createRechargeOrder,
   verifyRecharge,
+  cancelRechargeOrder,
   getTransactionHistory,
   deductFromWallet,
   deductForAIUsage,
+  createRechargeQrOrder,
+  checkRechargeStatus,
 };

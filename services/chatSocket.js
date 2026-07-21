@@ -1,6 +1,7 @@
 const { parse } = require("cookie");
 const { validateToken } = require("./authService");
 const ChatSession = require("../model/chat/chatSession");
+const ChatHistorySession = require("../model/chat/chatHistorySession");
 const ChatMessage = require("../model/chat/chatMessage");
 const Astrologer = require("../model/astrologer/astrologer");
 const User = require("../model/user/userAuth");
@@ -10,14 +11,23 @@ const {
   completeChatSessionWithBilling,
 } = require("./chatSessionLifecycle");
 const { queueArchiveAndDeleteSession } = require("./chatHistoryService");
+const {
+  getSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("./chatFeedbackPromptService");
 const { getWalletBalanceBreakdown } = require("./walletService");
 const pushNotificationService = require("./pushNotificationService");
+const {
+  CHAT_BILLING_SOURCES,
+  calculateFreeChatWindow,
+} = require("./freeChatService");
 
 const SESSION_ACCESS_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_MESSAGE_INACTIVITY_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const userInactivityTimers = new Map();
 const walletLimitTimers = new Map();
+const disconnectTimers = new Map();
 const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
 
 /**
@@ -48,7 +58,32 @@ function authenticateSocket(socket, next) {
       return next(new Error("Invalid or expired token"));
     }
 
-    socket.user = payload; // { id, role }
+    // Optional: Validate sessionVersion for astrologers asynchronously
+    if (payload.role === "astrologer") {
+      Astrologer.findByPk(payload.id, { attributes: ["id", "sessionVersion"] })
+        .then((astrologer) => {
+          if (!astrologer) {
+            return next(new Error("Astrologer not found"));
+          }
+          const tokenVersion = Number.isInteger(payload.sessionVersion) ? payload.sessionVersion : 0;
+          if (tokenVersion !== (astrologer.sessionVersion || 0)) {
+            return next(new Error("Session expired due to login on another device"));
+          }
+          socket.data = socket.data || {};
+          socket.data.user = payload;
+          socket.user = payload;
+          next();
+        })
+        .catch((err) => {
+          console.error("Socket session validation error:", err);
+          next(new Error("Authentication failed"));
+        });
+      return;
+    }
+
+    socket.data = socket.data || {};
+    socket.data.user = payload;
+    socket.user = payload; // Keep for backward compatibility
     next();
   } catch (error) {
     console.error("Socket auth error:", error);
@@ -80,6 +115,9 @@ function toSessionAccessSnapshot(session) {
     astrologerId: json.astrologerId,
     requestStatus: json.requestStatus,
     status: json.status,
+    billingSource: json.billingSource || CHAT_BILLING_SOURCES.WALLET,
+    freeChatAllocationId: json.freeChatAllocationId || null,
+    freeChatMinutes: json.freeChatMinutes || null,
     maxDurationSeconds: json.maxDurationSeconds || null,
     maxEndTime: json.maxEndTime || null,
     walletBalanceAtApproval: json.walletBalanceAtApproval || null,
@@ -198,6 +236,45 @@ function emitChatMessage(io, session, payload) {
     .emit("message:new", payload);
 }
 
+async function autoEndSessionForDisconnect(io, sessionId, disconnectedRole = "user") {
+  try {
+    const session = await ChatSession.findByPk(sessionId);
+    if (!session || session.status !== "active" || session.requestStatus !== "approved") {
+      return;
+    }
+
+    const billing = await completeChatSessionWithBilling(session, io);
+    await session.reload();
+
+    emitChatEnded(io, session, {
+      endedBy: "system",
+      reason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
+      currentMinutes: billing.currentMinutes,
+      currentCost: billing.currentCost,
+      totalMinutes: billing.totalMinutes,
+      totalCost: billing.totalCost,
+      billedAmount: billing.billedAmount,
+    });
+
+    io.to(getUserRoom(session.userId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "user"),
+    });
+
+    io.to(getAstrologerRoom(session.astrologerId)).emit("chat:updated", {
+      sessionId: session.id,
+      session: mapSession(session, "astrologer"),
+    });
+
+    queueArchiveAndDeleteSession(session.id, {
+      endReason: disconnectedRole === "astrologer" ? "astrologer_disconnected" : "user_disconnected",
+      billedAmount: billing.billedAmount,
+    });
+  } catch (error) {
+    console.error("auto end chat disconnect error:", error);
+  }
+}
+
 async function autoEndSessionForUserInactivity(io, sessionId) {
   clearUserInactivityAutoEnd(sessionId);
 
@@ -248,11 +325,15 @@ async function endSessionForWalletTimeLimit(io, session) {
   await session.reload();
   clearUserInactivityAutoEnd(session.id);
   clearWalletLimitAutoEnd(session.id);
+  const endReason =
+    session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT
+      ? "free_chat_time_limit"
+      : "wallet_time_limit";
 
   if (io) {
     emitChatEnded(io, session, {
       endedBy: "system",
-      reason: "wallet_time_limit",
+      reason: endReason,
       currentMinutes: billing.currentMinutes,
       currentCost: billing.currentCost,
       totalMinutes: billing.totalMinutes,
@@ -274,7 +355,7 @@ async function endSessionForWalletTimeLimit(io, session) {
   }
 
   queueArchiveAndDeleteSession(session.id, {
-    endReason: "wallet_time_limit",
+    endReason,
     billedAmount: billing.billedAmount,
   });
 
@@ -454,6 +535,9 @@ function mapSession(session, viewerRole) {
     totalMinutes: json.totalMinutes,
     totalCost: json.totalCost,
     pricePerMinute: json.pricePerMinute,
+    billingSource: json.billingSource || CHAT_BILLING_SOURCES.WALLET,
+    freeChatAllocationId: json.freeChatAllocationId || null,
+    freeChatMinutes: json.freeChatMinutes || null,
     maxDurationSeconds: json.maxDurationSeconds || null,
     maxEndTime: json.maxEndTime || null,
     walletBalanceAtApproval: json.walletBalanceAtApproval || null,
@@ -541,6 +625,8 @@ async function createAndBroadcastMessage({
     message: messagePayload,
   });
 
+  
+
   // Update chat lists for both sides
   io.to(getUserRoom(session.userId)).emit("chat:updated", {
     sessionId: session.id,
@@ -603,7 +689,18 @@ function initializeChatSocket(io) {
   scheduleExistingWalletLimitSessions(io);
 
   io.on("connection", (socket) => {
-    const { id: authId, role } = socket?.user;
+    const userPayload = socket?.data?.user || socket?.user || {};
+    const { id: authId, role } = userPayload;
+    if (!authId) {
+      console.warn("[Socket.IO] Connection rejected: user authId is missing on socket", { 
+        hasDataUser: !!socket?.data?.user, 
+        hasSocketUser: !!socket?.user, 
+        auth: socket?.handshake?.auth 
+      });
+      socket.disconnect(true);
+      return;
+    }
+
     const isAstrologer = role === "astrologer";
     socket.data.sessionAccessCache = new Map();
 
@@ -630,7 +727,36 @@ function initializeChatSocket(io) {
         });
 
         if (!sessionAccess) {
+          // Fallback: Check if the session was archived (e.g., due to grace period expiration)
+          const archivedSession = await ChatHistorySession.findOne({
+            where: { sourceSessionId: sessionId },
+          });
+
+          if (archivedSession && (archivedSession.userId === authId || archivedSession.astrologerId === authId)) {
+            socket.emit("chat:ended", {
+              sessionId: sessionId,
+              endedBy: "system",
+              reason: archivedSession.endReason || "session_ended",
+            });
+
+            socket.emit("chat:updated", {
+              sessionId: sessionId,
+              session: {
+                ...mapSession(archivedSession, isAstrologer ? "astrologer" : "user"),
+                archived: true,
+                status: archivedSession.status || "completed",
+              },
+            });
+          }
           return;
+        }
+
+        socket.data.activeSessionId = sessionId;
+        const timerKey = `${sessionId}_${authId}`;
+        if (disconnectTimers.has(timerKey)) {
+          clearTimeout(disconnectTimers.get(timerKey));
+          disconnectTimers.delete(timerKey);
+          console.log(`[Socket.IO] Cleared disconnect timer for ${timerKey}`);
         }
 
         socket.join(getSessionRoom(sessionId));
@@ -764,18 +890,11 @@ function initializeChatSocket(io) {
             if (walletBreakdown.rechargeBalance <= 0) {
               await endSessionForInsufficientBalance(io, session);
 
-              const isBonusOnlyBalance =
-                walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
-
               if (callback) {
                 callback({
                   success: false,
-                  error: isBonusOnlyBalance
-                    ? "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers."
-                    : "Insufficient wallet balance. Chat ended.",
-                  code: isBonusOnlyBalance
-                    ? "RECHARGE_REQUIRED_FOR_HUMAN_CHAT"
-                    : "INSUFFICIENT_BALANCE",
+                  error: "Insufficient wallet balance. Chat ended.",
+                  code: "INSUFFICIENT_BALANCE",
                 });
               }
               return;
@@ -921,6 +1040,17 @@ function initializeChatSocket(io) {
           billedAmount: billing.billedAmount,
         });
 
+        await queueChatFeedbackPrompt({
+          userId: session.userId,
+          targetType: "real",
+          astrologerId: session.astrologerId,
+          astrologerName: null,
+          sessionId: session.id,
+          durationSeconds: getSessionDurationSeconds(session),
+        }).catch((promptError) => {
+          console.error("Real chat feedback prompt socket queue error:", promptError);
+        });
+
         if (callback) {
           callback({
             success: true,
@@ -966,32 +1096,43 @@ function initializeChatSocket(io) {
         if (!session || session.astrologerId !== authId) return;
 
         const approvalStartTime = new Date();
-        const wallet = await Wallet.findOne({ where: { userId: session.userId } });
-        const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
         const pricePerMinute = parseFloat(session.pricePerMinute || 0);
+        const isFreeChatSession =
+          session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT;
+        let walletLimit = null;
 
-        if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
-          if (callback) {
-            callback({
-              success: false,
-              error:
-                "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.",
-              code: "RECHARGE_REQUIRED_FOR_HUMAN_CHAT",
-              wallet: {
-                balance: walletBreakdown.balance,
-                signupBonusBalance: walletBreakdown.signupBonusBalance,
-                humanChatBalance: walletBreakdown.rechargeBalance,
-              },
-            });
+        if (isFreeChatSession) {
+          walletLimit = calculateFreeChatWindow(
+            session.freeChatMinutes || 1,
+            approvalStartTime
+          );
+        } else {
+          const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+          const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+
+          if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
+              if (callback) {
+                callback({
+                  success: false,
+                  error:
+                    "Insufficient wallet balance. Recharge to start or continue this chat.",
+                  code: "INSUFFICIENT_BALANCE",
+                  wallet: {
+                    balance: walletBreakdown.balance,
+                    signupBonusBalance: 0,
+                    humanChatBalance: walletBreakdown.balance,
+                  },
+                });
+              }
+            return;
           }
-          return;
-        }
 
-        const walletLimit = calculateWalletLimitedChatTime({
-          rechargeBalance: walletBreakdown.rechargeBalance,
-          pricePerMinute,
-          startTime: approvalStartTime,
-        });
+          walletLimit = calculateWalletLimitedChatTime({
+            rechargeBalance: walletBreakdown.rechargeBalance,
+            pricePerMinute,
+            startTime: approvalStartTime,
+          });
+        }
 
         await session.update({
           requestStatus: "approved",
@@ -1000,7 +1141,9 @@ function initializeChatSocket(io) {
           endTime: null,
           maxDurationSeconds: walletLimit.maxDurationSeconds,
           maxEndTime: walletLimit.maxEndTime,
-          walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
+          walletBalanceAtApproval: isFreeChatSession
+            ? null
+            : walletLimit.walletBalanceAtApproval,
         });
         await session.reload();
 
@@ -1117,6 +1260,20 @@ function initializeChatSocket(io) {
     socket.on("disconnect", () => {
       // Do not clear inactivity timers globally here; they are session-level
       // and should continue even if one client disconnects temporarily.
+
+      const { activeSessionId } = socket.data;
+      if (activeSessionId) {
+        const timerKey = `${activeSessionId}_${authId}`;
+        console.log(`[Socket.IO] User disconnected, starting ${process.env.GRACE_PERIOD_TIMEOUT/1000}s grace period for ${timerKey}`);
+        
+        const timer = setTimeout(() => {
+          console.log(`[Socket.IO] Grace period expired for ${timerKey}, ending session`);
+          disconnectTimers.delete(timerKey);
+          autoEndSessionForDisconnect(io, activeSessionId, isAstrologer ? "astrologer" : "user");
+        }, process.env.GRACE_PERIOD_TIMEOUT);
+        
+        disconnectTimers.set(timerKey, timer);
+      }
     });
   });
 }

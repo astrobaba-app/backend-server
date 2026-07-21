@@ -16,7 +16,9 @@ const {
   createRefreshToken,
 } = require("../../services/authService");
 const setTokenCookie = require("../../services/setTokenCookie");
-const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  grantWelcomeFreeChatForUser,
+} = require("../../services/freeChatService");
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const {
   handleNewUserOnboarding,
@@ -155,18 +157,20 @@ const completeGoogleLogin = async (res, user, isNewUser) => {
     invalidateTotalUsers: isNewUser,
   });
 
-  let bonusInfo = null;
+  let welcomeFreeChatInfo = null;
   if (isNewUser) {
     try {
-      const bonusResult = await applySignupBonus(user.id, "google");
-      if (bonusResult.bonusApplied) {
-        bonusInfo = {
-          amount: bonusResult.amount,
-          message: bonusResult.message,
-        };
-      }
+      const welcomeGrant = await grantWelcomeFreeChatForUser(user.id, {
+        loginMethod: "google",
+      });
+      const grantedMinutes = welcomeGrant.minutes || 2;
+      welcomeFreeChatInfo = {
+        minutes: grantedMinutes,
+        applicableChatType: "ai",
+        message: "Talk to an astrologer for free.",
+      };
     } catch (error) {
-      console.error("Failed to apply signup bonus:", error);
+      console.error("Failed to grant welcome free chat:", error);
     }
 
     try {
@@ -183,7 +187,8 @@ const completeGoogleLogin = async (res, user, isNewUser) => {
     token,
     middlewareToken,
     refreshToken,
-    bonusInfo,
+    bonusInfo: null,
+    welcomeFreeChatInfo,
     profileIncomplete: !user.isOnboarded,
   };
 };
@@ -397,7 +402,7 @@ const googleMobileLogin = async (req, res) => {
       name: profile.name,
       email: profile.email,
     });
-    const { token, middlewareToken, bonusInfo, profileIncomplete } =
+    const { token, middlewareToken, welcomeFreeChatInfo, profileIncomplete } =
       await completeGoogleLogin(res, user, isNewUser);
 
     return res.status(200).json({
@@ -406,7 +411,8 @@ const googleMobileLogin = async (req, res) => {
       isNewUser: profileIncomplete,
       token,
       middlewareToken,
-      bonusInfo,
+      bonusInfo: null,
+      welcomeFreeChatInfo,
       user: buildUserPayload(user),
     });
   } catch (error) {

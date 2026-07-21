@@ -14,10 +14,48 @@ const {
   subscribeWebPush,
   unsubscribeWebPush,
 } = require("../../controller/notification/notificationController");
+const {
+  getAstrologerNotifications,
+  getAstrologerUnreadCount,
+  markAstrologerNotificationAsRead,
+  markAllAstrologerNotificationsAsRead,
+  deleteAstrologerNotification,
+} = require("../../controller/notification/astrologerNotificationController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 
 router.get("/push/public-key", getWebPushPublicKey);
+
+router.get(
+  "/astrologer",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  getAstrologerNotifications
+);
+router.get(
+  "/astrologer/unread-count",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  getAstrologerUnreadCount
+);
+router.patch(
+  "/astrologer/read-all",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  markAllAstrologerNotificationsAsRead
+);
+router.patch(
+  "/astrologer/:notificationId/read",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  markAstrologerNotificationAsRead
+);
+router.delete(
+  "/astrologer/:notificationId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["astrologer"]),
+  deleteAstrologerNotification
+);
 
 // All routes require user authentication
 router.get("/", checkForAuthenticationCookie(), getNotifications);

@@ -53,6 +53,8 @@ const MSG91_MOBILE_OTP_TEMPLATE_ID = String(
   process.env.MSG91_MOBILE_OTP_TEMPLATE_ID || ""
 ).trim();
 const DUMMY_ASTROLOGER_PHONE = "8112590071";
+const DUMMY_USER_PHONE = "8112590072";
+const DUMMY_OTP = "1111";
 
 let workerStarted = false;
 let processing = false;
@@ -99,8 +101,11 @@ const getVerifyAttemptsKey = ({ actorType, mobile }) =>
 const getVerifyLimitKey = ({ actorType, mobile, window }) =>
   `${actorType}:otp:verify:${window}:${mobile}`;
 
-const isUnlimitedDummyAstrologerOtp = ({ actorType, mobile }) =>
-  actorType === "astrologer" && mobile === DUMMY_ASTROLOGER_PHONE;
+const isUnlimitedDummyOtp = ({ actorType, mobile }) =>
+  (actorType === "astrologer" && mobile === DUMMY_ASTROLOGER_PHONE) ||
+  (actorType === "user" && mobile === DUMMY_USER_PHONE);
+
+const isUnlimitedDummyAstrologerOtp = isUnlimitedDummyOtp;
 
 const incrementWindowLimit = async ({ key, ttlSeconds, limit, message }) => {
   const requestCount = await redis.incr(key);
@@ -117,7 +122,7 @@ const incrementWindowLimit = async ({ key, ttlSeconds, limit, message }) => {
 };
 
 const checkOtpSendLimits = async ({ actorType, mobile }) => {
-  if (isUnlimitedDummyAstrologerOtp({ actorType, mobile })) {
+  if (isUnlimitedDummyOtp({ actorType, mobile })) {
     return;
   }
 
@@ -144,7 +149,7 @@ const checkOtpSendLimits = async ({ actorType, mobile }) => {
 };
 
 const checkOtpVerifyLimits = async ({ actorType, mobile }) => {
-  if (isUnlimitedDummyAstrologerOtp({ actorType, mobile })) {
+  if (isUnlimitedDummyOtp({ actorType, mobile })) {
     return;
   }
 
@@ -200,7 +205,7 @@ const createAndQueueOtp = async ({ actorType, mobile, templateId, includeAppHash
     createdAt: Date.now(),
   });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
- // console.log("[OTPQueue] OTP queued", { actorType, mobile, otp });
+  console.log("[OTPQueue] OTP queued", { actorType, mobile, otp });
   await enqueueOtp({ actorType, mobile, otp, templateId, includeAppHash });
 };
 
@@ -212,6 +217,7 @@ const createStoredOtp = async ({ actorType, mobile, otp }) => {
     mobile,
     createdAt: Date.now(),
   });
+ console.log("[OTPQueue] OTP stored", { actorType, mobile, otp });
   await redis.del(getVerifyAttemptsKey({ actorType, mobile }));
 };
 
@@ -232,10 +238,14 @@ const createAndQueueMobileOtp = async ({ actorType, mobile }) => {
   });
 };
 
-const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
+const verifyQueuedOtp = async ({ actorType, mobile, otp, deleteOtp = true }) => {
   const otpKey = getOtpKey({ actorType, mobile });
   const verifyAttemptsKey = getVerifyAttemptsKey({ actorType, mobile });
   await checkOtpVerifyLimits({ actorType, mobile });
+
+  if (isUnlimitedDummyOtp({ actorType, mobile }) && otp === DUMMY_OTP) {
+    return true;
+  }
 
   const storedData = parseRedisValue(await redis.get(otpKey));
 
@@ -245,8 +255,10 @@ const verifyQueuedOtp = async ({ actorType, mobile, otp }) => {
     throw error;
   }
 
-  await redis.del(otpKey);
-  await redis.del(verifyAttemptsKey);
+  if (deleteOtp) {
+    await redis.del(otpKey);
+    await redis.del(verifyAttemptsKey);
+  }
   return true;
 };
 

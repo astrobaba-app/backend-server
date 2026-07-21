@@ -28,10 +28,19 @@ const {
   getOpenAIRequestLogs,
 } = require("../../controller/admin/adminController");
 const {
-  getSignupBonusSettings,
-  updateSignupBonusSettings,
-  toggleSignupBonus,
-} = require("../../controller/admin/signupBonusController");
+  sendAstrologerNotification,
+  getAstrologerBroadcastHistory,
+  resendAstrologerBroadcast,
+} = require("../../controller/admin/adminAstrologerNotificationController");
+const {
+  getHomeCardSettings,
+  updateHomeCardSettings,
+  toggleHomeCard,
+} = require("../../controller/admin/homeCardController");
+const {
+  getShareSettingsAdmin,
+  updateShareSettingsAdmin,
+} = require("../../controller/admin/shareSettingsController");
 const {
   getAstrologerPayoutRequests,
   markPayoutRequestPaid,
@@ -67,6 +76,11 @@ const {
   getPalmFailureCandidates,
   cleanupPalmQueue,
 } = require("../../controller/admin/palmRefundAdminController");
+const {
+  getAdminFreeChatAllocations,
+  grantAdminFreeChatAllocations,
+  revokeAdminFreeChatAllocation,
+} = require("../../controller/admin/freeChatAdminController");
 const {
   createJob,
   getAdminJobs,
@@ -200,6 +214,24 @@ router.put(
   updateUserWhatsappChatLimit
 );
 router.get(
+  "/free-chat-allocations",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/grant",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  grantAdminFreeChatAllocations
+);
+router.post(
+  "/free-chat-allocations/:allocationId/revoke",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  revokeAdminFreeChatAllocation
+);
+router.get(
   "/astrologers",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
@@ -231,17 +263,35 @@ router.post(
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   broadcastNotification
 );
+router.post(
+  "/astrologer-notifications",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  sendAstrologerNotification
+);
 router.get(
   "/broadcast-history",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getBroadcastHistory
 );
+router.get(
+  "/astrologer-notifications/history",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getAstrologerBroadcastHistory
+);
 router.post(
   "/broadcast-resend/:logId",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   resendBroadcast
+);
+router.post(
+  "/astrologer-notifications/resend/:logId",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  resendAstrologerBroadcast
 );
 
 router.get(
@@ -306,24 +356,38 @@ router.delete(
   deleteScheduledNotificationBatch
 );
 
-// Signup bonus settings routes
+// Home card settings routes
 router.get(
-  "/signup-bonus/settings",
+  "/home-card/settings",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  getSignupBonusSettings
+  getHomeCardSettings
 );
 router.put(
-  "/signup-bonus/settings",
+  "/home-card/settings",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  updateSignupBonusSettings
+  updateHomeCardSettings
 );
 router.post(
-  "/signup-bonus/toggle",
+  "/home-card/toggle",
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
-  toggleSignupBonus
+  toggleHomeCard
+);
+
+// App Share Visibility settings routes
+router.get(
+  "/share-settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  getShareSettingsAdmin
+);
+router.put(
+  "/share-settings",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  updateShareSettingsAdmin
 );
 
 // WhatsApp auth settings routes

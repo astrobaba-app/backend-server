@@ -5,6 +5,7 @@ const ChatHistoryMessage = require("../../model/chat/chatHistoryMessage");
 const User = require("../../model/user/userAuth");
 const Astrologer = require("../../model/astrologer/astrologer");
 const Wallet = require("../../model/wallet/wallet");
+const { sequelize } = require("../../dbConnection/dbConfig");
 const { Op } = require("sequelize");
 const webPushService = require("../../services/webPushService");
 const pushNotificationService = require("../../services/pushNotificationService");
@@ -15,6 +16,17 @@ const {
   queueArchiveAndDeleteSession,
 } = require("../../services/chatHistoryService");
 const { getWalletBalanceBreakdown } = require("../../services/walletService");
+const {
+  CHAT_BILLING_SOURCES,
+  calculateFreeChatWindow,
+  consumeFreeChatAllocation,
+  getAvailableFreeChatAllocation,
+} = require("../../services/freeChatService");
+const redis = require("../../config/redis/redis");
+const {
+  getSessionDurationSeconds,
+  queueChatFeedbackPrompt,
+} = require("../../services/chatFeedbackPromptService");
 
 const CHAT_REQUEST_TIMEOUT_SECONDS = 60;
 const CHAT_END_REASON_ALLOWLIST = new Set([
@@ -23,7 +35,7 @@ const CHAT_END_REASON_ALLOWLIST = new Set([
 ]);
 const HUMAN_CHAT_RECHARGE_REQUIRED_CODE = "RECHARGE_REQUIRED_FOR_HUMAN_CHAT";
 const HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE =
-  "Signup bonus is only for AI astrologer chat. Recharge wallet to chat with human astrologers.";
+  "Insufficient wallet balance. Recharge to start or continue this chat.";
 const ASTROLOGER_CHAT_USER_ATTRIBUTES = [
   "id",
   "fullName",
@@ -288,33 +300,103 @@ const startChatSession = async (req, res) => {
       });
     }
 
-    const wallet = await Wallet.findOne({ where: { userId } });
-    const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
-    const requiredBalance = parseFloat(astrologer.pricePerMinute || 0);
-
-    if (walletBreakdown.rechargeBalance < requiredBalance) {
-      return res.status(402).json({
+    // Check if astrologer or user is busy
+    const isAstroBusy = await redis.get(`astrologer:busy:${astrologerId}`);
+    if (isAstroBusy) {
+      return res.status(400).json({
         success: false,
-        message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
-        code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
-        redirectTo: "/aichat",
-        wallet: {
-          balance: walletBreakdown.balance,
-          signupBonusBalance: walletBreakdown.signupBonusBalance,
-          humanChatBalance: walletBreakdown.rechargeBalance,
-          required: requiredBalance,
-        },
+        message: "Astrologer is currently busy",
       });
     }
 
-    const session = await ChatSession.create({
-      userId,
-      astrologerId,
-      pricePerMinute: astrologer.pricePerMinute,
-      startTime: new Date(),
-      // Every new chat starts as a fresh pending request.
-      requestStatus: "pending",
-    });
+    const isUserBusy = await redis.get(`user:busy:${userId}`);
+    if (isUserBusy) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have an active or pending chat session",
+      });
+    }
+
+    const requiredBalance = parseFloat(astrologer.pricePerMinute || 0);
+    const dbTransaction = await sequelize.transaction();
+    let session = null;
+
+    try {
+      const freeChatAllocation = await getAvailableFreeChatAllocation(
+        userId,
+        "real",
+        dbTransaction
+      );
+
+      if (freeChatAllocation) {
+        session = await ChatSession.create(
+          {
+            userId,
+            astrologerId,
+            pricePerMinute: astrologer.pricePerMinute,
+            startTime: new Date(),
+            requestStatus: "pending",
+            billingSource: CHAT_BILLING_SOURCES.FREE_CHAT,
+            freeChatAllocationId: freeChatAllocation.id,
+            freeChatMinutes: freeChatAllocation.minutes,
+          },
+          { transaction: dbTransaction }
+        );
+
+        await consumeFreeChatAllocation(
+          {
+            allocationId: freeChatAllocation.id,
+            userId,
+            sessionId: session.id,
+            sessionKind: "human_chat",
+            chatType: "real",
+          },
+          dbTransaction
+        );
+      } else {
+        const wallet = await Wallet.findOne({
+          where: { userId },
+          transaction: dbTransaction,
+          lock: dbTransaction.LOCK.UPDATE,
+        });
+        const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+
+        if (walletBreakdown.rechargeBalance < requiredBalance) {
+          await dbTransaction.rollback();
+          return res.status(402).json({
+            success: false,
+            message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
+            code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
+            wallet: {
+              balance: walletBreakdown.balance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
+              required: requiredBalance,
+            },
+          });
+        }
+
+        session = await ChatSession.create(
+          {
+            userId,
+            astrologerId,
+            pricePerMinute: astrologer.pricePerMinute,
+            startTime: new Date(),
+            requestStatus: "pending",
+          },
+          { transaction: dbTransaction }
+        );
+      }
+
+      await dbTransaction.commit();
+    } catch (transactionError) {
+      await dbTransaction.rollback();
+      throw transactionError;
+    }
+
+    // Mark as busy for 70 seconds (1 minute 10 secs)
+    await redis.set(`astrologer:busy:${astrologerId}`, userId, { ex: 70 });
+    await redis.set(`user:busy:${userId}`, astrologerId, { ex: 70 });
 
     // Get astrologer details
     const astrologerDetails = await Astrologer.findByPk(astrologerId, {
@@ -485,6 +567,10 @@ const endChatSession = async (req, res) => {
 
     const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: session.astrologerId },
+    });
 
     if (io) {
       const {
@@ -527,6 +613,17 @@ const endChatSession = async (req, res) => {
     queueArchiveAndDeleteSession(session.id, {
       endReason,
       billedAmount: billing.billedAmount,
+    });
+
+    await queueChatFeedbackPrompt({
+      userId: session.userId,
+      targetType: "real",
+      astrologerId: session.astrologerId,
+      astrologerName: session.astrologer?.fullName || null,
+      sessionId: session.id,
+      durationSeconds: getSessionDurationSeconds(session),
+    }).catch((promptError) => {
+      console.error("Real chat feedback prompt queue error:", promptError);
     });
 
     res.status(200).json({
@@ -716,31 +813,23 @@ const sendMessage = async (req, res) => {
         const { endSessionForInsufficientBalance } = require("../../services/chatSocket");
         const billing = await endSessionForInsufficientBalance(io, session);
 
-        const isBonusOnlyBalance =
-          walletBreakdown.balance > 0 && walletBreakdown.rechargeBalance <= 0;
-
-        return res.status(402).json({
-          success: false,
-          message: isBonusOnlyBalance
-            ? HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE
-            : "Insufficient wallet balance. Chat ended. Please recharge to continue.",
-          code: isBonusOnlyBalance
-            ? HUMAN_CHAT_RECHARGE_REQUIRED_CODE
-            : "INSUFFICIENT_BALANCE",
-          redirectTo: isBonusOnlyBalance ? "/aichat" : undefined,
-          session: {
-            id: session.id,
-            totalMinutes: billing.totalMinutes,
-            totalCost: billing.totalCost,
-            billedAmount: billing.billedAmount,
-            pricePerMinute: parseFloat(session.pricePerMinute || 0),
-          },
-          wallet: {
-            balance: walletBreakdown.balance,
-            signupBonusBalance: walletBreakdown.signupBonusBalance,
-            humanChatBalance: walletBreakdown.rechargeBalance,
-          },
-        });
+          return res.status(402).json({
+            success: false,
+            message: "Insufficient wallet balance. Chat ended. Please recharge to continue.",
+            code: "INSUFFICIENT_BALANCE",
+            session: {
+              id: session.id,
+              totalMinutes: billing.totalMinutes,
+              totalCost: billing.totalCost,
+              billedAmount: billing.billedAmount,
+              pricePerMinute: parseFloat(session.pricePerMinute || 0),
+            },
+            wallet: {
+              balance: walletBreakdown.balance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
+            },
+          });
       }
     }
 
@@ -1341,29 +1430,39 @@ const approveChatRequest = async (req, res) => {
     }
 
     const approvalStartTime = new Date();
-    const wallet = await Wallet.findOne({ where: { userId: session.userId } });
-    const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
     const pricePerMinute = parseFloat(session.pricePerMinute || 0);
+    const isFreeChatSession =
+      session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT;
+    let walletLimit = null;
 
-    if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
-      return res.status(402).json({
-        success: false,
-        message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
-        code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
-        redirectTo: "/aichat",
-        wallet: {
-          balance: walletBreakdown.balance,
-          signupBonusBalance: walletBreakdown.signupBonusBalance,
-          humanChatBalance: walletBreakdown.rechargeBalance,
-        },
+    if (isFreeChatSession) {
+      walletLimit = calculateFreeChatWindow(
+        session.freeChatMinutes || 1,
+        approvalStartTime
+      );
+    } else {
+      const wallet = await Wallet.findOne({ where: { userId: session.userId } });
+      const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
+
+      if (walletBreakdown.rechargeBalance <= 0 && pricePerMinute > 0) {
+        return res.status(402).json({
+          success: false,
+          message: HUMAN_CHAT_RECHARGE_REQUIRED_MESSAGE,
+          code: HUMAN_CHAT_RECHARGE_REQUIRED_CODE,
+            wallet: {
+              balance: walletBreakdown.balance,
+              signupBonusBalance: 0,
+              humanChatBalance: walletBreakdown.balance,
+            },
+          });
+      }
+
+      walletLimit = calculateWalletLimitedChatTime({
+        rechargeBalance: walletBreakdown.rechargeBalance,
+        pricePerMinute,
+        startTime: approvalStartTime,
       });
     }
-
-    const walletLimit = calculateWalletLimitedChatTime({
-      rechargeBalance: walletBreakdown.rechargeBalance,
-      pricePerMinute,
-      startTime: approvalStartTime,
-    });
 
     const io = req.app.get("io");
     let chatSocketService = null;
@@ -1422,8 +1521,15 @@ const approveChatRequest = async (req, res) => {
       endTime: null,
       maxDurationSeconds: walletLimit.maxDurationSeconds,
       maxEndTime: walletLimit.maxEndTime,
-      walletBalanceAtApproval: walletLimit.walletBalanceAtApproval,
+      walletBalanceAtApproval: isFreeChatSession
+        ? null
+        : walletLimit.walletBalanceAtApproval,
     });
+    
+    // Extend the busy locks to cover the entire active chat duration (2 hours safety net)
+    await redis.set(`astrologer:busy:${session.astrologerId}`, session.userId, { ex: 7200 });
+    await redis.set(`user:busy:${session.userId}`, session.astrologerId, { ex: 7200 });
+
     await cancelPendingChatRequestNotification(session, "approved");
 
     if (io && chatSocketService) {
@@ -1494,6 +1600,9 @@ const rejectChatRequest = async (req, res) => {
       endTime: new Date(),
     });
     await session.reload();
+
+    await redis.del(`astrologer:busy:${astrologerId}`);
+    await redis.del(`user:busy:${session.userId}`);
 
     await notifyPendingChatRequestClosed(
       req.app.get("io"),
@@ -1782,6 +1891,10 @@ const endAstrologerChatSession = async (req, res) => {
     const io = req.app.get("io");
     const billing = await completeChatSessionWithBilling(session, io);
     await session.reload();
+    await Astrologer.increment("totalConsultations", {
+      by: 1,
+      where: { id: session.astrologerId },
+    });
 
     if (io) {
       const {

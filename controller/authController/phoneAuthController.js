@@ -11,19 +11,22 @@ const {
 const setTokenCookie = require("../../services/setTokenCookie");
 const clearTokenCookie = require("../../services/clearTokenCookie");
 const { parse } = require("cookie");
-const { applySignupBonus } = require("../../services/signupBonusService");
+const {
+  grantWelcomeFreeChatForUser,
+} = require("../../services/freeChatService");
 const {
   validateWhatsappApiKey,
 } = require("../../services/whatsappAuthSettingsService");
 const {
   normalizeIndianMobile,
 } = require("../../services/phoneNumberService");
-const {
-  createAndQueueOtp,
-  verifyQueuedOtp,
-} = require("../../services/otpQueueService");
+const { createAndQueueOtp, verifyQueuedOtp, createStoredOtp } = require("../../services/otpQueueService");
+
+const DUMMY_USER_PHONE = "8112590072";
+const DUMMY_USER_OTP = "1111";
 const { trackUserLogin } = require("../../services/userLoginTrackingService");
 const { recordUserLogout } = require("../../services/userActivityCohortService");
+const pushNotificationService = require("../../services/pushNotificationService");
 
 const normalizeMobileNumber = (rawMobile) => {
   const digits = String(rawMobile || "").replace(/\D/g, "");
@@ -77,14 +80,25 @@ const generateOtp = async (req, res) => {
       });
     }
 
-    await createAndQueueOtp({
-      actorType: "user",
-      mobile: normalizedMobile,
-    });
+    if (normalizedMobile === DUMMY_USER_PHONE) {
+      await createStoredOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+        otp: DUMMY_USER_OTP,
+      });
+    } else {
+      await createAndQueueOtp({
+        actorType: "user",
+        mobile: normalizedMobile,
+      });
+    }
 
     res.status(200).json({
       success: true,
-      message: "OTP sent successfully",
+      message:
+        normalizedMobile === DUMMY_USER_PHONE
+          ? "Dummy OTP prepared successfully"
+          : "OTP sent successfully",
       mobile: normalizedMobile,
     });
   } catch (error) {
@@ -133,14 +147,61 @@ const verifyOtp = async (req, res) => {
       user = await User.create({
         mobile: verifiedMobile,
         isUserRequested: false,
+        activeDevices: [],
       });
       isNewUser = true;
     }
 
+    const { deviceId, deviceName, deviceType, forceLogout } = req.body;
+    let finalDeviceId = deviceId ? String(deviceId).trim() : null;
+
+    if (finalDeviceId) {
+      let activeDevices = user.activeDevices || [];
+      const existingDeviceIndex = activeDevices.findIndex((d) => d.deviceId === finalDeviceId);
+
+      if (existingDeviceIndex === -1 && activeDevices.length >= 3) {
+        // Sort devices by lastLoginAt ascending to find LRU
+        activeDevices.sort((a, b) => new Date(a.lastLoginAt) - new Date(b.lastLoginAt));
+        const lruDevice = activeDevices[0];
+
+        if (!forceLogout) {
+          return res.status(409).json({
+            success: false,
+            code: "MAX_DEVICES_REACHED",
+            sessionConflict: true,
+            message: `Maximum 3 active devices reached. Would you like to log out from the oldest device (${lruDevice.deviceName || 'Unknown'})?`,
+            lruDevice: lruDevice
+          });
+        }
+
+        // Force logout the LRU device
+        activeDevices.shift(); // Remove LRU
+        // Delete its push token
+        await pushNotificationService.removeDeviceTokenByDeviceId(user.id, lruDevice.deviceId);
+      }
+
+      // Add or update the current device
+      const newDeviceInfo = {
+        deviceId: finalDeviceId,
+        deviceName: deviceName ? String(deviceName).trim() : "Unknown Device",
+        deviceType: deviceType ? String(deviceType).trim() : "unknown",
+        lastLoginAt: new Date().toISOString()
+      };
+
+      if (existingDeviceIndex !== -1) {
+        activeDevices[existingDeviceIndex] = newDeviceInfo;
+      } else {
+        activeDevices.push(newDeviceInfo);
+      }
+      
+      user.activeDevices = activeDevices;
+      await user.save();
+    }
+
     // Generate tokens and set cookies
-    const token = createToken(user);
-    const middlewareToken = createMiddlewareToken(user);
-    const refreshToken = createRefreshToken(user);
+    const token = createToken(user, finalDeviceId);
+    const middlewareToken = createMiddlewareToken(user, finalDeviceId);
+    const refreshToken = createRefreshToken(user, finalDeviceId);
 
     setTokenCookie(res, token, middlewareToken, refreshToken);
 
@@ -148,20 +209,20 @@ const verifyOtp = async (req, res) => {
       invalidateTotalUsers: isNewUser,
     });
 
-    // Apply signup bonus for new users
-    let bonusInfo = null;
+    let welcomeFreeChatInfo = null;
     if (isNewUser) {
       try {
-        const bonusResult = await applySignupBonus(user.id, "phone");
-        if (bonusResult.bonusApplied) {
-          bonusInfo = {
-            amount: bonusResult.amount,
-            message: bonusResult.message,
-          };
-        }
+        const welcomeGrant = await grantWelcomeFreeChatForUser(user.id, {
+          loginMethod: "phone",
+        });
+        const grantedMinutes = welcomeGrant.minutes || 2;
+        welcomeFreeChatInfo = {
+          minutes: grantedMinutes,
+          applicableChatType: "ai",
+          message: "Talk to an astrologer for free.",
+        };
       } catch (error) {
-        console.error("Failed to apply signup bonus:", error);
-        // Don't fail the registration if bonus fails
+        console.error("Failed to grant welcome free chat:", error);
       }
     }
 
@@ -174,7 +235,8 @@ const verifyOtp = async (req, res) => {
       isNewUser: profileIncomplete,
       token: token,
       middlewareToken: middlewareToken,
-      bonusInfo: bonusInfo,
+      bonusInfo: null,
+      welcomeFreeChatInfo,
       user: {
         id: user.id,
         fullName: user.fullName,
@@ -335,11 +397,13 @@ const whatsappRegisterOrCheck = async (req, res) => {
     // Keep response path fast; bonus credit is best-effort in background.
     setImmediate(async () => {
       try {
-        await applySignupBonus(createdUser.id, "whatsapp");
-      } catch (bonusError) {
-        console.error("Failed to apply WhatsApp signup bonus:", bonusError);
-      }
-    });
+          await grantWelcomeFreeChatForUser(createdUser.id, {
+            loginMethod: "phone",
+          });
+        } catch (welcomeError) {
+          console.error("Failed to grant WhatsApp welcome free chat:", welcomeError);
+        }
+      });
 
     return res.status(201).json({
       success: true,
@@ -390,9 +454,21 @@ const refreshAccessToken = async (req, res) => {
       });
     }
 
-    const token = createToken(user);
-    const middlewareToken = createMiddlewareToken(user);
-    const nextRefreshToken = createRefreshToken(user);
+    const tokenDeviceId = refreshPayload.deviceId;
+    if (tokenDeviceId) {
+      const activeDevices = user.activeDevices || [];
+      if (!activeDevices.find((d) => d.deviceId === tokenDeviceId)) {
+        clearTokenCookie(res);
+        return res.status(401).json({
+          success: false,
+          message: "Session logged out on this device.",
+        });
+      }
+    }
+
+    const token = createToken(user, tokenDeviceId);
+    const middlewareToken = createMiddlewareToken(user, tokenDeviceId);
+    const nextRefreshToken = createRefreshToken(user, tokenDeviceId);
 
     setTokenCookie(res, token, middlewareToken, nextRefreshToken);
 
@@ -428,6 +504,18 @@ const logout = async (req, res) => {
     const payload = token ? validateToken(token) : null;
     if (payload?.id && payload?.role !== "astrologer") {
       await recordUserLogout(payload.id);
+
+      const deviceId = req.body.deviceId ? String(req.body.deviceId).trim() : null;
+      if (deviceId) {
+        const user = await User.findByPk(payload.id);
+        if (user) {
+          let activeDevices = user.activeDevices || [];
+          activeDevices = activeDevices.filter(d => d.deviceId !== deviceId);
+          user.activeDevices = activeDevices;
+          await user.save();
+        }
+        await pushNotificationService.removeDeviceTokenByDeviceId(payload.id, deviceId);
+      }
     }
 
     clearTokenCookie(res);

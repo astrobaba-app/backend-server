@@ -15,6 +15,7 @@ const Wallet = require("../wallet/wallet");
 const WalletTransaction = require("../wallet/walletTransaction");
 const Astrologer = require("../astrologer/astrologer");
 const AstrologerDeviceToken = require("../astrologer/astrologerDeviceToken");
+const AstrologerNotification = require("../notification/astrologerNotification");
 const Admin = require("../admin/admin");
 const Blog = require("../blog/blog");
 const BlogLike = require("../blog/blogLike");
@@ -26,6 +27,7 @@ const ChatSession = require("../chat/chatSession");
 const ChatMessage = require("../chat/chatMessage");
 const ChatHistorySession = require("../chat/chatHistorySession");
 const ChatHistoryMessage = require("../chat/chatHistoryMessage");
+const FreeChatAllocation = require("../freeChat/freeChatAllocation");
 const LiveSession = require("../live/liveSession");
 const LiveParticipant = require("../live/liveParticipant");
 const CallSession = require("../call/callSession");
@@ -561,6 +563,17 @@ const PalmOrder = require("../palm/palmOrder");
     as: "user",
   });
 
+  Astrologer.hasMany(AstrologerNotification, {
+    foreignKey: "astrologerId",
+    as: "notifications",
+    onDelete: "CASCADE",
+  });
+
+  AstrologerNotification.belongsTo(Astrologer, {
+    foreignKey: "astrologerId",
+    as: "astrologer",
+  });
+
   Astrologer.hasMany(AstrologerWebPushSubscription, {
     foreignKey: "astrologerId",
     as: "webPushSubscriptions",
@@ -1015,6 +1028,37 @@ const PalmOrder = require("../palm/palmOrder");
   AIChatMessage.belongsTo(AIChatSession, {
     foreignKey: "sessionId",
     as: "session",
+  });
+
+  User.hasMany(FreeChatAllocation, {
+    foreignKey: "userId",
+    as: "freeChatAllocations",
+    onDelete: "CASCADE",
+  });
+
+  FreeChatAllocation.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  Admin.hasMany(FreeChatAllocation, {
+    foreignKey: "grantedByAdminId",
+    as: "grantedFreeChatAllocations",
+  });
+
+  FreeChatAllocation.belongsTo(Admin, {
+    foreignKey: "grantedByAdminId",
+    as: "grantedByAdmin",
+  });
+
+  Admin.hasMany(FreeChatAllocation, {
+    foreignKey: "revokedByAdminId",
+    as: "revokedFreeChatAllocations",
+  });
+
+  FreeChatAllocation.belongsTo(Admin, {
+    foreignKey: "revokedByAdminId",
+    as: "revokedByAdmin",
   });
 
   User.hasMany(InterestIntentResult, {

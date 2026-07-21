@@ -224,6 +224,54 @@ class PushNotificationService {
     }
   }
 
+  async sendToMultipleAstrologers(
+    astrologerIds,
+    { title, body, data = {}, imageUrl = null }
+  ) {
+    try {
+      const results = await Promise.allSettled(
+        astrologerIds.map((astrologerId) =>
+          this.sendToAstrologer(astrologerId, {
+            title,
+            body,
+            data,
+            imageUrl,
+          })
+        )
+      );
+
+      const deliveredAstrologerIds = [];
+      const failedAstrologerIds = [];
+
+      results.forEach((result, index) => {
+        const astrologerId = astrologerIds[index];
+        const delivered =
+          result.status === "fulfilled" &&
+          result.value.success &&
+          (result.value.successCount ?? 0) > 0;
+
+        if (delivered) {
+          deliveredAstrologerIds.push(astrologerId);
+        } else {
+          failedAstrologerIds.push(astrologerId);
+        }
+      });
+
+      return {
+        success: true,
+        totalAstrologers: astrologerIds.length,
+        successCount: deliveredAstrologerIds.length,
+        failureCount: failedAstrologerIds.length,
+        attemptedAstrologerIds: astrologerIds,
+        deliveredAstrologerIds,
+        failedAstrologerIds,
+      };
+    } catch (error) {
+      console.error("[FCM] Error sending to multiple astrologers:", error);
+      throw error;
+    }
+  }
+
   /**
    * Broadcast push notification to all users with active tokens
    */
@@ -259,6 +307,38 @@ class PushNotificationService {
       };
     } catch (error) {
       console.error("[FCM] Error broadcasting to all:", error);
+      throw error;
+    }
+  }
+
+  async broadcastToAllAstrologers({ title, body, data = {}, imageUrl = null }) {
+    try {
+      const activeAstrologers = await AstrologerDeviceToken.findAll({
+        where: { isActive: true },
+        attributes: ["astrologerId"],
+        group: ["astrologerId"],
+        raw: true,
+      });
+
+      const astrologerIds = activeAstrologers.map((item) => item.astrologerId);
+
+      if (!astrologerIds.length) {
+        return { success: false, message: "No active astrologers found" };
+      }
+
+      const result = await this.sendToMultipleAstrologers(astrologerIds, {
+        title,
+        body,
+        data,
+        imageUrl,
+      });
+
+      return {
+        ...result,
+        activeAstrologerIds: astrologerIds,
+      };
+    } catch (error) {
+      console.error("[FCM] Error broadcasting to astrologers:", error);
       throw error;
     }
   }
@@ -339,6 +419,17 @@ class PushNotificationService {
    */
   async saveDeviceToken(userId, token, deviceType = "android", deviceId = null) {
     try {
+      if (deviceId) {
+        await DeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+        await AstrologerDeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+      }
+
       // Check if token already exists
       const existingToken = await DeviceToken.findOne({
         where: { token },
@@ -357,16 +448,38 @@ class PushNotificationService {
         return existingToken;
       } else {
         // Create new token
-        const newToken = await DeviceToken.create({
-          userId,
-          token,
-          deviceType,
-          deviceId,
-          isActive: true,
-          lastUsedAt: new Date(),
-        });
-        console.log("[FCM] Created new token for user");
-        return newToken;
+        try {
+          const newToken = await DeviceToken.create({
+            userId,
+            token,
+            deviceType,
+            deviceId,
+            isActive: true,
+            lastUsedAt: new Date(),
+          });
+          console.log("[FCM] Created new token for user");
+          return newToken;
+        } catch (createError) {
+          if (
+            createError.name === 'SequelizeUniqueConstraintError' ||
+            createError.name?.includes('Unique') ||
+            String(createError?.original?.code) === '23505'
+          ) {
+            const tokenRecord = await DeviceToken.findOne({ where: { token } });
+            if (tokenRecord) {
+              await tokenRecord.update({
+                userId,
+                deviceType,
+                deviceId,
+                isActive: true,
+                lastUsedAt: new Date(),
+              });
+              console.log("[FCM] Updated existing token for user (recovered from constraint error)");
+              return tokenRecord;
+            }
+          }
+          throw createError;
+        }
       }
     } catch (error) {
       console.error("[FCM] Error saving device token:", error);
@@ -390,8 +503,53 @@ class PushNotificationService {
     }
   }
 
+  /**
+   * Remove device token by device ID
+   */
+  async removeDeviceTokenByDeviceId(userId, deviceId) {
+    if (!deviceId) return false;
+    try {
+      const result = await DeviceToken.destroy({
+        where: { userId, deviceId },
+      });
+      console.log(`[FCM] Removed token for device ${deviceId}: ${result > 0 ? "success" : "not found"}`);
+      return result > 0;
+    } catch (error) {
+      console.error("[FCM] Error removing device token by deviceId:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove astrologer device token by device ID
+   */
+  async removeAstrologerDeviceTokenByDeviceId(astrologerId, deviceId) {
+    if (!deviceId) return false;
+    try {
+      const result = await AstrologerDeviceToken.destroy({
+        where: { astrologerId, deviceId },
+      });
+      console.log(`[FCM] Removed astrologer token for device ${deviceId}: ${result > 0 ? "success" : "not found"}`);
+      return result > 0;
+    } catch (error) {
+      console.error("[FCM] Error removing astrologer device token by deviceId:", error);
+      throw error;
+    }
+  }
+
   async saveAstrologerDeviceToken(astrologerId, token, deviceType = "android", deviceId = null, deviceName = null) {
     try {
+      if (deviceId) {
+        await AstrologerDeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+        await DeviceToken.update(
+          { isActive: false },
+          { where: { deviceId, token: { [Op.ne]: token }, isActive: true } }
+        ).catch(() => null);
+      }
+
       const existingToken = await AstrologerDeviceToken.findOne({ where: { token } });
 
       if (existingToken) {
@@ -407,17 +565,40 @@ class PushNotificationService {
         return existingToken;
       }
 
-      const newToken = await AstrologerDeviceToken.create({
-        astrologerId,
-        token,
-        deviceType,
-        deviceId,
-        deviceName,
-        isActive: true,
-        lastUsedAt: new Date(),
-      });
-      console.log("[FCM] Created new token for astrologer");
-      return newToken;
+      try {
+        const newToken = await AstrologerDeviceToken.create({
+          astrologerId,
+          token,
+          deviceType,
+          deviceId,
+          deviceName,
+          isActive: true,
+          lastUsedAt: new Date(),
+        });
+        console.log("[FCM] Created new token for astrologer");
+        return newToken;
+      } catch (createError) {
+        if (
+          createError.name === 'SequelizeUniqueConstraintError' ||
+          createError.name?.includes('Unique') ||
+          String(createError?.original?.code) === '23505'
+        ) {
+          const tokenRecord = await AstrologerDeviceToken.findOne({ where: { token } });
+          if (tokenRecord) {
+            await tokenRecord.update({
+              astrologerId,
+              deviceType,
+              deviceId,
+              deviceName,
+              isActive: true,
+              lastUsedAt: new Date(),
+            });
+            console.log("[FCM] Updated existing token for astrologer (recovered from constraint error)");
+            return tokenRecord;
+          }
+        }
+        throw createError;
+      }
     } catch (error) {
       console.error("[FCM] Error saving astrologer device token:", error);
       throw error;
