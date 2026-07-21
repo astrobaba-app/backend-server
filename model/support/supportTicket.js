@@ -1,6 +1,7 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../../dbConnection/dbConfig");
 
+
 const SupportTicket = sequelize.define(
   "SupportTicket",
   {
@@ -63,7 +64,15 @@ const SupportTicket = sequelize.define(
         "account",
         "consultation",
         "general",
-        "other"
+        "other",
+        "kundli",
+        "astrologer_wallet",
+        "graho_store",
+        "horoscope",
+        "refund",
+        "notifications",
+        "discussion",
+        "support"
       ),
       defaultValue: "general",
     },
