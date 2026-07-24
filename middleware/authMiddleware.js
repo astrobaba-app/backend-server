@@ -16,6 +16,9 @@ function checkForAuthenticationCookie() {
           token = authHeader.split(" ")[1];
         }
       }
+      if (!token && req.query.token) {
+        token = req.query.token;
+      }
       if (!token) {
         console.warn("[Auth] Missing token", {
           method: req.method,
