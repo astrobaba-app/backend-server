@@ -507,10 +507,63 @@ if (!["monthly", "yearly"].includes(reportType)) {
   }
 };
 
+// this is for chatbot widget pdf viewer in a new tab. we can't use downloadPDF function because we don't have sessionId
+const downloadReportPDFGet = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId, reportType } = req.params;
+    
+    if (!userRequestId || !reportType) {
+      return res.status(400).send("userRequestId and reportType are required");
+    }
+
+    if (!["monthly", "yearly"].includes(reportType)) {
+      return res.status(400).send("Invalid report type");
+    }
+
+    const userRequest = await getUserRequestWithKundli(userId, userRequestId);
+    if (!userRequest) {
+      return res.status(404).send("Kundli not found");
+    }
+
+    const kundliData = userRequest.kundli;
+    const userDetails = buildUserDetails(userRequest);
+
+    const { reportData, reportRecord } = await getOrCreateStoredReport({
+      userId,
+      userRequestId,
+      kundliData,
+      userDetails,
+      reportType,
+    });
+
+    const pdfBuffer = await buildKundliReportPDF(reportData, kundliData, userDetails);
+
+    await ensureStoredKundliPdf({
+      reportRecord,
+      pdfBuffer,
+      userDetails,
+      userRequestId,
+    });
+
+    const filename = reportRecord?.pdfFileName || buildKundliPdfFileName(userDetails, userRequestId);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error("Error downloading PDF via GET:", error);
+    res.status(500).send("Failed to generate PDF: " + error.message);
+  }
+};
+
 module.exports = {
   getUserKundlisForReport,
   generateKundliReport,
   getGeneratedKundliReport,
   downloadKundliReportPDF,
   previewKundliReportPDF,
+  downloadReportPDFGet,
 };

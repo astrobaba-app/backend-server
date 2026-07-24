@@ -6,6 +6,7 @@ const {
   getGeneratedKundliReport,
   downloadKundliReportPDF,
   previewKundliReportPDF,
+  downloadReportPDFGet,
 } = require("../../controller/horoscope/kundliReportController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
@@ -23,5 +24,8 @@ router.post("/download", checkForAuthenticationCookie(), downloadKundliReportPDF
 
 // Preview PDF (base64)
 router.post("/preview", checkForAuthenticationCookie(), previewKundliReportPDF);
+
+// Download PDF via GET (for chatbot support)
+router.get("/pdf/:userRequestId/:reportType", checkForAuthenticationCookie(), downloadReportPDFGet);
 
 module.exports = router;

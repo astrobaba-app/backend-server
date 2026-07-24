@@ -178,6 +178,7 @@ const forumRoute = require("./routes/forum/forumRoute");
 const jobRoute = require("./routes/job/jobRoute");
 const palmReadingRoute = require("./routes/palm/palmReadingRoute");
 const internalLogRoute = require("./routes/internal/logRoute");
+const workflowChatbotRoute = require("./routes/chatbot/workflowChatbotRoute");
 const { startPalmQueueWorker } = require("./services/palmQueueService");
 
 app.use("/api/auth", phoneAuthRoute, googleAuthRoute, appleAuthRoute);
@@ -207,6 +208,7 @@ app.use("/api/support", supportRoute);
 app.use("/api/store", storeRoute);
 app.use("/api/addresses", addressRoute);
 app.use("/api/ai-chat", aiChatRoute);
+app.use("/api/workflow-chatbot", workflowChatbotRoute);
 app.use("/api/maps", mapsRoute);
 app.use("/api/location", locationRoute);
 app.use("/api/forum", forumRoute);
