@@ -1,6 +1,7 @@
 const Wallet = require("../../model/wallet/wallet");
 const WalletTransaction = require("../../model/wallet/walletTransaction");
 const User = require("../../model/user/userAuth");
+const AiChatSession = require("../../model/aiChat/aiChatSession");
 const Coupon = require("../../model/coupon/coupon");
 const CouponUsage = require("../../model/coupon/couponUsage");
 const CouponUserAssignment = require("../../model/coupon/couponUserAssignment");
@@ -676,8 +677,14 @@ const deductForAIUsage = async (req, res) => {
       });
     }
 
-    const expectedRate =
-      type === "chat" ? AI_CHAT_PRICE_PER_MINUTE : AI_VOICE_PRICE_PER_MINUTE;
+    let expectedRate = type === "chat" ? AI_CHAT_PRICE_PER_MINUTE : AI_VOICE_PRICE_PER_MINUTE;
+
+    if (type === "chat" && sessionId) {
+      const session = await AiChatSession.findOne({ where: { id: sessionId } });
+      if (session && session.pricePerMinute) {
+        expectedRate = parseFloat(session.pricePerMinute);
+      }
+    }
     const isValidMultiple =
       Math.abs(parsedAmount / expectedRate - Math.round(parsedAmount / expectedRate)) < 1e-6;
     if (!isValidMultiple) {

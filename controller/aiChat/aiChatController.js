@@ -434,6 +434,7 @@ const ASTROLOGER_PROFILES = {
     expertise: "traditional Vedic astrology, timing predictions, career, education, family, and legal matters",
     style: "logical and timing-accurate predictions with focus on long-term life direction",
     skills: ["Vedic", "KP", "Nadi", "Prashna"],
+    pricePerMinute: 14,
   },
   "ai-astrologer-ritika": {
     name: "Ritika Mehra",
@@ -441,6 +442,7 @@ const ASTROLOGER_PROFILES = {
     expertise: "relationship astrology, tarot, love, marriage, and emotional clarity",
     style: "intuitive insights blended with astrological patterns, compassionate guidance",
     skills: ["Tarot", "Face Reading"],
+    pricePerMinute: 17,
   },
   "ai-astrologer-arjun": {
     name: "Pandit Arjun Iyer",
@@ -448,6 +450,7 @@ const ASTROLOGER_PROFILES = {
     expertise: "wealth patterns, health indicators, energy alignment, numerology, palmistry, and vastu",
     style: "practical and solution-oriented readings focused on removing financial and energetic blockages",
     skills: ["Numerology", "Palmistry", "Vastu"],
+    pricePerMinute: 12,
   },
 };
 
@@ -1601,6 +1604,7 @@ const createChatSession = async (req, res) => {
         dbTransaction
       );
       const now = new Date();
+      const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
       const session = await AIChatSession.create(
         {
           userId,
@@ -1610,7 +1614,7 @@ const createChatSession = async (req, res) => {
           status: "active",
           startTime: now,
           lastMessageAt: now,
-          pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+          pricePerMinute: profile.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE,
           ...(freeChatAllocation
             ? buildFreeChatSessionFields(freeChatAllocation, now)
             : {}),
@@ -1741,7 +1745,7 @@ const buildPublicAiAstrologerProfile = (astrologerId, aggregateStats = null) => 
     gender: profile.gender,
     expertise: profile.skills.join(", "),
     skills: profile.skills,
-    pricePerMinute: AI_CHAT_PRICE_PER_MINUTE,
+    pricePerMinute: profile.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE,
     rating,
     totalConsultations: aggregateStats?.totalConsultations || 0,
     ...publicDetails,
@@ -1757,7 +1761,8 @@ const createChatSessionV2 = async (req, res) => {
   try {
     const userId = req.user.id;
     const { astrologerId } = req.body;
-    const pricePerMinute = AI_CHAT_PRICE_PER_MINUTE;
+    const profile = ASTROLOGER_PROFILES[astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
+    const pricePerMinute = profile.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE;
     const now = new Date();
     const freeChatAllocation = await getAvailableFreeChatAllocation(
       userId,
