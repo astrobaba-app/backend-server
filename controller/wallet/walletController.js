@@ -19,6 +19,7 @@ const {
 const {
   queueWalletCohortRefresh,
 } = require("../../services/walletCohortService");
+const { trackPurchaseEvent } = require("../../services/metaPixelService");
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -526,6 +527,20 @@ const verifyRecharge = async (req, res) => {
         newBalance,
       });
       queueWalletCohortRefresh(userId, "recharge_verified");
+
+      // Meta Conversions API - Send Purchase Event asynchronously
+      User.findByPk(userId).then(user => {
+        trackPurchaseEvent({
+          user: user,
+          amount: transaction.amount,
+          currency: 'INR',
+          transactionId: transaction.id,
+          clientIp: req.ip || req.headers['x-forwarded-for'],
+          userAgent: req.headers['user-agent'],
+        });
+      }).catch(err => {
+        console.error('[Meta CAPI] Error fetching user for tracking:', err.message);
+      });
 
       res.status(200).json({
         success: true,
