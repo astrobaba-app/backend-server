@@ -2,6 +2,7 @@ const Admin = require("../../model/admin/admin");
 const Astrologer = require("../../model/astrologer/astrologer");
 const AstrologerBroadcastLog = require("../../model/admin/astrologerBroadcastLog");
 const astrologerNotificationService = require("../../services/astrologerNotificationService");
+const axios = require("axios");
 
 const normalizeTargetAstrologerIds = async (targetAstrologerIds = []) => {
   const uniqueIds = Array.from(
@@ -37,6 +38,21 @@ const sendAstrologerNotification = async (req, res) => {
     const targetMode = normalizedTargetIds.length ? "selected" : "all";
 
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+
+    if (targetMode === "all" && process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
+      const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-astrologer-notification`, {
+        title,
+        message,
+        actionUrl,
+        data: { notificationAudience: "astrologer", ...(data || {}) },
+        adminId: req.user.id,
+        adminName: admin?.name || ""
+      }, {
+        headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+      });
+      return res.status(200).json(response.data);
+    }
+
     const broadcastLog = await AstrologerBroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",
@@ -142,6 +158,22 @@ const resendAstrologerBroadcast = async (req, res) => {
     }
 
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+
+    if (log.targetMode === "all" && process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
+      const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-astrologer-notification`, {
+        title: log.title,
+        message: log.message,
+        actionUrl: log.actionUrl,
+        data: { notificationAudience: "astrologer" },
+        adminId: req.user.id,
+        adminName: admin?.name || "",
+        sourceAstrologerBroadcastLogId: log.id
+      }, {
+        headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+      });
+      return res.status(200).json(response.data);
+    }
+
     const newLog = await AstrologerBroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",

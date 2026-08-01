@@ -6,6 +6,7 @@ const OpenAIRequestLog = require("../../model/ai/openAiRequestLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { literal, Op } = require("sequelize");
+const axios = require("axios");
 const {
   sendAstrologerApprovalEmail,
   sendAstrologerRejectionEmail,
@@ -949,6 +950,21 @@ const broadcastNotification = async (req, res) => {
     }
 
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+
+    if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
+      const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
+        title,
+        message,
+        actionUrl,
+        data,
+        adminId: req.user.id,
+        adminName: admin?.name || ""
+      }, {
+        headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+      });
+      return res.status(200).json(response.data);
+    }
+
     const broadcastLog = await BroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",
@@ -1050,6 +1066,22 @@ const resendBroadcast = async (req, res) => {
     }
 
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
+
+    if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
+      const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
+        title: log.title,
+        message: log.message,
+        actionUrl: log.actionUrl,
+        data: {},
+        adminId: req.user.id,
+        adminName: admin?.name || "",
+        sourceBroadcastLogId: log.id
+      }, {
+        headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+      });
+      return res.status(200).json(response.data);
+    }
+
     const newLog = await BroadcastLog.create({
       adminId: req.user.id,
       adminName: admin?.name || "",
