@@ -55,6 +55,17 @@ const BroadcastLog = sequelize.define(
       defaultValue: 0,
       comment: "Push-eligible users without delivered push yet; resent when they register a token",
     },
+    targetMode: {
+      type: DataTypes.ENUM("all", "selected"),
+      allowNull: false,
+      defaultValue: "all",
+      comment: "Target mode for broadcast",
+    },
+    targetUserIds: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      comment: "Array of selected user IDs if targetMode is selected",
+    },
   },
   {
     tableName: "broadcast_logs",

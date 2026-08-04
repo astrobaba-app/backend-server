@@ -65,6 +65,8 @@ const PalmFeature = require("../palm/palmFeature");
 const PalmReport = require("../palm/palmReport");
 const AIJob = require("../palm/aiJob");
 const PalmOrder = require("../palm/palmOrder");
+const ScheduledNotificationBatch = require("../admin/scheduledNotificationBatch");
+const ScheduledNotificationItem = require("../admin/scheduledNotificationItem");
 
 
   // User has many UserRequests
@@ -1121,4 +1123,14 @@ const PalmOrder = require("../palm/palmOrder");
   PalmOrder.belongsTo(User, { foreignKey: "userId", as: "user" });
   PalmUpload.hasOne(PalmOrder, { foreignKey: "palmUploadId", as: "order", onDelete: "CASCADE" });
   PalmOrder.belongsTo(PalmUpload, { foreignKey: "palmUploadId", as: "palmUpload" });
+
+  ScheduledNotificationBatch.hasMany(ScheduledNotificationItem, {
+    foreignKey: "batchId",
+    as: "items",
+    onDelete: "CASCADE",
+  });
+  ScheduledNotificationItem.belongsTo(ScheduledNotificationBatch, {
+    foreignKey: "batchId",
+    as: "batch",
+  });
 

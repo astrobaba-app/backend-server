@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const os = require("os");
 const cron = require("node-cron");
+const axios = require("axios");
 const { Op, literal } = require("sequelize");
 const Admin = require("../model/admin/admin");
 const BroadcastLog = require("../model/admin/broadcastLog");
@@ -282,7 +283,7 @@ class ScheduledNotificationService {
     };
   }
 
-  async getGroupedItems({ status, from, to }) {
+  async getGroupedItems({ status, from, to, page = 1, limit = 10 }) {
     const where = {};
     if (status && status !== "all") where.status = status;
     if (from || to) {
@@ -293,19 +294,55 @@ class ScheduledNotificationService {
       if (toDate && !Number.isNaN(toDate.getTime())) where.scheduledAt[Op.lte] = toDate;
     }
 
-    const items = await ScheduledNotificationItem.findAll({
+    const effectiveLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
+    const effectivePage = Math.max(1, Number.parseInt(page, 10) || 1);
+    const offset = (effectivePage - 1) * effectiveLimit;
+
+    const uniqueDates = await ScheduledNotificationItem.findAll({
+      attributes: [
+        [ScheduledNotificationItem.sequelize.fn('DISTINCT', ScheduledNotificationItem.sequelize.col('scheduledAt')), 'scheduledAt']
+      ],
       where,
+      order: [['scheduledAt', 'ASC']],
+      limit: effectiveLimit,
+      offset,
+      raw: true,
+    });
+
+    const targetDates = uniqueDates.map(d => d.scheduledAt);
+    const count = await ScheduledNotificationItem.count({
+      where,
+      distinct: true,
+      col: 'scheduledAt'
+    });
+
+    if (!targetDates.length) {
+      return {
+        groups: [],
+        pagination: {
+          total: count,
+          page: effectivePage,
+          limit: effectiveLimit,
+          totalPages: 0,
+        },
+      };
+    }
+
+    const items = await ScheduledNotificationItem.findAll({
+      where: {
+        ...where,
+        scheduledAt: { [Op.in]: targetDates }
+      },
       order: [
         ["scheduledAt", "ASC"],
         ["createdAt", "ASC"],
       ],
-      limit: 300,
     });
 
-    const groups = new Map();
+    const groupsMap = new Map();
     items.forEach((item) => {
       const key = item.scheduledAt.toISOString().slice(0, 16);
-      const current = groups.get(key) || {
+      const current = groupsMap.get(key) || {
         scheduledAt: item.scheduledAt,
         total: 0,
         scheduled: 0,
@@ -317,10 +354,18 @@ class ScheduledNotificationService {
       current.total += 1;
       current[item.status] = (current[item.status] || 0) + 1;
       current.items.push(item);
-      groups.set(key, current);
+      groupsMap.set(key, current);
     });
 
-    return Array.from(groups.values());
+    return {
+      groups: Array.from(groupsMap.values()),
+      pagination: {
+        total: count,
+        page: effectivePage,
+        limit: effectiveLimit,
+        totalPages: Math.ceil(count / effectiveLimit),
+      },
+    };
   }
 
   async getSentHistory({ page = 1, limit = 10 }) {
@@ -506,44 +551,67 @@ class ScheduledNotificationService {
 
       try {
         const admin = await Admin.findByPk(item.adminId, { attributes: ["id", "name"] });
-        const log = await BroadcastLog.create({
-          adminId: item.adminId,
-          adminName: admin?.name || "",
-          title: item.title,
-          message: item.message,
-          actionUrl: item.actionUrl,
-          totalUsers: 0,
-          pushSuccessCount: 0,
-          pushFailureCount: 0,
-          pushPendingCount: 0,
-        });
+        
+        let generatedBroadcastLogId = null;
 
-        const result = await notificationService.broadcastToAll({
-          type: "admin_broadcast",
-          title: item.title,
-          message: item.message,
-          data: {
-            scheduledNotificationItemId: item.id,
-            scheduledNotificationBatchId: item.batchId,
-            broadcastLogId: log.id,
-          },
-          actionUrl: item.actionUrl,
-          priority: "high",
-          sendPush: true,
-        });
+        if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === "true") {
+          const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
+            title: item.title,
+            message: item.message,
+            actionUrl: item.actionUrl,
+            adminId: item.adminId,
+            adminName: admin?.name || "",
+            data: {
+              scheduledNotificationItemId: item.id,
+              scheduledNotificationBatchId: item.batchId,
+            }
+          }, {
+            headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+          });
+          
+          generatedBroadcastLogId = response.data?.data?.broadcastLogId;
+        } else {
+          const log = await BroadcastLog.create({
+            adminId: item.adminId,
+            adminName: admin?.name || "",
+            title: item.title,
+            message: item.message,
+            actionUrl: item.actionUrl,
+            totalUsers: 0,
+            pushSuccessCount: 0,
+            pushFailureCount: 0,
+            pushPendingCount: 0,
+          });
 
-        await log.update({
-          totalUsers: result.totalSent || 0,
-          pushSuccessCount: result.pushSuccessCount || 0,
-          pushFailureCount: result.pushFailureCount || 0,
-          pushPendingCount: result.pushPendingCount || 0,
-        });
+          generatedBroadcastLogId = log.id;
+
+          const result = await notificationService.broadcastToAll({
+            type: "admin_broadcast",
+            title: item.title,
+            message: item.message,
+            data: {
+              scheduledNotificationItemId: item.id,
+              scheduledNotificationBatchId: item.batchId,
+              broadcastLogId: log.id,
+            },
+            actionUrl: item.actionUrl,
+            priority: "high",
+            sendPush: true,
+          });
+
+          await log.update({
+            totalUsers: result.totalSent || 0,
+            pushSuccessCount: result.pushSuccessCount || 0,
+            pushFailureCount: result.pushFailureCount || 0,
+            pushPendingCount: result.pushPendingCount || 0,
+          });
+        }
 
         await ScheduledNotificationItem.update(
           {
             status: "sent",
             sentAt: new Date(),
-            broadcastLogId: log.id,
+            broadcastLogId: generatedBroadcastLogId,
             lockToken: null,
             lockedAt: null,
             lastError: null,

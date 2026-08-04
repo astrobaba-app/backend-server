@@ -1200,12 +1200,66 @@ async function ensureBroadcastLogDeliveryColumns() {
       );
     }
 
+    if (!table.targetMode && !table.target_mode) {
+      operations.push(
+        queryInterface.addColumn("broadcast_logs", "targetMode", {
+          type: DataTypes.ENUM("all", "selected"),
+          allowNull: false,
+          defaultValue: "all",
+        })
+      );
+    }
+
+    if (!table.targetUserIds && !table.target_user_ids) {
+      operations.push(
+        queryInterface.addColumn("broadcast_logs", "targetUserIds", {
+          type: DataTypes.JSON,
+          allowNull: true,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("✓ Ensured broadcast log delivery columns exist");
     }
   } catch (error) {
     console.log("broadcast_logs table will be created by sequelize.sync()");
+  }
+}
+
+async function ensureAstrologerBroadcastLogColumns() {
+  const queryInterface = sequelize.getQueryInterface();
+  try {
+    const table = await queryInterface.describeTable("astrologer_broadcast_logs");
+    const operations = [];
+
+    if (!table.targetMode && !table.target_mode) {
+      operations.push(
+        queryInterface.addColumn("astrologer_broadcast_logs", "targetMode", {
+          type: DataTypes.ENUM("all", "selected"),
+          allowNull: false,
+          defaultValue: "all",
+        })
+      );
+    }
+
+    if (!table.targetAstrologerIds && !table.target_astrologer_ids) {
+      operations.push(
+        queryInterface.addColumn("astrologer_broadcast_logs", "targetAstrologerIds", {
+          type: DataTypes.JSONB,
+          allowNull: true,
+          defaultValue: [],
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("✓ Ensured astrologer broadcast log columns exist");
+    }
+  } catch (error) {
+    console.log("astrologer_broadcast_logs table will be created by sequelize.sync()");
   }
 }
 
@@ -2205,6 +2259,7 @@ const initDB = (callback) => {
     .then(() => ensureUserPreferenceColumns())
     .then(() => ensureNotificationPushColumns())
     .then(() => ensureBroadcastLogDeliveryColumns())
+    .then(() => ensureAstrologerBroadcastLogColumns())
     .then(() => ensureScheduledNotificationColumns())
     .then(() => ensureForumPostModerationColumns())
     .then(() => ensureForumCommentModerationColumns())

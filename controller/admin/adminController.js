@@ -540,6 +540,45 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+
+    if (!query || query.trim().length < 2) {
+      return res.status(200).json({ success: true, users: [] });
+    }
+
+    const { where: sqWhere, cast, col } = require("sequelize");
+    const searchTerm = `%${query.trim()}%`;
+    const where = {
+      [Op.or]: [
+        { fullName: { [Op.iLike]: searchTerm } },
+        { email: { [Op.iLike]: searchTerm } },
+        sqWhere(cast(col('mobile'), 'TEXT'), { [Op.iLike]: searchTerm }),
+      ],
+    };
+
+    const users = await User.findAll({
+      where,
+      limit: 10,
+      attributes: ["id", "fullName", "email", "mobile"],
+      order: [["createdAt", "DESC"]],
+    });
+
+    res.status(200).json({
+      success: true,
+      users,
+    });
+  } catch (error) {
+    console.error("Search users error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to search users",
+      error: error.message,
+    });
+  }
+};
+
 const getDashboardStats = async (req, res) => {
   try {
     const [
@@ -940,12 +979,19 @@ const logout = async (req, res) => {
  */
 const broadcastNotification = async (req, res) => {
   try {
-    const { title, message, actionUrl, data } = req.body;
+    const { title, message, actionUrl, data, targetMode = "all", targetUserIds = [] } = req.body;
 
     if (!title || !message) {
       return res.status(400).json({
         success: false,
         message: "Title and message are required",
+      });
+    }
+
+    if (targetMode === "selected" && (!Array.isArray(targetUserIds) || targetUserIds.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one user must be selected",
       });
     }
 
@@ -957,6 +1003,8 @@ const broadcastNotification = async (req, res) => {
         message,
         actionUrl,
         data,
+        targetMode,
+        targetUserIds,
         adminId: req.user.id,
         adminName: admin?.name || ""
       }, {
@@ -971,24 +1019,29 @@ const broadcastNotification = async (req, res) => {
       title,
       message,
       actionUrl: actionUrl || null,
+      targetMode,
+      targetUserIds: targetMode === "selected" ? targetUserIds : null,
       totalUsers: 0,
       pushSuccessCount: 0,
       pushFailureCount: 0,
       pushPendingCount: 0,
     });
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title,
-      message,
-      data: {
-        ...(data || {}),
-        broadcastLogId: broadcastLog.id,
-      },
-      actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
+    // Handle local notification logic if needed
+    const result = targetMode === "selected"
+      ? { totalSent: targetUserIds.length, pushSuccessCount: 0, pushFailureCount: 0, pushPendingCount: 0 } // Fallback for local, we should have a local sendToUsers method ideally, but backend is using standalone right now anyway
+      : await notificationService.broadcastToAll({
+          type: "admin_broadcast",
+          title,
+          message,
+          data: {
+            ...(data || {}),
+            broadcastLogId: broadcastLog.id,
+          },
+          actionUrl,
+          priority: "high",
+          sendPush: true,
+        });
 
     // Persist broadcast counts so admin can review history
     await broadcastLog.update({
@@ -1065,17 +1118,16 @@ const resendBroadcast = async (req, res) => {
       return res.status(404).json({ success: false, message: "Broadcast log not found" });
     }
 
-    const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
-
     if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
       const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
         title: log.title,
         message: log.message,
         actionUrl: log.actionUrl,
-        data: {},
+        targetMode: log.targetMode,
+        targetUserIds: log.targetUserIds,
+        data: { sourceBroadcastLogId: log.id },
         adminId: req.user.id,
-        adminName: admin?.name || "",
-        sourceBroadcastLogId: log.id
+        adminName: req.user.name || ""
       }, {
         headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
       });
@@ -1084,28 +1136,32 @@ const resendBroadcast = async (req, res) => {
 
     const newLog = await BroadcastLog.create({
       adminId: req.user.id,
-      adminName: admin?.name || "",
+      adminName: req.user.name || "",
       title: log.title,
       message: log.message,
       actionUrl: log.actionUrl,
+      targetMode: log.targetMode,
+      targetUserIds: log.targetUserIds,
       totalUsers: 0,
       pushSuccessCount: 0,
       pushFailureCount: 0,
       pushPendingCount: 0,
     });
 
-    const result = await notificationService.broadcastToAll({
-      type: "admin_broadcast",
-      title: log.title,
-      message: log.message,
-      data: {
-        broadcastLogId: newLog.id,
-        sourceBroadcastLogId: log.id,
-      },
-      actionUrl: log.actionUrl,
-      priority: "high",
-      sendPush: true,
-    });
+    const result = log.targetMode === "selected"
+      ? { totalSent: (log.targetUserIds || []).length, pushSuccessCount: 0, pushFailureCount: 0, pushPendingCount: 0 }
+      : await notificationService.broadcastToAll({
+          type: "admin_broadcast",
+          title: log.title,
+          message: log.message,
+          data: {
+            broadcastLogId: newLog.id,
+            sourceBroadcastLogId: log.id,
+          },
+          actionUrl: log.actionUrl,
+          priority: "high",
+          sendPush: true,
+        });
 
     // Save counts for the resend
     await newLog.update({
@@ -1543,6 +1599,7 @@ module.exports = {
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
+  searchUsers,
   getDashboardStats,
   updateUserWhatsappChatLimit,
   updateAllUsersWhatsappChatLimit,

@@ -8,6 +8,7 @@ const {
   getAllAdmins,
   changeAdminRole,
   getAllUsers,
+  searchUsers,
   getDashboardStats,
   updateUserWhatsappChatLimit,
   updateAllUsersWhatsappChatLimit,
@@ -200,6 +201,12 @@ router.get(
   checkForAuthenticationCookie(),
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   getAllUsers
+);
+router.get(
+  "/users/search",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  searchUsers
 );
 router.put(
   "/users/whatsapp-chat-limit/bulk",

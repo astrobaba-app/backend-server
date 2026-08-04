@@ -22,6 +22,7 @@ const parseWorkbookRows = (file) => {
   const workbook = XLSX.read(file.buffer, {
     type: "buffer",
     cellDates: true,
+    codepage: 65001
   });
   const rows = [];
 
@@ -34,30 +35,63 @@ const parseWorkbookRows = (file) => {
   return rows;
 };
 
+const axios = require("axios");
+const FormData = require("form-data");
+
 const uploadScheduledNotifications = async (req, res) => {
   try {
-    const rows = parseWorkbookRows(req.file);
-    const batchPayload = await scheduledNotificationService.createBatchFromRows({
-      adminId: req.user.id,
-      name: req.body.name,
-      planType: req.body.planType,
-      scheduleMode: req.body.scheduleMode,
-      startDate: req.body.startDate,
-      times: parseTimes(req.body.times),
-      sourceFileName: req.file.originalname,
-      rows,
-    });
+    if (!req.file?.buffer) {
+      return res.status(400).json({ success: false, message: "Excel file is required" });
+    }
 
-    return res.status(201).json({
-      success: true,
-      message: "Scheduled notifications uploaded successfully",
-      ...batchPayload,
-    });
+    if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === "true") {
+      const form = new FormData();
+      form.append("file", req.file.buffer, req.file.originalname);
+      form.append("adminId", req.user.id);
+      
+      const fields = ["name", "planType", "scheduleMode", "startDate", "times"];
+      for (const field of fields) {
+        if (req.body[field]) {
+          form.append(field, typeof req.body[field] === "object" ? JSON.stringify(req.body[field]) : req.body[field]);
+        }
+      }
+
+      const response = await axios.post(
+        `${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/scheduled/upload`,
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}`,
+          },
+        }
+      );
+
+      return res.status(response.status).json(response.data);
+    } else {
+      const rows = parseWorkbookRows(req.file);
+      const batchPayload = await scheduledNotificationService.createBatchFromRows({
+        adminId: req.user.id,
+        name: req.body.name,
+        planType: req.body.planType,
+        scheduleMode: req.body.scheduleMode,
+        startDate: req.body.startDate,
+        times: parseTimes(req.body.times),
+        sourceFileName: req.file.originalname,
+        rows,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Scheduled notifications uploaded successfully",
+        ...batchPayload,
+      });
+    }
   } catch (error) {
     console.error("Upload scheduled notifications error:", error);
     return res.status(400).json({
       success: false,
-      message: error.message || "Failed to upload scheduled notifications",
+      message: error.response?.data?.message || error.message || "Failed to upload scheduled notifications",
     });
   }
 };
@@ -96,8 +130,8 @@ const getScheduledNotificationBatch = async (req, res) => {
 
 const getScheduledNotificationGroups = async (req, res) => {
   try {
-    const groups = await scheduledNotificationService.getGroupedItems(req.query);
-    return res.status(200).json({ success: true, groups });
+    const result = await scheduledNotificationService.getGroupedItems(req.query);
+    return res.status(200).json({ success: true, ...result });
   } catch (error) {
     console.error("Get scheduled notification groups error:", error);
     return res.status(500).json({

@@ -39,14 +39,16 @@ const sendAstrologerNotification = async (req, res) => {
 
     const admin = await Admin.findByPk(req.user.id, { attributes: ["id", "name"] });
 
-    if (targetMode === "all" && process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
+    if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === 'true') {
       const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-astrologer-notification`, {
         title,
         message,
         actionUrl,
         data: { notificationAudience: "astrologer", ...(data || {}) },
         adminId: req.user.id,
-        adminName: admin?.name || ""
+        adminName: admin?.name || "",
+        targetMode,
+        targetAstrologerIds: normalizedTargetIds
       }, {
         headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
       });
