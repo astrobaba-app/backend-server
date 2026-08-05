@@ -45,8 +45,12 @@ function buildWalletCohortScores(metrics) {
 
   if (rechargeCount === 0) {
     scores.NeverRecharged = 1;
-  } else if (rechargeCount === 1) {
-    scores.FirstRechargeCompleted = 1;
+    scores.UnpaidUser = 1;
+  } else {
+    scores.PaidUser = 1;
+    if (rechargeCount === 1) {
+      scores.FirstRechargeCompleted = 1;
+    }
   }
 
   if (rechargeCount >= WALLET_COHORT_CONFIG.repeatRechargeCount) {

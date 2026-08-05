@@ -549,18 +549,60 @@ const searchUsers = async (req, res) => {
     }
 
     const { where: sqWhere, cast, col } = require("sequelize");
-    const searchTerm = `%${query.trim()}%`;
-    const where = {
-      [Op.or]: [
-        { fullName: { [Op.iLike]: searchTerm } },
-        { email: { [Op.iLike]: searchTerm } },
-        sqWhere(cast(col('mobile'), 'TEXT'), { [Op.iLike]: searchTerm }),
-      ],
-    };
+    const isMulti = query.includes(",");
+    let where;
+    let limit = 10;
+
+    if (isMulti) {
+      const terms = query
+        .split(",")
+        .map((t) => t.trim().toLowerCase())
+        .filter((t) => t.length > 0);
+      
+      limit = Math.max(10, terms.length * 2);
+
+      const phoneTerms = [];
+      const emailTerms = [];
+
+      for (const term of terms) {
+        if (/^\d+$/.test(term)) {
+          phoneTerms.push(term);
+        } else {
+          emailTerms.push(term);
+        }
+      }
+
+      const orConditions = [];
+      if (emailTerms.length > 0) {
+        orConditions.push(
+          sqWhere(cast(col("email"), "TEXT"), { [Op.in]: emailTerms })
+        );
+      }
+      if (phoneTerms.length > 0) {
+        orConditions.push(
+          sqWhere(cast(col("mobile"), "TEXT"), { [Op.in]: phoneTerms })
+        );
+      }
+
+      if (orConditions.length > 0) {
+        where = { [Op.or]: orConditions };
+      } else {
+        return res.status(200).json({ success: true, users: [] });
+      }
+    } else {
+      const searchTerm = `%${query.trim()}%`;
+      where = {
+        [Op.or]: [
+          { fullName: { [Op.iLike]: searchTerm } },
+          { email: { [Op.iLike]: searchTerm } },
+          sqWhere(cast(col("mobile"), "TEXT"), { [Op.iLike]: searchTerm }),
+        ],
+      };
+    }
 
     const users = await User.findAll({
       where,
-      limit: 10,
+      limit,
       attributes: ["id", "fullName", "email", "mobile"],
       order: [["createdAt", "DESC"]],
     });

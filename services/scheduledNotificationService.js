@@ -555,21 +555,41 @@ class ScheduledNotificationService {
         let generatedBroadcastLogId = null;
 
         if (process.env.USE_STANDALONE_NOTIFICATION_SERVER === "true") {
-          const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
-            title: item.title,
-            message: item.message,
-            actionUrl: item.actionUrl,
-            adminId: item.adminId,
-            adminName: admin?.name || "",
-            data: {
-              scheduledNotificationItemId: item.id,
-              scheduledNotificationBatchId: item.batchId,
-            }
-          }, {
-            headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
-          });
-          
-          generatedBroadcastLogId = response.data?.data?.broadcastLogId;
+          if (item.targetMode === "cohort" && item.metadata?.targetCohorts) {
+            const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/cohort`, {
+              title: item.title,
+              message: item.message,
+              actionUrl: item.actionUrl,
+              adminId: item.adminId,
+              adminName: item.metadata?.adminName || admin?.name || "",
+              targetCohorts: item.metadata.targetCohorts,
+              combinationLogic: item.metadata.combinationLogic || "AND",
+              data: {
+                scheduledNotificationItemId: item.id,
+                scheduledNotificationBatchId: item.batchId,
+                ...(item.metadata?.data || {})
+              }
+            }, {
+              headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+            });
+            generatedBroadcastLogId = response.data?.broadcastLogId || response.data?.data?.broadcastLogId;
+          } else {
+            const response = await axios.post(`${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/broadcast-notification`, {
+              title: item.title,
+              message: item.message,
+              actionUrl: item.actionUrl,
+              adminId: item.adminId,
+              adminName: admin?.name || "",
+              data: {
+                scheduledNotificationItemId: item.id,
+                scheduledNotificationBatchId: item.batchId,
+              }
+            }, {
+              headers: { 'Authorization': `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}` }
+            });
+            
+            generatedBroadcastLogId = response.data?.data?.broadcastLogId;
+          }
         } else {
           const log = await BroadcastLog.create({
             adminId: item.adminId,

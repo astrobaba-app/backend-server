@@ -581,11 +581,11 @@ async function ensureCohortStorageColumns() {
         await Promise.all(operations);
       }
 
-      if (sequelize.getDialect() === "postgres" && table.category) {
-        await sequelize.query(
-          `ALTER TABLE "${cohortTable.table}" ALTER COLUMN "category" TYPE VARCHAR(64) USING "category"::text`
-        );
-      }
+        if (sequelize.getDialect() === "postgres" && table.category && table.category.type !== "CHARACTER VARYING(64)") {
+          await sequelize.query(
+            `ALTER TABLE "${cohortTable.table}" ALTER COLUMN "category" TYPE VARCHAR(64) USING "category"::text`
+          );
+        }
     } catch (error) {
       console.log(`${cohortTable.table} will be created by sequelize.sync()`);
     }
@@ -1293,6 +1293,25 @@ async function ensureScheduledNotificationColumns() {
       operations.push(
         queryInterface.addColumn("scheduled_notification_items", "broadcastLogId", {
           type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
+    if (!itemTable.targetMode && !itemTable.target_mode) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "targetMode", {
+          type: DataTypes.ENUM("all", "cohort", "selected"),
+          allowNull: false,
+          defaultValue: "all",
+        })
+      );
+    }
+
+    if (!itemTable.metadata) {
+      operations.push(
+        queryInterface.addColumn("scheduled_notification_items", "metadata", {
+          type: DataTypes.JSON,
           allowNull: true,
         })
       );

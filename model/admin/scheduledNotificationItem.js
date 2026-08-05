@@ -38,6 +38,15 @@ const ScheduledNotificationItem = sequelize.define(
       allowNull: false,
       defaultValue: "scheduled",
     },
+    targetMode: {
+      type: DataTypes.ENUM("all", "cohort", "selected"),
+      allowNull: false,
+      defaultValue: "all",
+    },
+    metadata: {
+      type: DataTypes.JSON,
+      allowNull: true,
+    },
     rowNumber: {
       type: DataTypes.INTEGER,
       allowNull: true,

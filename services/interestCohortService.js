@@ -18,6 +18,8 @@ const WALLET_CATEGORIES = [
   "RepeatRecharger",
   "LowBalanceUser",
   "HighBalanceUser",
+  "PaidUser",
+  "UnpaidUser",
 ];
 const WALLET_CATEGORY_SET = new Set(WALLET_CATEGORIES);
 const ASTRO_CATEGORIES = [

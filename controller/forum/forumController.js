@@ -1,4 +1,5 @@
 const { Op } = require("sequelize");
+const axios = require("axios");
 const { sequelize } = require("../../dbConnection/dbConfig");
 const ForumPost = require("../../model/forum/forumPost");
 const ForumComment = require("../../model/forum/forumComment");
@@ -46,21 +47,35 @@ const notifyNewForumPost = async (post) => {
     return;
   }
 
+  const payload = {
+    type: "general",
+    priority: "medium",
+    title: "New Discussion on Graho",
+    message: post.title,
+    actionUrl: `/forum/${post.id}`,
+    data: {
+      notificationCategory: "forum_post",
+      forumPostId: post.id,
+      postId: post.id,
+      postTitle: post.title,
+    },
+    sendPush: true,
+  };
+
   try {
-    await notificationService.broadcastToAll({
-      type: "general",
-      priority: "medium",
-      title: "New Discussion on Graho",
-      message: post.title,
-      actionUrl: `/forum/${post.id}`,
-      data: {
-        notificationCategory: "forum_post",
-        forumPostId: post.id,
-        postId: post.id,
-        postTitle: post.title,
-      },
-      sendPush: true,
-    });
+    if (process.env.NOTIFICATION_SERVER_URL) {
+      await axios.post(
+        `${process.env.NOTIFICATION_SERVER_URL}/api/internal/notifications/system-broadcast-notification`,
+        payload,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.NOTIFICATION_INTERNAL_TOKEN}`,
+          },
+        }
+      );
+    } else {
+      await notificationService.broadcastToAll(payload);
+    }
   } catch (error) {
     console.error("Forum post notification error:", error);
   }

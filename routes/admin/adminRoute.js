@@ -92,6 +92,7 @@ const {
   acceptJobApplication,
   rejectJobApplication,
 } = require("../../controller/job/jobController");
+const adminCohortNotificationRoute = require("./adminCohortNotificationRoute");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
 const multer = require("multer");
@@ -552,5 +553,8 @@ router.post(
   authorizeRoles(["admin", "superadmin", "masteradmin"]),
   cleanupPalmQueue
 );
+
+// Mount Modular Admin Routes
+router.use("/notifications", adminCohortNotificationRoute);
 
 module.exports = router;
