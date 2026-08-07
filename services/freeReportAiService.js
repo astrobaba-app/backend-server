@@ -1,6 +1,7 @@
 const { generateGeneralDetails, generateVimshottariDashaReport, generateRudrakshaSuggestion, generateGemstoneSuggestion, generateDoshaReport } = require("../utils/reportGenerator");
 const { buildInsightPayload } = require("./astroInsightEngineService");
 const { createChatCompletion } = require("./openaiClient");
+const { generateTemplatedFreeReport } = require("./templatedFreeReportService");
 
 // ==================== CONFIGURATION & CONSTANTS ====================
 
@@ -297,6 +298,20 @@ async function generateFreeReportNarratives({
     const normalizedKundli = kundli || buildKundliFromLegacyInput({
       basicDetails, personality, remedies, horoscope, manglikAnalysis, dasha, planetary, ashtakvarga, yogas
     });
+
+    const useTemplated = process.env.USE_TEMPLATED_FREE_REPORT === "true" || 
+                         context?.useTemplated === true || 
+                         userRequest?.useTemplated === true;
+
+    if (useTemplated) {
+      console.log("[FreeReportAI] Routing to high-speed Templated Free Report flow...");
+      const templatedReport = await generateTemplatedFreeReport({ userRequest, kundli: normalizedKundli, context });
+      if (templatedReport) {
+        console.log(`[FreeReportAI] Templated report assembled successfully in ${Date.now() - totalStartTime}ms`);
+        return templatedReport;
+      }
+      console.log("[FreeReportAI] Templated report returned null, falling back to original parallel LLM flow.");
+    }
 
     let gemstoneRecommendations = gemstoneData;
 

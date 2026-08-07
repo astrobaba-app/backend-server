@@ -331,12 +331,26 @@ initDB(() => {
     startOtpQueueWorker();
     startFreeChatGrantNotificationWorker();
     startAiChatQueueWorker();
-    const { startReportWorkerScheduler } = require("./scripts/scheduleReportWorkers");
+    const {
+      startReportWorkerScheduler,
+    } = require("./scripts/scheduleReportWorkers");
+    const { loadContentBank } = require("./services/templatedFreeReportService");
     startReportWorkerScheduler();
     console.log(
       liveViewerCountSyncEnabled
         ? "Live viewer count sync enabled (every 30 seconds)"
         : "Live viewer count sync disabled"
     );
+
+    // Preload Content Bank into memory (non-blocking — runs in background)
+    loadContentBank().then(success => {
+      if (success) {
+        console.log("[ContentBank] In-memory cache preloaded successfully on startup.");
+      } else {
+        console.warn("[ContentBank] Startup preload failed — cache will be loaded lazily on first request.");
+      }
+    }).catch(err => {
+      console.warn("[ContentBank] Startup preload error:", err.message);
+    });
   });
 });
