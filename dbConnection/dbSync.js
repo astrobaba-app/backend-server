@@ -60,6 +60,9 @@ const KundliReport = require("../model/horoscope/kundliReport");
 const YearlyReport = require("../model/horoscope/yearlyReport");
 const WealthReport = require("../model/horoscope/wealthReport");
 const SadeSatiReport = require("../model/horoscope/sadeSatiReport");
+const CompatibilityReport = require("../model/horoscope/compatibilityReport");
+const HealthReport = require("../model/horoscope/healthReport");
+const LoveRelationshipReport = require("../model/horoscope/loveRelationshipReport");
 const DailyInsightPayload = require("../model/horoscope/dailyInsightPayload");
 const MatchingProfile = require("../model/horoscope/matchingProfile");
 const SharedKundliDeletion = require("../model/horoscope/sharedKundliDeletion");
@@ -2249,6 +2252,33 @@ async function ensureUserAuthColumns() {
   }
 }
 
+async function ensureReportPurchaseEnumValues() {
+  try {
+    const [results] = await sequelize.query(`
+      SELECT typname 
+      FROM pg_type 
+      WHERE typname = 'enum_ReportPurchases_reportType'
+         OR typname = 'enum_reportPurchases_reportType'
+         OR typname = 'enum_reportpurchases_reportType'
+         OR typname = 'enum_ReportPurchase_reportType'
+    `);
+    
+    if (results.length > 0) {
+      const enumName = results[0].typname;
+      const values = ['sade-sati', 'compatibility', 'health', 'love-relationship'];
+      
+      for (const val of values) {
+        try {
+          await sequelize.query(`ALTER TYPE "${enumName}" ADD VALUE IF NOT EXISTS '${val}'`);
+        } catch (err) { }
+      }
+      console.log("Ensured ReportPurchase enum values");
+    }
+  } catch (error) {
+    console.error("Error ensuring ReportPurchase enum values:", error);
+  }
+}
+
 const initDB = (callback) => {
   sequelize
     .authenticate()
@@ -2296,6 +2326,7 @@ const initDB = (callback) => {
     .then(() => ensureSupportTicketActorColumns())
     .then(() => ensureMatchingProfileColumns())
     .then(() => ensureUserAuthColumns())
+    .then(() => ensureReportPurchaseEnumValues())
     .then(() => {
       console.log("All models synced");
       callback();

@@ -2452,18 +2452,7 @@ async function generateWealthReportPDF(reportData, userRequest) {
     console.log("[Wealth PDF Service] Compiling HTML template...");
     const htmlContent = await generateWealthHtmlTemplate(reportData, userRequest);
 
-    try {
-      const tempDir = path.resolve(__dirname, "../temp");
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      const htmlFileName = `wealth_report_${Date.now()}.html`;
-      htmlDumpPath = path.join(tempDir, htmlFileName);
-      fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
-      console.log("[Wealth PDF Service] Dumped HTML to temp for reference");
-    } catch (dumpErr) {
-      console.warn("[Wealth PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
-    }
+
 
     console.log("[Wealth PDF Service] Launching browser...");
     browser = await puppeteer.launch(getPuppeteerLaunchOptions());
@@ -2475,14 +2464,6 @@ async function generateWealthReportPDF(reportData, userRequest) {
       waitUntil: "load",
       timeout: 120000
     });
-    if (htmlDumpPath) {
-      try {
-        fs.unlinkSync(htmlDumpPath);
-        console.log("[Wealth PDF Service] Deleted temp HTML dump after page load");
-      } catch (cleanupErr) {
-        console.warn("[Wealth PDF Service] Failed to delete temp HTML dump (safe to ignore):", cleanupErr.message);
-      }
-    }
 
     console.log("[Wealth PDF Service] Printing to PDF...");
     const pdfBuffer = await page.pdf({

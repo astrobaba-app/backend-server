@@ -5,6 +5,9 @@ const KundliReport = require("../horoscope/kundliReport");
 const YearlyReport = require("../horoscope/yearlyReport");
 const WealthReport = require("../horoscope/wealthReport");
 const SadeSatiReport = require("../horoscope/sadeSatiReport");
+const CompatibilityReport = require("../horoscope/compatibilityReport");
+const HealthReport = require("../horoscope/healthReport");
+const LoveRelationshipReport = require("../horoscope/loveRelationshipReport");
 const DailyInsightPayload = require("../horoscope/dailyInsightPayload");
 const MatchingProfile = require("../horoscope/matchingProfile");
 const GoogleAuth = require("../user/googleAuth");
@@ -185,6 +188,66 @@ const ScheduledNotificationItem = require("../admin/scheduledNotificationItem");
   });
 
   SadeSatiReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated HealthReport
+  UserRequest.hasOne(HealthReport, {
+    foreignKey: "userRequestId",
+    as: "healthReport",
+    onDelete: "CASCADE",
+  });
+
+  HealthReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated Health reports
+  User.hasMany(HealthReport, {
+    foreignKey: "userId",
+    as: "healthReports",
+    onDelete: "CASCADE",
+  });
+
+  HealthReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // UserRequest has one generated LoveRelationshipReport
+  UserRequest.hasOne(LoveRelationshipReport, {
+    foreignKey: "userRequestId",
+    as: "loveRelationshipReport",
+    onDelete: "CASCADE",
+  });
+
+  LoveRelationshipReport.belongsTo(UserRequest, {
+    foreignKey: "userRequestId",
+    as: "userRequest",
+  });
+
+  // User can have many generated Love Relationship reports
+  User.hasMany(LoveRelationshipReport, {
+    foreignKey: "userId",
+    as: "loveRelationshipReports",
+    onDelete: "CASCADE",
+  });
+
+  LoveRelationshipReport.belongsTo(User, {
+    foreignKey: "userId",
+    as: "user",
+  });
+
+  // User can have many generated Compatibility reports
+  User.hasMany(CompatibilityReport, {
+    foreignKey: "userId",
+    as: "compatibilityReports",
+    onDelete: "CASCADE",
+  });
+
+  CompatibilityReport.belongsTo(User, {
     foreignKey: "userId",
     as: "user",
   });

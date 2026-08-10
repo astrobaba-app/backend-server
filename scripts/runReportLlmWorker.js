@@ -10,6 +10,9 @@ const {
   generateYearlyKundaliReport,
   generateWealthKundaliReport,
   generateSadeSatiKundaliReport,
+  generateCompatibilityKundaliReport,
+  generateHealthKundaliReport,
+  generateLoveRelationshipKundaliReport,
 } = require("../controller/horoscope/kundliReportController");
 const { processPalmQueueSnapshot } = require("../services/palmQueueService");
 const ReportGenerationRequest = require("../model/report/reportGenerationRequest");
@@ -18,6 +21,9 @@ const CONTROLLERS = {
   yearly_kundali: generateYearlyKundaliReport,
   wealth_kundali: generateWealthKundaliReport,
   sade_sati_kundali: generateSadeSatiKundaliReport,
+  compatibility_kundali: generateCompatibilityKundaliReport,
+  health_kundali: generateHealthKundaliReport,
+  love_relationship_kundali: generateLoveRelationshipKundaliReport,
 };
 
 const createWorkerResponse = () => {

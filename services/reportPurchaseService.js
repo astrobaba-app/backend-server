@@ -21,12 +21,40 @@ const REPORT_PURCHASE_CONFIG = {
     amount: Number(process.env.PALM_REPORT_PURCHASE_PRICE || process.env.PALM_REPORT_PRICE || 151),
     redirectPath: "/palm-reading",
   },
+  "sade-sati": {
+    label: "Sade Sati Premium Analysis",
+    amount: Number(process.env.SADE_SATI_REPORT_PURCHASE_PRICE || 151),
+    redirectPath: "/reports/kundli_page?type=sade-sati",
+  },
+  compatibility: {
+    label: "Marriage & Compatibility Report",
+    amount: Number(process.env.COMPATIBILITY_REPORT_PURCHASE_PRICE || 251),
+    redirectPath: "/reports/compatibility-kundli-page",
+  },
+  health: {
+    label: "Health & Wellness Astrology Report",
+    amount: Number(process.env.HEALTH_REPORT_PURCHASE_PRICE || 199),
+    redirectPath: "/reports/kundli_page?type=health",
+  },
+  "love-relationship": {
+    label: "Love & Romance Report",
+    amount: Number(process.env.LOVE_REPORT_PURCHASE_PRICE || 199),
+    redirectPath: "/reports/kundli_page?type=love-relationship",
+  },
 };
 
 const normalizeReportType = (reportType) => {
-  const type = String(reportType || "").trim().toLowerCase();
+  let type = String(reportType || "").trim().toLowerCase();
+  
+  // Map mobile app report types to backend config keys
+  if (type === 'love') {
+    type = 'love-relationship';
+  } else if (type === 'sadesati') {
+    type = 'sade-sati';
+  }
+
   if (!REPORT_PURCHASE_CONFIG[type]) {
-    const error = new Error("Unsupported report type");
+    const error = new Error("Unsupported report type: " + type);
     error.statusCode = 400;
     throw error;
   }

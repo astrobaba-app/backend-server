@@ -1787,19 +1787,6 @@ async function generateYearlyReportPDF(reportData, userRequest) {
     console.log("[Yearly PDF Service] Building HTML template...");
     const htmlContent = await generateHTMLTemplate(reportData, userRequest);
 
-    // Dump HTML for debugging and reference (matches temp folder behavior)
-    try {
-      const tempDir = path.join(__dirname, "../temp");
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-      const htmlFileName = `yearly_report_${Date.now()}.html`;
-      htmlDumpPath = path.join(tempDir, htmlFileName);
-      fs.writeFileSync(htmlDumpPath, htmlContent, "utf8");
-      console.log("[Yearly PDF Service] Dumped HTML to temp for reference");
-    } catch (dumpErr) {
-      console.warn("[Yearly PDF Service] Failed to write HTML dump (safe to ignore):", dumpErr.message);
-    }
 
     console.log("[Yearly PDF Service] Launching browser...");
     browser = await puppeteer.launch(getPuppeteerLaunchOptions());
@@ -1811,14 +1798,7 @@ async function generateYearlyReportPDF(reportData, userRequest) {
       waitUntil: "load",
       timeout: 120000
     });
-    if (htmlDumpPath) {
-      try {
-        fs.unlinkSync(htmlDumpPath);
-        console.log("[Yearly PDF Service] Deleted temp HTML dump after page load");
-      } catch (cleanupErr) {
-        console.warn("[Yearly PDF Service] Failed to delete temp HTML dump (safe to ignore):", cleanupErr.message);
-      }
-    }
+
 
     console.log("[Yearly PDF Service] Printing to PDF...");
     const pdfBuffer = await page.pdf({

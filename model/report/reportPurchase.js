@@ -17,7 +17,7 @@ const ReportPurchase = sequelize.define(
       onDelete: "CASCADE",
     },
     reportType: {
-      type: DataTypes.ENUM("daily", "yearly", "wealth", "palm"),
+      type: DataTypes.ENUM("daily", "yearly", "wealth", "palm", "sade-sati", "compatibility", "health", "love-relationship"),
       allowNull: false,
     },
     amount: {

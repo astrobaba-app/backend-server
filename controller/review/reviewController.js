@@ -15,6 +15,8 @@ const createReview = async (req, res) => {
       });
     }
 
+    console.log(`[Review API] Received review for Astrologer ${astrologerId} from User ${userId}. Rating: ${rating}`);
+
     if (rating < 1 || rating > 5) {
       return res.status(400).json({
         success: false,

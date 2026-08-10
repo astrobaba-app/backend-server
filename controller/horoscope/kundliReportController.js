@@ -3,6 +3,9 @@ const KundliReport = require("../../model/horoscope/kundliReport");
 const YearlyReport = require("../../model/horoscope/yearlyReport");
 const WealthReport = require("../../model/horoscope/wealthReport");
 const SadeSatiReport = require("../../model/horoscope/sadeSatiReport");
+const CompatibilityReport = require("../../model/horoscope/compatibilityReport");
+const HealthReport = require("../../model/horoscope/healthReport");
+const LoveRelationshipReport = require("../../model/horoscope/loveRelationshipReport");
 const ReportGenerationRequest = require("../../model/report/reportGenerationRequest");
 const UserRequest = require("../../model/user/userRequest");
 const { generateKundliReportContent } = require("../../services/kundliReportAiService");
@@ -32,6 +35,24 @@ const {
 const {
   generateSadeSatiReportPDF,
 } = require("../../services/sadeSatiReportPdfService");
+const {
+  generateCompatibilityReport,
+} = require("../../services/compatibility-kundli-report");
+const {
+  generateCompatibilityReportPDF,
+} = require("../../services/compatibilityReportPdfService");
+const {
+  generateHealthReport,
+} = require("../../services/health-kundli-report");
+const {
+  generateHealthReportPDF,
+} = require("../../services/healthReportPdfService");
+const {
+  generateLoveRelationshipReport,
+} = require("../../services/love-relationship-kundli-report");
+const {
+  generateLoveRelationshipReportPDF,
+} = require("../../services/loveRelationshipReportPdfService");
 const {
   generateDailyReportPDF,
 } = require("../../services/dailyReportPdfService");
@@ -131,6 +152,10 @@ const formatQueuedReportHistoryItem = (request) => {
     placeOfBirth: payload.placeOfBirth || metadata.placeOfBirth || "",
     timeOfbirth: payload.timeOfbirth || metadata.timeOfbirth || null,
     gender: payload.gender || metadata.gender || null,
+    boyName: payload.boyName || metadata.boyName || null,
+    girlName: payload.girlName || metadata.girlName || null,
+    boyPlaceOfBirth: payload.boyPlaceOfBirth || metadata.boyPlaceOfBirth || null,
+    girlPlaceOfBirth: payload.girlPlaceOfBirth || metadata.girlPlaceOfBirth || null,
     createdAt: request.createdAt,
     pdfUrl: request.pdfUrl || null,
     reportData: request.reportData || null,
@@ -2742,7 +2767,7 @@ const uploadSadeSatiPdfBuffer = async ({ reportRecord, pdfBuffer, userRequest })
     return getStoredPdfMetadata(reportRecord);
   }
 
-  const safeName = (userRequest.fullName ?? "sadesati_report").replace(/\s+/g, "_");
+  const safeName = (userRequest.fullName ?? "sadesati_report").replace(/s+/g, "_");
   const fileName = `sadesati_report_${safeName}_${Date.now()}.pdf`;
   const uploadResult = await uploadPdfBuffer({
     buffer: pdfBuffer,
@@ -2891,353 +2916,9 @@ const downloadWealthReportPdf = async (req, res) => {
   }
 };
 
-const generateSadeSatiPdfInBackground = async (reportRecord, userRequest) => {
-  try {
-    console.log("[Sade Sati PDF Background] Generating PDF...");
-    const pdfBuffer = await generateSadeSatiReportPDF(reportRecord.reportData, userRequest);
 
-    const safeName = (userRequest.fullName ?? "sadesati_report").replace(/\s+/g, "_");
-    const fileName = `sadesati_report_${safeName}_${Date.now()}.pdf`;
 
-    console.log(`[Sade Sati PDF Background] Uploading to Cloudinary...`);
-    const uploadResult = await uploadPdfBuffer({
-      buffer: pdfBuffer,
-      fileName,
-      folder: "graho/sadesati-reports",
-    });
 
-    console.log(`[Sade Sati PDF Background] Saving pdfUrl in database...`);
-    await reportRecord.update({
-      pdfUrl: uploadResult.secure_url,
-      pdfPublicId: uploadResult.public_id,
-      pdfFileName: fileName,
-      pdfUploadedAt: new Date(),
-    });
-    console.log("[Sade Sati PDF Background] Successfully completed");
-  } catch (error) {
-    console.error(`[Sade Sati PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
-  }
-};
-
-const generateSadeSatiKundaliReport = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const {
-      fullName,
-      gender,
-      dateOfbirth,
-      timeOfbirth,
-      placeOfBirth,
-      latitude,
-      longitude,
-      userRequestId,
-    } = req.body;
-
-    if (!userRequestId && (!fullName || !gender || !dateOfbirth || !timeOfbirth || !placeOfBirth)) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields (userRequestId or fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth)",
-      });
-    }
-
-    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
-      return respondQueuedReport({
-        req,
-        res,
-        reportType: "sade_sati_kundali",
-        message: "Sade Sati report request queued. It will be processed by the scheduled report worker.",
-      });
-    }
-
-    console.log("Received Sade Sati report request");
-
-    const userRequest = await findOrCreateUserRequestWithKundli({
-      userId,
-      userRequestId,
-      fullName,
-      gender,
-      dateOfbirth,
-      timeOfbirth,
-      placeOfBirth,
-      latitude,
-      longitude,
-    });
-
-    // Check if we have a SadeSatiReport generated already for this request
-    let reportRecord = await SadeSatiReport.findOne({
-      where: {
-        userId,
-        userRequestId: userRequest.id,
-      },
-    });
-
-    let finalResponseData;
-    let reportGenerationRequest = null;
-    let sadeSatiKundli = null;
-    if (reportRecord) {
-      finalResponseData = reportRecord.reportData;
-      console.log(`[SadeSatiReportController] Serving cached predictions`);
-      if (!reportRecord.pdfUrl) {
-        reportGenerationRequest = await saveReportGenerationRequest(req, {
-          userId,
-          userRequestId: userRequest.id,
-          kundliId: userRequest.kundli?.id || null,
-          reportType: "sade_sati_kundali",
-          sourceType: "sade_sati_cached_pdf_generation",
-          sourceId: reportRecord.id,
-          status: "llm_completed",
-          price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
-          currency: "INR",
-          requestPayload: { reportId: reportRecord.id, userRequestId: userRequest.id },
-          llmResponse: {},
-          reportData: finalResponseData || {},
-          startedAt: new Date(),
-          metadata: { reason: "cached_sade_sati_report_missing_pdf", pdfGeneration: "pending" },
-        });
-        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
-          return res.status(202).json({
-            success: true,
-            queued: true,
-            message: "Cached Sade Sati report found. PDF generation queued.",
-            report: {
-              id: reportRecord?.id || null,
-              reportRequestId: reportGenerationRequest?.id || null,
-              status: "llm_completed",
-            },
-          });
-        }
-        generateSadeSatiPdfInBackground(reportRecord, userRequest);
-      }
-    } else {
-      // Reuse existing Kundli from DB if available, otherwise fetch and save it
-      let kundli;
-      if (userRequest.kundli) {
-        kundli = userRequest.kundli.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
-      } else {
-        // Generate Kundli data in parallel
-        const [
-          basicDetails,
-          astroDetails,
-          panchang,
-          planetary,
-          charts,
-          dasha,
-          yogini,
-          manglikAnalysis,
-          personality,
-          gemstoneRemedies,
-          rudrakshaSuggestion,
-          ashtakavarga,
-          transit,
-          completeHoroscope,
-        ] = await Promise.allSettled([
-          getBasicDetails(userRequest),
-          getAstroDetails(userRequest),
-          getPanchang(userRequest),
-          getPlanetaryPositions(userRequest),
-          getAllCharts(userRequest),
-          getVimshottariDasha(userRequest),
-          getYoginiDasha(userRequest),
-          getManglikAnalysis(userRequest),
-          getAscendantReport(userRequest),
-          getGemstoneRemedies(userRequest),
-          getRudrakshaSuggestion(userRequest),
-          getAshtakavarga(userRequest),
-          getTransitChart(userRequest),
-          getCompleteHoroscope(userRequest),
-        ]);
-
-        const extractValue = (result, name) => {
-          if (result.status === "fulfilled") return result.value;
-          console.error(`${name} failed:`, result.reason?.message || result.reason);
-          return null;
-        };
-
-        const basicDetailsVal = extractValue(basicDetails, "Basic Details");
-        const astroDetailsVal = extractValue(astroDetails, "Astro Details");
-        const panchangVal = extractValue(panchang, "Panchang");
-        const planetaryVal = extractValue(planetary, "Planetary");
-        const chartsVal = extractValue(charts, "Charts");
-        const dashaVal = extractValue(dasha, "Vimshottari Dasha");
-        const yoginiVal = extractValue(yogini, "Yogini Dasha");
-        const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik");
-        const personalityVal = extractValue(personality, "Personality");
-        const gemstones = extractValue(gemstoneRemedies, "Gemstones");
-        const rudraksha = extractValue(rudrakshaSuggestion, "Rudraksha");
-        const ashtakvargaData = extractValue(ashtakavarga, "Ashtakavarga");
-        const transitVal = extractValue(transit, "Transit");
-        const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
-
-        const ashtakvargaPayload = buildAshtakvargaPayload(
-          ashtakvargaData,
-          basicDetailsVal?.ascendant?.longitude ?? 0
-        );
-
-        let yogas = null;
-        if (horoscope && Array.isArray(horoscope.yoga_analysis)) {
-          yogas = horoscope.yoga_analysis.map((yoga) => ({
-            name: yoga.name,
-            type: yoga.type,
-            strength: yoga.strength,
-            description: yoga.description,
-            effects: yoga.effects,
-          }));
-        }
-
-        const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
-        if (transitVal) finalHoroscope.transit = transitVal;
-
-        const kundliDataObj = {
-          requestId: userRequest.id,
-          basicDetails: basicDetailsVal,
-          astroDetails: astroDetailsVal,
-          manglikAnalysis: manglikAnalysisVal,
-          panchang: panchangVal,
-          charts: chartsVal,
-          dasha: dashaVal,
-          yogini: yoginiVal,
-          personality: personalityVal,
-          planetary: planetaryVal,
-          remedies: { gemstones, rudraksha },
-          ashtakvarga: ashtakvargaPayload,
-          yogas,
-          horoscope: finalHoroscope,
-        };
-
-        const createdKundli = await Kundli.create(kundliDataObj);
-        kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
-      }
-
-      sadeSatiKundli = kundli;
-      finalResponseData = await generateSadeSatiReport(kundli, userRequest);
-      
-      if (reportRecord) {
-        await reportRecord.update({
-          reportData: finalResponseData,
-          generatedAt: new Date(),
-          pdfUrl: null, // Reset as predictions have changed
-        });
-      } else {
-        reportRecord = await SadeSatiReport.create({
-          userId,
-          userRequestId: userRequest.id,
-          reportData: finalResponseData,
-          generatedAt: new Date(),
-        });
-      }
-      reportGenerationRequest = await saveReportGenerationRequest(req, {
-        userId,
-        userRequestId: userRequest.id,
-        kundliId: sadeSatiKundli?.id || null,
-        reportType: "sade_sati_kundali",
-        sourceType: "sade_sati_kundli_report",
-        sourceId: reportRecord.id,
-        status: "llm_completed",
-        price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
-        currency: "INR",
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        tokenUsage: {
-          inputTokens: 0,
-          outputTokens: 0,
-          totalTokens: 0,
-          unavailableBecause: "sade_sati_service_llm_logic_left_unchanged",
-        },
-        requestPayload: {
-          userRequestId: userRequest.id,
-        },
-        llmResponse: finalResponseData || {},
-        reportData: finalResponseData || {},
-        startedAt: new Date(),
-        metadata: {
-          pdfGeneration: "pending",
-        },
-      });
-
-      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
-        return res.status(202).json({
-          success: true,
-          queued: true,
-          message: "Sade Sati report LLM completed. PDF generation queued.",
-          report: {
-            id: reportRecord?.id || null,
-            reportRequestId: reportGenerationRequest?.id || null,
-            status: "llm_completed",
-          },
-        });
-      }
-
-      generateSadeSatiPdfInBackground(reportRecord, userRequest);
-    }
-
-    if (!reportGenerationRequest) {
-      reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({
-        req,
-        userId,
-        userRequest,
-        reportRecord,
-        reportType: "sade_sati_kundali",
-        sourceType: "sade_sati_kundli_report",
-        price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0),
-        finalResponseData,
-        kundliId: userRequest.kundli?.id || sadeSatiKundli?.id || null,
-        requestPayload: {
-          ...(req.body || {}),
-          userRequestId: userRequest.id,
-        },
-        llmResponse: finalResponseData || {},
-        metadata: {
-          reportKind: "sade_sati",
-        },
-      });
-    }
-
-    if (isReportQueueWorkerMode(req) && reportGenerationRequest?.pdfUrl) {
-      return res.status(200).json({
-        success: true,
-        cached: true,
-        message: "Sade Sati report already has a PDF. Queue request marked completed.",
-        report: {
-          id: reportRecord?.id || null,
-          reportRequestId: reportGenerationRequest?.id || null,
-          status: "completed",
-          ...getStoredPdfMetadata(reportRecord),
-        },
-      });
-    }
-
-    if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
-      return res.status(202).json({
-        success: true,
-        queued: true,
-        message: "Sade Sati report LLM completed. PDF generation queued.",
-        report: {
-          id: reportRecord?.id || null,
-          reportRequestId: reportGenerationRequest?.id || null,
-          status: "llm_completed",
-        },
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: finalResponseData,
-      report: {
-        id: reportRecord?.id || null,
-        reportRequestId: reportGenerationRequest?.id || null,
-        ...getStoredPdfMetadata(reportRecord),
-      },
-    });
-  } catch (error) {
-    console.error("Error in generateSadeSatiKundaliReport:", error);
-    res.status(error.statusCode || 500).json({
-      success: false,
-      message: "Failed to generate Sade Sati report",
-      error: error.message,
-    });
-  }
-};
 
 const getSadeSatiKundaliHistory = async (req, res) => {
   try {
@@ -3377,6 +3058,41 @@ const generateQueuedReportPdf = async (reportGenerationRequest) => {
       pdfBuffer,
       userRequest: reportRecord.userRequest,
     });
+  } else if (reportGenerationRequest.reportType === "compatibility_kundali") {
+    reportRecord = await CompatibilityReport.findOne({
+      where: { id: reportGenerationRequest.sourceId, userId: reportGenerationRequest.userId },
+    });
+    if (!reportRecord?.reportData) throw new Error("Compatibility report data not found for queued PDF");
+    pdfBuffer = await generateCompatibilityReportPDF(reportRecord);
+    pdfMetadata = await uploadCompatibilityPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userRequest: null,
+    });
+  } else if (reportGenerationRequest.reportType === "health_kundali") {
+    reportRecord = await HealthReport.findOne({
+      where: { id: reportGenerationRequest.sourceId, userId: reportGenerationRequest.userId },
+      include: [{ model: UserRequest, as: "userRequest", required: true }],
+    });
+    if (!reportRecord?.reportData) throw new Error("Health report data not found for queued PDF");
+    pdfBuffer = await generateHealthReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    pdfMetadata = await uploadHealthPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userRequest: reportRecord.userRequest,
+    });
+  } else if (reportGenerationRequest.reportType === "love_relationship_kundali") {
+    reportRecord = await LoveRelationshipReport.findOne({
+      where: { id: reportGenerationRequest.sourceId, userId: reportGenerationRequest.userId },
+      include: [{ model: UserRequest, as: "userRequest", required: true }],
+    });
+    if (!reportRecord?.reportData) throw new Error("Love Relationship report data not found for queued PDF");
+    pdfBuffer = await generateLoveRelationshipReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    pdfMetadata = await uploadLoveRelationshipPdfBuffer({
+      reportRecord,
+      pdfBuffer,
+      userRequest: reportRecord.userRequest,
+    });
   } else if (reportGenerationRequest.reportType === "palmistry") {
     pdfMetadata = await generateQueuedPalmPdf(reportGenerationRequest);
     await markPalmJobCompletedAfterPdf({
@@ -3406,7 +3122,694 @@ const generateQueuedReportPdf = async (reportGenerationRequest) => {
   return pdfMetadata;
 };
 
+
+
+
+// SADE SATI
+const generateSadeSatiPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
+  try {
+    console.log("[Sade Sati PDF Background] Generating PDF...");
+    const pdfBuffer = await generateSadeSatiReportPDF(reportRecord.reportData, userRequest);
+    const safeName = (userRequest.fullName ?? "sadesati_report").replace(/s+/g, "_");
+    const fileName = `sadesati_report_${safeName}_${Date.now()}.pdf`;
+    console.log(`[Sade Sati PDF Background] Uploading to Cloudinary...`);
+    const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/sadesati-reports" });
+    
+    await reportRecord.update({
+      pdfUrl: uploadResult.secure_url,
+      pdfPublicId: uploadResult.public_id,
+      pdfFileName: fileName,
+      pdfUploadedAt: new Date(),
+    });
+
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed",
+        pdfUrl: uploadResult.secure_url,
+        pdfPublicId: uploadResult.public_id,
+        pdfFileName: fileName,
+        pdfUploadedAt: new Date(),
+        completedAt: new Date(),
+        metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "uploaded" },
+      });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
+    }
+    console.log("[Sade Sati PDF Background] Successfully completed");
+  } catch (error) {
+    console.error(`[Sade Sati PDF Background] Failed for report ID: ${reportRecord.id}:`, error.message || error);
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "pdf_failed",
+        error: error.message || String(error),
+        completedAt: new Date(),
+        metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "failed" },
+      });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
+    }
+  }
+};
+
+const generateSadeSatiKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude, userRequestId } = req.body;
+    
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({ userId, reportType: "sade-sati", accessToken: req.body.reportAccessToken });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, { queuedReportType: "sade_sati_kundali" });
+      return respondQueuedReport({ req, res, reportType: "sade_sati_kundali", message: "Sade Sati report request queued. It will be processed by the scheduled report worker." });
+    }
+
+    const userRequest = await findOrCreateUserRequestWithKundli({ userId, userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude });
+    if (reportPurchase) await markReportPurchaseConsumed(reportPurchase, { userRequestId: userRequest.id });
+
+    let reportRecord = await SadeSatiReport.findOne({ where: { userId, userRequestId: userRequest.id } });
+    let finalResponseData;
+    let reportGenerationRequest = null;
+    
+    if (reportRecord) {
+      finalResponseData = reportRecord.reportData;
+      if (!reportRecord.pdfUrl) {
+        reportGenerationRequest = await saveReportGenerationRequest(req, {
+          userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "sade_sati_kundali",
+          sourceType: "sade_sati_cached_pdf_generation", sourceId: reportRecord.id, status: "llm_completed",
+          price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0), currency: "INR",
+          requestPayload: { reportId: reportRecord.id, userRequestId: userRequest.id }, llmResponse: {}, reportData: finalResponseData || {},
+          startedAt: new Date(), metadata: { reason: "cached_sade_sati_report_missing_pdf", pdfGeneration: "pending" },
+        });
+        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+          return res.status(202).json({ success: true, queued: true, message: "Cached Sade Sati report found. PDF generation queued.", report: { id: reportRecord?.id || null, reportRequestId: reportGenerationRequest?.id || null, status: "llm_completed" } });
+        }
+        generateSadeSatiPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+      }
+    } else {
+      let kundli;
+      if (userRequest.kundli) {
+        kundli = userRequest.kundli.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
+      } else {
+        const [
+          basicDetails,
+          astroDetails,
+          panchang,
+          planetary,
+          charts,
+          dasha,
+          yogini,
+          manglikAnalysis,
+          personality,
+          gemstoneRemedies,
+          rudrakshaSuggestion,
+          ashtakavarga,
+          transit,
+          completeHoroscope,
+        ] = await Promise.allSettled([
+          getBasicDetails(userRequest),
+          getAstroDetails(userRequest),
+          getPanchang(userRequest),
+          getPlanetaryPositions(userRequest),
+          getAllCharts(userRequest),
+          getVimshottariDasha(userRequest),
+          getYoginiDasha(userRequest),
+          getManglikAnalysis(userRequest),
+          getAscendantReport(userRequest),
+          getGemstoneRemedies(userRequest),
+          getRudrakshaSuggestion(userRequest),
+          getAshtakavarga(userRequest),
+          getTransitChart(userRequest),
+          getCompleteHoroscope(userRequest),
+        ]);
+
+        const extractValue = (result, name) => {
+          if (result.status === "fulfilled") return result.value;
+          console.error(`${name} failed:`, result.reason?.message || result.reason);
+          return null;
+        };
+
+        const basicDetailsVal = extractValue(basicDetails, "Basic Details");
+        const astroDetailsVal = extractValue(astroDetails, "Astro Details");
+        const panchangVal = extractValue(panchang, "Panchang");
+        const planetaryVal = extractValue(planetary, "Planetary");
+        const chartsVal = extractValue(charts, "Charts");
+        const dashaVal = extractValue(dasha, "Vimshottari Dasha");
+        const yoginiVal = extractValue(yogini, "Yogini Dasha");
+        const manglikAnalysisVal = extractValue(manglikAnalysis, "Manglik");
+        const personalityVal = extractValue(personality, "Personality");
+        const gemstones = extractValue(gemstoneRemedies, "Gemstones");
+        const rudraksha = extractValue(rudrakshaSuggestion, "Rudraksha");
+        const ashtakvargaData = extractValue(ashtakavarga, "Ashtakavarga");
+        const transitVal = extractValue(transit, "Transit");
+        const horoscope = extractValue(completeHoroscope, "Complete Horoscope");
+
+        const ashtakvargaPayload = buildAshtakvargaPayload(
+          ashtakvargaData,
+          basicDetailsVal?.ascendant?.longitude ?? 0
+        );
+
+        let yogas = null;
+        if (horoscope && Array.isArray(horoscope.yoga_analysis)) {
+          yogas = horoscope.yoga_analysis.map((yoga) => ({
+            name: yoga.name,
+            type: yoga.type,
+            strength: yoga.strength,
+            description: yoga.description,
+            effects: yoga.effects,
+          }));
+        }
+
+        const finalHoroscope = (horoscope && typeof horoscope === "object") ? { ...horoscope } : {};
+        if (transitVal) finalHoroscope.transit = transitVal;
+
+        const kundliDataObj = {
+          requestId: userRequest.id,
+          basicDetails: basicDetailsVal,
+          astroDetails: astroDetailsVal,
+          manglikAnalysis: manglikAnalysisVal,
+          panchang: panchangVal,
+          charts: chartsVal,
+          dasha: dashaVal,
+          yogini: yoginiVal,
+          personality: personalityVal,
+          planetary: planetaryVal,
+          remedies: { gemstones, rudraksha },
+          ashtakvarga: ashtakvargaPayload,
+          yogas,
+          horoscope: finalHoroscope,
+        };
+
+        const createdKundli = await Kundli.create(kundliDataObj);
+        kundli = createdKundli.toJSON ? createdKundli.toJSON() : createdKundli;
+        userRequest.kundli = createdKundli;
+      }
+      finalResponseData = await generateSadeSatiReport(kundli || {}, userRequest);
+      reportRecord = await SadeSatiReport.create({ userId, userRequestId: userRequest.id, reportData: finalResponseData, generatedAt: new Date() });
+      
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "sade_sati_kundali",
+        sourceType: "sade_sati_kundli_report", sourceId: reportRecord.id, status: "llm_completed",
+        price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0), currency: "INR",
+        requestPayload: { userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, reportData: finalResponseData || {},
+        startedAt: new Date(), metadata: { pdfGeneration: "pending" },
+      });
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) {
+        return res.status(202).json({ success: true, queued: true, message: "Sade Sati report LLM completed. PDF generation queued.", report: { id: reportRecord?.id || null, reportRequestId: reportGenerationRequest?.id || null, status: "llm_completed" } });
+      }
+      generateSadeSatiPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+    }
+
+    if (!reportGenerationRequest) reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({ req, userId, userRequest, reportRecord, reportType: "sade_sati_kundali", sourceType: "sade_sati_kundli_report", price: Number(process.env.SADE_SATI_REPORT_GENERATION_PRICE || 0), finalResponseData, kundliId: userRequest.kundli?.id || null, requestPayload: { ...(req.body || {}), userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, metadata: { reportKind: "sade_sati" } });
+    if (isReportQueueWorkerMode(req)) return res.status(200).json({ success: true, worker_processed: true, message: "Report generated successfully via worker", reportRequestId: reportGenerationRequest?.id, reportRecordId: reportRecord?.id });
+    
+    return res.status(200).json({ success: true, report: { id: reportRecord.id, pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId, status: "completed" } });
+  } catch (error) {
+    console.error("[generateSadeSatiKundaliReport] ERROR:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// COMPATIBILITY
+const generateCompatibilityPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
+  try {
+    const pdfBuffer = await generateCompatibilityReportPDF(reportRecord);
+    const fileName = `compatibility_report_${Date.now()}.pdf`;
+    const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/compatibility-reports" });
+    
+    await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed", pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date(),
+        completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "uploaded" },
+      });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
+    }
+  } catch (error) {
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({ status: "pdf_failed", error: error.message || String(error), completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "failed" } });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
+    }
+  }
+};
+
+const generateCompatibilityKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { boy, girl, reportAccessToken } = req.body;
+    
+    if (!boy || !girl) {
+      throw new Error("Missing partner details. This is likely an older, incomplete request payload.");
+    }
+
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({ userId, reportType: "compatibility", accessToken: reportAccessToken });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, { queuedReportType: "compatibility_kundali" });
+      return respondQueuedReport({ req, res, reportType: "compatibility_kundali", message: "Compatibility report request queued." });
+    }
+
+    if (reportPurchase) await markReportPurchaseConsumed(reportPurchase, { metadata: { boyName: boy.fullName, girlName: girl.fullName } });
+
+    let finalResponseData = await generateCompatibilityReport(req.body, { userId });
+    
+    let reportRecord = await CompatibilityReport.create({ 
+      userId, 
+      boyName: boy.fullName,
+      boyDateOfBirth: boy.dateOfbirth,
+      boyTimeOfBirth: boy.timeOfbirth,
+      boyPlaceOfBirth: boy.placeOfBirth,
+      boyLatitude: boy.latitude,
+      boyLongitude: boy.longitude,
+      girlName: girl.fullName,
+      girlDateOfBirth: girl.dateOfbirth,
+      girlTimeOfBirth: girl.timeOfbirth,
+      girlPlaceOfBirth: girl.placeOfBirth,
+      girlLatitude: girl.latitude,
+      girlLongitude: girl.longitude,
+      reportData: finalResponseData 
+    });
+      
+    let reportGenerationRequest = await saveReportGenerationRequest(req, {
+      userId, userRequestId: null, kundliId: null, reportType: "compatibility_kundali",
+      sourceType: "compatibility_report", sourceId: reportRecord.id, status: "llm_completed",
+      price: 0, currency: "INR", requestPayload: req.body, llmResponse: finalResponseData || {}, reportData: finalResponseData || {},
+      startedAt: new Date(), metadata: { pdfGeneration: "pending" },
+    });
+    
+    if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) return res.status(202).json({ success: true, queued: true });
+    
+    // Background PDF generation
+    generateCompatibilityPdfInBackground(reportRecord, { userId }, reportGenerationRequest);
+    
+    if (!reportGenerationRequest) reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({ req, userId, userRequest: { userId }, reportRecord, reportType: "compatibility_kundali", sourceType: "compatibility_report", price: 0, finalResponseData, kundliId: null, requestPayload: req.body, llmResponse: finalResponseData || {}, metadata: {} });
+    if (isReportQueueWorkerMode(req)) return res.status(200).json({ success: true, worker_processed: true });
+    
+    return res.status(200).json({ success: true, report: { id: reportRecord.id, pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId, status: "completed" } });
+  } catch (error) {
+    console.error("[generateCompatibilityKundaliReport] ERROR:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// HEALTH
+const generateHealthPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
+  try {
+    const pdfBuffer = await generateHealthReportPDF(reportRecord.reportData, userRequest);
+    const fileName = `health_report_${Date.now()}.pdf`;
+    const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/health-reports" });
+    
+    await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed", pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date(),
+        completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "uploaded" },
+      });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
+    }
+  } catch (error) {
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({ status: "pdf_failed", error: error.message || String(error), completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "failed" } });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
+    }
+  }
+};
+
+const generateHealthKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude } = req.body;
+    
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({ userId, reportType: "health", accessToken: req.body.reportAccessToken });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, { queuedReportType: "health_kundali" });
+      return respondQueuedReport({ req, res, reportType: "health_kundali", message: "Health report request queued." });
+    }
+
+    const userRequest = await findOrCreateUserRequestWithKundli({ userId, userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude });
+    if (reportPurchase) await markReportPurchaseConsumed(reportPurchase, { userRequestId: userRequest.id });
+
+    let reportRecord = await HealthReport.findOne({ where: { userId, userRequestId: userRequest.id } });
+    let finalResponseData;
+    let reportGenerationRequest = null;
+    
+    if (reportRecord) {
+      finalResponseData = reportRecord.reportData;
+      if (!reportRecord.pdfUrl) {
+        reportGenerationRequest = await saveReportGenerationRequest(req, {
+          userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "health_kundali",
+          sourceType: "health_cached_pdf", sourceId: reportRecord.id, status: "llm_completed",
+          price: 0, currency: "INR", requestPayload: { reportId: reportRecord.id }, llmResponse: {}, reportData: finalResponseData || {},
+          startedAt: new Date(), metadata: { reason: "cached_pdf_missing", pdfGeneration: "pending" },
+        });
+        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) return res.status(202).json({ success: true, queued: true });
+        generateHealthPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+      }
+    } else {
+      let kundli = userRequest.kundli?.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
+      finalResponseData = await generateHealthReport(kundli || {}, userRequest);
+      reportRecord = await HealthReport.create({ userId, userRequestId: userRequest.id, reportData: finalResponseData });
+      
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "health_kundali",
+        sourceType: "health_report", sourceId: reportRecord.id, status: "llm_completed",
+        price: 0, currency: "INR", requestPayload: { userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, reportData: finalResponseData || {},
+        startedAt: new Date(), metadata: { pdfGeneration: "pending" },
+      });
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) return res.status(202).json({ success: true, queued: true });
+      generateHealthPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+    }
+
+    if (!reportGenerationRequest) reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({ req, userId, userRequest, reportRecord, reportType: "health_kundali", sourceType: "health_report", price: 0, finalResponseData, kundliId: userRequest.kundli?.id || null, requestPayload: { userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, metadata: {} });
+    if (isReportQueueWorkerMode(req)) return res.status(200).json({ success: true, worker_processed: true });
+    
+    return res.status(200).json({ success: true, report: { id: reportRecord.id, pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId, status: "completed" } });
+  } catch (error) {
+    console.error("[generateHealthKundaliReport] ERROR:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// LOVE RELATIONSHIP
+const generateLoveRelationshipPdfInBackground = async (reportRecord, userRequest, reportGenerationRequest = null) => {
+  try {
+    const pdfBuffer = await generateLoveRelationshipReportPDF(reportRecord.reportData, userRequest);
+    const fileName = `love_report_${Date.now()}.pdf`;
+    const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/love-reports" });
+    
+    await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({
+        status: "completed", pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date(),
+        completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "uploaded" },
+      });
+      await notifyReportGenerationStatus(reportGenerationRequest, "completed");
+    }
+  } catch (error) {
+    if (reportGenerationRequest) {
+      await reportGenerationRequest.update({ status: "pdf_failed", error: error.message || String(error), completedAt: new Date(), metadata: { ...(reportGenerationRequest.metadata || {}), pdfGeneration: "failed" } });
+      await notifyReportGenerationStatus(reportGenerationRequest, "pdf_failed");
+    }
+  }
+};
+
+const generateLoveRelationshipKundaliReport = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude } = req.body;
+    
+    let reportPurchase = null;
+    if (!isReportQueueWorkerMode(req)) {
+      reportPurchase = await assertReportPurchaseAccess({ userId, reportType: "love-relationship", accessToken: req.body.reportAccessToken });
+    }
+
+    if (REPORT_QUEUE_ENABLED() && !isReportQueueWorkerMode(req)) {
+      await markReportPurchaseConsumed(reportPurchase, { queuedReportType: "love_relationship_kundali" });
+      return respondQueuedReport({ req, res, reportType: "love_relationship_kundali", message: "Love Relationship report request queued." });
+    }
+
+    const userRequest = await findOrCreateUserRequestWithKundli({ userId, userRequestId, fullName, gender, dateOfbirth, timeOfbirth, placeOfBirth, latitude, longitude });
+    if (reportPurchase) await markReportPurchaseConsumed(reportPurchase, { userRequestId: userRequest.id });
+
+    let reportRecord = await LoveRelationshipReport.findOne({ where: { userId, userRequestId: userRequest.id } });
+    let finalResponseData;
+    let reportGenerationRequest = null;
+    
+    if (reportRecord) {
+      finalResponseData = reportRecord.reportData;
+      if (!reportRecord.pdfUrl) {
+        reportGenerationRequest = await saveReportGenerationRequest(req, {
+          userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "love_relationship_kundali",
+          sourceType: "love_relationship_cached_pdf", sourceId: reportRecord.id, status: "llm_completed",
+          price: 0, currency: "INR", requestPayload: { reportId: reportRecord.id }, llmResponse: {}, reportData: finalResponseData || {},
+          startedAt: new Date(), metadata: { reason: "cached_pdf_missing", pdfGeneration: "pending" },
+        });
+        if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) return res.status(202).json({ success: true, queued: true });
+        generateLoveRelationshipPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+      }
+    } else {
+      let kundli = userRequest.kundli?.toJSON ? userRequest.kundli.toJSON() : userRequest.kundli;
+      finalResponseData = await generateLoveRelationshipReport(kundli || {}, userRequest);
+      reportRecord = await LoveRelationshipReport.create({ userId, userRequestId: userRequest.id, reportData: finalResponseData });
+      
+      reportGenerationRequest = await saveReportGenerationRequest(req, {
+        userId, userRequestId: userRequest.id, kundliId: userRequest.kundli?.id || null, reportType: "love_relationship_kundali",
+        sourceType: "love_relationship_report", sourceId: reportRecord.id, status: "llm_completed",
+        price: 0, currency: "INR", requestPayload: { userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, reportData: finalResponseData || {},
+        startedAt: new Date(), metadata: { pdfGeneration: "pending" },
+      });
+      if (await handoffToPdfQueueIfWorker(req, reportGenerationRequest, reportRecord?.id || null)) return res.status(202).json({ success: true, queued: true });
+      generateLoveRelationshipPdfInBackground(reportRecord, userRequest, reportGenerationRequest);
+    }
+
+    if (!reportGenerationRequest) reportGenerationRequest = await saveCachedReportGenerationRequestForWorker({ req, userId, userRequest, reportRecord, reportType: "love_relationship_kundali", sourceType: "love_relationship_report", price: 0, finalResponseData, kundliId: userRequest.kundli?.id || null, requestPayload: { userRequestId: userRequest.id }, llmResponse: finalResponseData || {}, metadata: {} });
+    if (isReportQueueWorkerMode(req)) return res.status(200).json({ success: true, worker_processed: true });
+    
+    return res.status(200).json({ success: true, report: { id: reportRecord.id, pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId, status: "completed" } });
+  } catch (error) {
+    console.error("[generateLoveRelationshipKundaliReport] ERROR:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+
+
+
+
+// --- COMPATIBILITY CRUD ---
+const getCompatibilityKundaliHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const reports = await CompatibilityReport.findAll({ where: { userId }, order: [['createdAt', 'DESC']] });
+    
+    const formattedReports = reports.map((r) => ({
+      id: r.id,
+      userRequestId: r.userRequestId,
+      status: r.pdfUrl ? "completed" : "generating",
+      boyName: r.boyName,
+      girlName: r.girlName,
+      boyPlaceOfBirth: r.boyPlaceOfBirth,
+      girlPlaceOfBirth: r.girlPlaceOfBirth,
+      createdAt: r.generatedAt || r.createdAt,
+      pdfUrl: r.pdfUrl || null,
+      reportData: r.reportData || null,
+    }));
+    
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "compatibility_kundali",
+      existingReports: formattedReports,
+    });
+
+    res.status(200).json({ success: true, reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const deleteCompatibilityKundaliReport = async (req, res) => {
+  try {
+    await CompatibilityReport.destroy({ where: { id: req.params.id, userId: req.user.id } });
+    res.status(200).json({ success: true, message: "Report deleted" });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const regenerateCompatibilityReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await CompatibilityReport.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!reportRecord) return res.status(404).json({ success: false });
+    const pdfBuffer = await generateCompatibilityReportPDF(reportRecord);
+    const pdfMetadata = await uploadCompatibilityPdfBuffer({ reportRecord, pdfBuffer, userRequest: null });
+    res.status(200).json({ success: true, ...pdfMetadata });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const downloadCompatibilityReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await CompatibilityReport.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!reportRecord || !reportRecord.pdfUrl) return res.status(404).json({ success: false });
+    const fetchUrl = reportRecord.pdfUrl.replace("/upload/", "/upload/fl_attachment/");
+    const response = await fetch(fetchUrl);
+    res.setHeader("Content-Disposition", `attachment; filename="${reportRecord.pdfFileName || "compatibility_report.pdf"}"`);
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const uploadCompatibilityPdfBuffer = async ({ reportRecord, pdfBuffer, userRequest }) => {
+  if (!reportRecord || !pdfBuffer) return { pdfUrl: reportRecord?.pdfUrl };
+  const fileName = `compatibility_report_${Date.now()}.pdf`;
+  const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/compatibility-reports" });
+  await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+  return { pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId };
+};
+
+// --- HEALTH CRUD ---
+const getHealthKundaliHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const reports = await HealthReport.findAll({ where: { userId }, include: [{ model: UserRequest, as: 'userRequest', required: true }], order: [['createdAt', 'DESC']] });
+
+    const formattedReports = reports.map((r) => ({
+      id: r.id,
+      userRequestId: r.userRequestId,
+      status: r.pdfUrl ? "completed" : "generating",
+      fullName: r.userRequest.fullName,
+      dateOfbirth: r.userRequest.dateOfbirth,
+      placeOfBirth: r.userRequest.placeOfBirth,
+      timeOfbirth: r.userRequest.timeOfbirth,
+      gender: r.userRequest.gender,
+      createdAt: r.generatedAt || r.createdAt,
+      pdfUrl: r.pdfUrl || null,
+      reportData: r.reportData || null,
+    }));
+
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "health_kundali",
+      existingReports: formattedReports,
+    });
+
+    res.status(200).json({ success: true, reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const deleteHealthKundaliReport = async (req, res) => {
+  try {
+    await HealthReport.destroy({ where: { id: req.params.id, userId: req.user.id } });
+    res.status(200).json({ success: true, message: "Report deleted" });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const regenerateHealthReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await HealthReport.findOne({ where: { id: req.params.id, userId: req.user.id }, include: [{ model: UserRequest, as: 'userRequest' }] });
+    if (!reportRecord) return res.status(404).json({ success: false });
+    const pdfBuffer = await generateHealthReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    const pdfMetadata = await uploadHealthPdfBuffer({ reportRecord, pdfBuffer, userRequest: reportRecord.userRequest });
+    res.status(200).json({ success: true, ...pdfMetadata });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const downloadHealthReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await HealthReport.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!reportRecord || !reportRecord.pdfUrl) return res.status(404).json({ success: false });
+    const fetchUrl = reportRecord.pdfUrl.replace("/upload/", "/upload/fl_attachment/");
+    const response = await fetch(fetchUrl);
+    res.setHeader("Content-Disposition", `attachment; filename="${reportRecord.pdfFileName || "health_report.pdf"}"`);
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const uploadHealthPdfBuffer = async ({ reportRecord, pdfBuffer, userRequest }) => {
+  if (!reportRecord || !pdfBuffer) return { pdfUrl: reportRecord?.pdfUrl };
+  const fileName = `health_report_${Date.now()}.pdf`;
+  const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/health-reports" });
+  await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+  return { pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId };
+};
+
+// --- LOVE RELATIONSHIP CRUD ---
+const getLoveRelationshipKundaliHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const reports = await LoveRelationshipReport.findAll({ where: { userId }, include: [{ model: UserRequest, as: 'userRequest', required: true }], order: [['createdAt', 'DESC']] });
+
+    const formattedReports = reports.map((r) => ({
+      id: r.id,
+      userRequestId: r.userRequestId,
+      status: r.pdfUrl ? "completed" : "generating",
+      fullName: r.userRequest.fullName,
+      dateOfbirth: r.userRequest.dateOfbirth,
+      placeOfBirth: r.userRequest.placeOfBirth,
+      timeOfbirth: r.userRequest.timeOfbirth,
+      gender: r.userRequest.gender,
+      createdAt: r.generatedAt || r.createdAt,
+      pdfUrl: r.pdfUrl || null,
+      reportData: r.reportData || null,
+    }));
+
+    const queuedReports = await getQueuedReportHistoryItems({
+      userId,
+      reportType: "love_relationship_kundali",
+      existingReports: formattedReports,
+    });
+
+    res.status(200).json({ success: true, reports: [...queuedReports, ...formattedReports].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const deleteLoveRelationshipKundaliReport = async (req, res) => {
+  try {
+    await LoveRelationshipReport.destroy({ where: { id: req.params.id, userId: req.user.id } });
+    res.status(200).json({ success: true, message: "Report deleted" });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const regenerateLoveRelationshipReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await LoveRelationshipReport.findOne({ where: { id: req.params.id, userId: req.user.id }, include: [{ model: UserRequest, as: 'userRequest' }] });
+    if (!reportRecord) return res.status(404).json({ success: false });
+    const pdfBuffer = await generateLoveRelationshipReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    const pdfMetadata = await uploadLoveRelationshipPdfBuffer({ reportRecord, pdfBuffer, userRequest: reportRecord.userRequest });
+    res.status(200).json({ success: true, ...pdfMetadata });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const downloadLoveRelationshipReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await LoveRelationshipReport.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!reportRecord || !reportRecord.pdfUrl) return res.status(404).json({ success: false });
+    const fetchUrl = reportRecord.pdfUrl.replace("/upload/", "/upload/fl_attachment/");
+    const response = await fetch(fetchUrl);
+    res.setHeader("Content-Disposition", `attachment; filename="${reportRecord.pdfFileName || "love_report.pdf"}"`);
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const uploadLoveRelationshipPdfBuffer = async ({ reportRecord, pdfBuffer, userRequest }) => {
+  if (!reportRecord || !pdfBuffer) return { pdfUrl: reportRecord?.pdfUrl };
+  const fileName = `love_report_${Date.now()}.pdf`;
+  const uploadResult = await uploadPdfBuffer({ buffer: pdfBuffer, fileName, folder: "graho/love-reports" });
+  await reportRecord.update({ pdfUrl: uploadResult.secure_url, pdfPublicId: uploadResult.public_id, pdfFileName: fileName, pdfUploadedAt: new Date() });
+  return { pdfUrl: reportRecord.pdfUrl, pdfFileName: reportRecord.pdfFileName, pdfPublicId: reportRecord.pdfPublicId };
+};
+
+const regenerateSadeSatiReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await SadeSatiReport.findOne({ where: { id: req.params.id, userId: req.user.id }, include: [{ model: UserRequest, as: 'userRequest' }] });
+    if (!reportRecord) return res.status(404).json({ success: false });
+    const pdfBuffer = await generateSadeSatiReportPDF(reportRecord.reportData, reportRecord.userRequest);
+    const pdfMetadata = await uploadSadeSatiPdfBuffer({ reportRecord, pdfBuffer, userRequest: reportRecord.userRequest });
+    res.status(200).json({ success: true, ...pdfMetadata });
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+const downloadSadeSatiReportPdf = async (req, res) => {
+  try {
+    const reportRecord = await SadeSatiReport.findOne({ where: { id: req.params.id, userId: req.user.id } });
+    if (!reportRecord || !reportRecord.pdfUrl) return res.status(404).json({ success: false });
+    const fetchUrl = reportRecord.pdfUrl.replace("/upload/", "/upload/fl_attachment/");
+    const response = await fetch(fetchUrl);
+    res.setHeader("Content-Disposition", `attachment; filename="${reportRecord.pdfFileName || "sadesati_report.pdf"}"`);
+    res.send(Buffer.from(await response.arrayBuffer()));
+  } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+};
+
+
 module.exports = {
+  generateCompatibilityKundaliReport,
+  getCompatibilityKundaliHistory,
+  deleteCompatibilityKundaliReport,
+  regenerateCompatibilityReportPdf,
+  downloadCompatibilityReportPdf,
+  generateHealthKundaliReport,
+  getHealthKundaliHistory,
+  deleteHealthKundaliReport,
+  regenerateHealthReportPdf,
+  downloadHealthReportPdf,
+  generateLoveRelationshipKundaliReport,
+  getLoveRelationshipKundaliHistory,
+  deleteLoveRelationshipKundaliReport,
+  regenerateLoveRelationshipReportPdf,
+  downloadLoveRelationshipReportPdf,
+  regenerateSadeSatiReportPdf,
+  downloadSadeSatiReportPdf,
   getUserKundlisForReport,
   generateKundliReport,
   getGeneratedKundliReport,

@@ -1,5 +1,7 @@
 const AdminSettings = require("../../model/admin/adminSettings");
 const User = require("../../model/user/userAuth");
+const UserInterestCohort = require("../../model/interest/userInterestCohort");
+const { Op } = require("sequelize");
 const {
   FREE_CHAT_TYPES,
   getUserFreeChatSummary,
@@ -236,6 +238,7 @@ const getUserHomeCardConfig = async (req, res) => {
     let showCard = settings.isEnabled;
     let userName = "User";
     let freeChatPreview = null;
+    let userActiveCohorts = [];
 
     if (userId) {
       try {
@@ -278,6 +281,26 @@ const getUserHomeCardConfig = async (req, res) => {
         if (!freeChatPreview) {
           showCard = false;
         }
+
+        // Fetch User Interest Cohorts
+        try {
+          const activeCohorts = await UserInterestCohort.findAll({
+            where: {
+              userId,
+              cohortType: "interest",
+              isActive: true,
+              scoreAtAssignment: { [Op.gt]: 0 },
+            },
+            attributes: ["category"],
+          });
+          
+          if (activeCohorts && activeCohorts.length > 0) {
+            userActiveCohorts = activeCohorts.map(c => c.category);
+          }
+        } catch (cohortErr) {
+          console.error("Error fetching user cohorts for home card:", cohortErr);
+        }
+
       } catch (dbErr) {
         console.error("Error evaluating user condition for home card:", dbErr);
         showCard = false;
@@ -289,6 +312,8 @@ const getUserHomeCardConfig = async (req, res) => {
     // Replace {name} placeholder in title
     const rawTitle = settings.title || DEFAULT_SETTINGS.title;
     const processedTitle = rawTitle.replace(/\{name\}/gi, userName);
+
+    console.log(`[HomeCardConfig] Sending config for user ${userName}. Active Cohorts:`, userActiveCohorts);
 
     res.status(200).json({
       success: true,
@@ -302,6 +327,7 @@ const getUserHomeCardConfig = async (req, res) => {
         freeChatPreview,
         fallbackCarouselItems: settings.fallbackCarouselItems || DEFAULT_SETTINGS.fallbackCarouselItems,
         carouselIntervalSeconds: settings.carouselIntervalSeconds || 4,
+        activeInterestCohorts: userActiveCohorts,
       },
     });
   } catch (error) {
@@ -319,6 +345,7 @@ const getUserHomeCardConfig = async (req, res) => {
         freeChatPreview: null,
         fallbackCarouselItems: DEFAULT_SETTINGS.fallbackCarouselItems,
         carouselIntervalSeconds: 4,
+        activeInterestCohorts: [],
       },
     });
   }

@@ -84,7 +84,8 @@ const trackPurchaseEvent = async ({
         {
           event_name: 'Purchase',
           event_time: Math.floor(Date.now() / 1000), // Unix timestamp in seconds
-          action_source: 'app',
+          event_id: String(transactionId), // Required for deduplication with App/Browser events
+          action_source: 'system_generated',
           user_data: userData,
           custom_data: {
             currency: currency,
