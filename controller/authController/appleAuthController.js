@@ -266,4 +266,96 @@ const appleCallback = async (req, res) => {
   }
 };
 
-module.exports = { redirectToApple, appleCallback };
+const mobileAppleLogin = async (req, res) => {
+  const { identityToken, fullName, email } = req.body;
+
+  if (!identityToken) {
+    return res.status(400).json({ success: false, message: "identityToken missing" });
+  }
+
+  try {
+    const applePayload = await appleSignin.verifyIdToken(identityToken, {
+      audience: ["com.graho", APPLE_CLIENT_ID],
+      ignoreExpiration: false,
+    });
+
+    const { sub: appleId, email: tokenEmail } = applePayload;
+    if (!appleId) {
+      return res.status(400).json({ success: false, message: "Apple ID missing from token" });
+    }
+
+    const finalEmail = tokenEmail || email || null;
+    const finalName = fullName || null;
+
+    let appleAuth = await AppleAuth.findOne({
+      where: { appleId },
+      include: [{ model: User, as: "user" }],
+    });
+
+    let user;
+    let isNewUser = false;
+
+    if (appleAuth) {
+      user = appleAuth.user;
+      const updates = {};
+      if (finalEmail && user.email !== finalEmail) updates.email = finalEmail;
+      if (finalName && user.fullName !== finalName) updates.fullName = finalName;
+      if (Object.keys(updates).length) await user.update(updates);
+    } else {
+      if (finalEmail) {
+        user = await User.findOne({ where: { email: finalEmail } });
+      }
+
+      if (user) {
+        appleAuth = await AppleAuth.create({ userId: user.id, appleId });
+      } else {
+        user = await User.create({
+          fullName: finalName || "Apple User",
+          email: finalEmail || null,
+          isUserRequested: false,
+        });
+        appleAuth = await AppleAuth.create({ userId: user.id, appleId });
+        isNewUser = true;
+      }
+    }
+
+    const token = createToken(user);
+    const middlewareToken = createMiddlewareToken(user);
+    const refreshToken = createRefreshToken(user);
+
+    await trackUserLogin(user.id, "apple", { invalidateTotalUsers: isNewUser });
+
+    let welcomeFreeChatInfo = null;
+    if (isNewUser) {
+      try {
+        welcomeFreeChatInfo = await grantWelcomeFreeChatForUser(user.id, { loginMethod: "apple" });
+      } catch (err) {
+        console.error("Failed to grant welcome free chat:", err);
+      }
+      try {
+        await handleNewUserOnboarding({ mobile: user.mobile, email: user.email });
+      } catch (error) {
+        console.error("Failed during new user onboarding notifications:", error);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: "Login successful",
+      isNewUser,
+      token,
+      middlewareToken,
+      refreshToken,
+      user,
+      welcomeFreeChatInfo,
+    });
+  } catch (error) {
+    console.error("Apple Mobile Sign In Error:", error);
+    if (error.message && error.message.includes("expired")) {
+      return res.status(401).json({ success: false, message: "Apple id_token expired" });
+    }
+    return res.status(500).json({ success: false, message: "Internal Server Error", error: error.message });
+  }
+};
+
+module.exports = { redirectToApple, appleCallback, mobileAppleLogin };

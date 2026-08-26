@@ -505,7 +505,7 @@ const logout = async (req, res) => {
     if (payload?.id && payload?.role !== "astrologer") {
       await recordUserLogout(payload.id);
 
-      const deviceId = req.body.deviceId ? String(req.body.deviceId).trim() : null;
+      const deviceId = req.body?.deviceId ? String(req.body.deviceId).trim() : null;
       if (deviceId) {
         const user = await User.findByPk(payload.id);
         if (user) {

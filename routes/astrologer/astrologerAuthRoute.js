@@ -22,14 +22,15 @@ const {
 } = require("../../controller/astrologer/astrologerAuthControllerV2");
 const upload = require("../../config/uploadConfig/supabaseUpload");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
+const { verifyBotProtection } = require("../../middleware/botProtection");
 
 // Public routes
-router.post("/send-otp", sendRegistrationOTP);
+router.post("/send-otp", verifyBotProtection, sendRegistrationOTP);
 router.post("/verify-otp", verifyOTP);
 router.post("/register", upload.single("photo"), completeRegistration);
 router.post("/login", login);
 router.post("/refresh-token", refreshAccessToken);
-router.post("/v2/send-otp", sendRegistrationOTPV2);
+router.post("/v2/send-otp", verifyBotProtection, sendRegistrationOTPV2);
 router.post("/v2/verify-otp", verifyOTPV2);
 router.post("/v2/register", upload.single("photo"), completeRegistrationV2);
 router.post("/v2/logout", checkForAuthenticationCookie(), logoutV2);
