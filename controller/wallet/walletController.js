@@ -80,6 +80,13 @@ const getWalletBalance = async (req, res) => {
 
     // Create wallet if doesn't exist
     if (!wallet) {
+      const user = await User.findByPk(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
       wallet = await Wallet.create({ userId });
     }
     queueWalletCohortRefresh(userId, "wallet_balance_checked");
