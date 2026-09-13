@@ -176,6 +176,8 @@ async function getAuthorizedSessionAccess({ socket, sessionId, authId, isAstrolo
       "astrologerId",
       "requestStatus",
       "status",
+      "billingSource",
+      "freeChatMinutes",
       "maxDurationSeconds",
       "maxEndTime",
       "walletBalanceAtApproval",
@@ -883,7 +885,15 @@ function initializeChatSocket(io) {
             return;
           }
 
-          if (!isAstrologer && session.status === "active" && session.requestStatus === "approved") {
+          const isFreeChatSession =
+            session.billingSource === CHAT_BILLING_SOURCES.FREE_CHAT;
+
+          if (
+            !isAstrologer &&
+            session.status === "active" &&
+            session.requestStatus === "approved" &&
+            !isFreeChatSession
+          ) {
             const wallet = await Wallet.findOne({ where: { userId: session.userId } });
             const walletBreakdown = getWalletBalanceBreakdown(wallet || {});
 

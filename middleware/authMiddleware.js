@@ -62,6 +62,23 @@ function checkForAuthenticationCookie() {
         if (!admin || admin.isActive === false || admin.isApproved === false) {
           return res.status(401).json({ error: "Invalid or expired token." });
         }
+      } else {
+        const User = require("../model/user/userAuth");
+        const user = await User.findByPk(userPayload.id, {
+          attributes: ["id", "isActive", "sessionVersion"],
+        });
+
+        if (!user || user.isActive === false) {
+          return res.status(401).json({ error: "Invalid or expired token." });
+        }
+
+        const tokenSessionVersion = Number.isInteger(userPayload.sessionVersion)
+          ? userPayload.sessionVersion
+          : 0;
+
+        if (tokenSessionVersion !== (user.sessionVersion || 0)) {
+          return res.status(401).json({ error: "Invalid or expired token." });
+        }
       }
       next();
     } catch (error) {

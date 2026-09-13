@@ -322,11 +322,8 @@ const startChatSession = async (req, res) => {
     let session = null;
 
     try {
-      const freeChatAllocation = await getAvailableFreeChatAllocation(
-        userId,
-        "real",
-        dbTransaction
-      );
+      // Free chat is disabled for human astrologers (AI astrologers only)
+      const freeChatAllocation = null;
 
       if (freeChatAllocation) {
         session = await ChatSession.create(

@@ -436,7 +436,7 @@ const grantWelcomeFreeChatForUser = async (
     userId,
     grantedByAdminId: systemGrantAdminId,
     minutes: normalizedMinutes,
-    applicableChatType: FREE_CHAT_TYPES.BOTH,
+    applicableChatType: FREE_CHAT_TYPES.AI,
     status: FREE_CHAT_STATUSES.ACTIVE,
     targetMode: "single",
     campaignName: WELCOME_FREE_CHAT_CAMPAIGN,
