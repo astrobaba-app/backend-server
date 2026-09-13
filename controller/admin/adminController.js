@@ -1633,6 +1633,51 @@ const getOpenAIRequestLogs = async (req, res) => {
   }
 };
 
+// Toggle Astrologer Active Status
+const toggleAstrologerStatus = async (req, res) => {
+  try {
+    const { astrologerId } = req.params;
+    const { isActive } = req.body;
+
+    const astrologer = await Astrologer.findByPk(astrologerId);
+    if (!astrologer) {
+      return res.status(404).json({
+        success: false,
+        message: "Astrologer not found",
+      });
+    }
+
+    const newStatus = typeof isActive === "boolean" ? isActive : !astrologer.isActive;
+
+    // If deactivating, also set isOnline to false
+    const updateData = { isActive: newStatus };
+    if (!newStatus) {
+      updateData.isOnline = false;
+    }
+
+    await astrologer.update(updateData);
+
+    res.status(200).json({
+      success: true,
+      message: `Astrologer ${newStatus ? "activated" : "deactivated"} successfully`,
+      astrologer: {
+        id: astrologer.id,
+        fullName: astrologer.fullName,
+        isActive: astrologer.isActive,
+        isOnline: astrologer.isOnline,
+      },
+    });
+  } catch (error) {
+    console.error("Toggle astrologer status error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update astrologer status",
+      error: error.message,
+    });
+  }
+};
+
+
 module.exports = {
   register,
   login,
@@ -1660,4 +1705,5 @@ module.exports = {
   verifyTwoFactor,
   disableTwoFactor,
   getOpenAIRequestLogs,
+  toggleAstrologerStatus,
 };

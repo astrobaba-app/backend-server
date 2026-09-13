@@ -27,6 +27,7 @@ const {
   verifyTwoFactor,
   disableTwoFactor,
   getOpenAIRequestLogs,
+  toggleAstrologerStatus,
 } = require("../../controller/admin/adminController");
 const {
   sendAstrologerNotification,
@@ -554,6 +555,14 @@ router.post(
   cleanupPalmQueue
 );
 
+router.patch(
+  "/astrologers/:astrologerId/status",
+  checkForAuthenticationCookie(),
+  authorizeRoles(["admin", "superadmin", "masteradmin"]),
+  toggleAstrologerStatus
+);
+
+
 // Manual in-memory cache refresh route for Content Bank
 router.post(
   "/content-bank/refresh",
@@ -573,6 +582,8 @@ router.post(
     }
   }
 );
+
+
 
 // Mount Modular Admin Routes
 router.use("/notifications", adminCohortNotificationRoute);
