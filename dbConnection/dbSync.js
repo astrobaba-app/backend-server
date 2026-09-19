@@ -454,8 +454,26 @@ async function autoMigrateHistoryMessages() {
         order: [["createdAt", "ASC"]],
       });
 
+      const historySessionIds = [...new Set(historyMessages.map(m => m.historySessionId).filter(Boolean))];
+      const historySessions = await ChatHistorySession.findAll({ where: { id: historySessionIds } });
+      const historySessionMap = new Map(historySessions.map(s => [s.id, s]));
+
+      const targetSessionIds = [...new Set(historySessions.map(s => s.sourceSessionId).filter(Boolean))];
+      const activeSessions = await ChatSession.findAll({ where: { id: targetSessionIds } });
+      const activeSessionMap = new Set(activeSessions.map(s => s.id));
+
+      const messageIdsToCheck = historyMessages.map(m => m.originalMessageId || m.id);
+      const replyToIds = historyMessages.map(m => m.replyToMessageId).filter(Boolean);
+      const allMessageIdsToFetch = [...new Set([...messageIdsToCheck, ...replyToIds])];
+      
+      const existingMessages = await ChatMessage.findAll({ where: { id: allMessageIdsToFetch } });
+      const existingMessageMap = new Map(existingMessages.map(m => [m.id, m]));
+
+      // Keep track of newly inserted IDs in this run so we don't need to query DB for replies
+      const newlyInsertedIds = new Set();
+
       for (const msg of historyMessages) {
-        const historySession = await ChatHistorySession.findByPk(msg.historySessionId);
+        const historySession = historySessionMap.get(msg.historySessionId);
         if (!historySession) continue;
 
         const messageIdToUse = msg.originalMessageId || msg.id;
@@ -464,10 +482,9 @@ async function autoMigrateHistoryMessages() {
         const targetSessionId = historySession.sourceSessionId;
         const createdAtToUse = msg.originalCreatedAt || msg.createdAt;
 
-        const activeSession = await ChatSession.findByPk(targetSessionId);
-        const sessionIdToUse = activeSession ? targetSessionId : null;
+        const sessionIdToUse = activeSessionMap.has(targetSessionId) ? targetSessionId : null;
 
-        const existing = await ChatMessage.findByPk(messageIdToUse);
+        const existing = existingMessageMap.get(messageIdToUse);
 
         if (existing) {
           if (!existing.userId || !existing.astrologerId) {
@@ -479,28 +496,32 @@ async function autoMigrateHistoryMessages() {
         } else {
           let validReplyToMessageId = null;
           if (msg.replyToMessageId) {
-            const parentExists = await ChatMessage.findByPk(msg.replyToMessageId);
-            if (parentExists) {
+            if (existingMessageMap.has(msg.replyToMessageId) || newlyInsertedIds.has(msg.replyToMessageId)) {
               validReplyToMessageId = msg.replyToMessageId;
             }
           }
 
-          await ChatMessage.create({
-            id: messageIdToUse,
-            sessionId: sessionIdToUse,
-            userId: targetUserId,
-            astrologerId: targetAstrologerId,
-            senderId: msg.senderId,
-            senderType: msg.senderType,
-            message: msg.message || "",
-            messageType: msg.messageType || "text",
-            fileUrl: msg.fileUrl || null,
-            isDeleted: msg.isDeleted || false,
-            replyToMessageId: validReplyToMessageId,
-            createdAt: createdAtToUse,
-            updatedAt: msg.updatedAt || createdAtToUse,
-          });
-          migratedCount++;
+          try {
+            await ChatMessage.create({
+              id: messageIdToUse,
+              sessionId: sessionIdToUse,
+              userId: targetUserId,
+              astrologerId: targetAstrologerId,
+              senderId: msg.senderId,
+              senderType: msg.senderType,
+              message: msg.message || "",
+              messageType: msg.messageType || "text",
+              fileUrl: msg.fileUrl || null,
+              isDeleted: msg.isDeleted || false,
+              replyToMessageId: validReplyToMessageId,
+              createdAt: createdAtToUse,
+              updatedAt: msg.updatedAt || createdAtToUse,
+            });
+            newlyInsertedIds.add(messageIdToUse);
+            migratedCount++;
+          } catch (createErr) {
+            console.error(`Failed to migrate msg ${messageIdToUse}:`, createErr.message);
+          }
         }
       }
 
