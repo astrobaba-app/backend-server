@@ -458,6 +458,14 @@ async function autoMigrateHistoryMessages() {
             });
           }
         } else {
+          let validReplyToMessageId = null;
+          if (msg.replyToMessageId) {
+            const parentExists = await ChatMessage.findByPk(msg.replyToMessageId);
+            if (parentExists) {
+              validReplyToMessageId = msg.replyToMessageId;
+            }
+          }
+
           await ChatMessage.create({
             id: messageIdToUse,
             sessionId: sessionIdToUse,
@@ -469,7 +477,7 @@ async function autoMigrateHistoryMessages() {
             messageType: msg.messageType || "text",
             fileUrl: msg.fileUrl || null,
             isDeleted: msg.isDeleted || false,
-            replyToMessageId: msg.replyToMessageId || null,
+            replyToMessageId: validReplyToMessageId,
             createdAt: createdAtToUse,
             updatedAt: msg.updatedAt || createdAtToUse,
           });
