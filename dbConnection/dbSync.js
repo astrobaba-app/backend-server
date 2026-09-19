@@ -2408,15 +2408,15 @@ const initDB = (callback) => {
       return ensureCohortStorageColumns();
     })
     .then(() => ensureAstroProductTrackingColumns())
+    .then(() => ensureChatSessionColumns())
+    .then(() => ensureChatMessageColumns())
+    .then(() => ensureLiveChatMessageColumns())
     .then(() => {
       // Basic sync (no alter) to avoid complex ALTER TABLE for all models
       return sequelize.sync();
     })
-    .then(() => ensureChatSessionColumns())
-    .then(() => ensureChatMessageColumns())
     .then(() => autoMigrateHistoryMessages())
     .then(() => ensureChatMessageVoiceEnumValues())
-    .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())
     .then(() => ensureAIChatSessionColumns())
     .then(() => ensureInterestIndexes())
