@@ -424,6 +424,25 @@ async function autoMigrateHistoryMessages() {
     const totalHistoryMessages = await ChatHistoryMessage.count();
     if (totalHistoryMessages === 0) return;
 
+    // Fast-skip: check if the oldest and newest history messages are already in ChatMessage
+    const firstHistoryMsg = await ChatHistoryMessage.findOne({ order: [["createdAt", "ASC"]] });
+    const lastHistoryMsg = await ChatHistoryMessage.findOne({ order: [["createdAt", "DESC"]] });
+    
+    if (firstHistoryMsg && lastHistoryMsg) {
+      const firstId = firstHistoryMsg.originalMessageId || firstHistoryMsg.id;
+      const lastId = lastHistoryMsg.originalMessageId || lastHistoryMsg.id;
+      
+      const [firstMigrated, lastMigrated] = await Promise.all([
+        ChatMessage.findByPk(firstId),
+        ChatMessage.findByPk(lastId)
+      ]);
+      
+      if (firstMigrated && lastMigrated) {
+        console.log("✓ History messages already migrated (fast-skip).");
+        return;
+      }
+    }
+
     const batchSize = 500;
     let offset = 0;
     let migratedCount = 0;
