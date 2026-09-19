@@ -378,9 +378,18 @@ async function ensureChatMessageColumns() {
       );
     }
 
+    if (table.sessionId && table.sessionId.allowNull === false) {
+      operations.push(
+        queryInterface.changeColumn("chat_messages", "sessionId", {
+          type: DataTypes.UUID,
+          allowNull: true,
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
-      console.log("Ensured chat_messages reply/delete/user/astrologer columns exist");
+      console.log("Ensured chat_messages sessionId/reply/delete/user/astrologer columns exist");
     }
 
     try {
