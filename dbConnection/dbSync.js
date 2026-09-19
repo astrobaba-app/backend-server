@@ -485,8 +485,9 @@ async function autoMigrateHistoryMessages() {
         }
       }
 
-      offset += batchSize;
-    }
+        offset += batchSize;
+        console.log(`[AutoMigrate] Processed ${Math.min(offset, totalHistoryMessages)} / ${totalHistoryMessages} history messages...`);
+      }
 
     if (migratedCount > 0) {
       console.log(`✓ Auto-migrated ${migratedCount} history messages to unified timeline.`);
