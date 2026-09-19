@@ -28,7 +28,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const userInactivityTimers = new Map();
 const walletLimitTimers = new Map();
 const disconnectTimers = new Map();
-const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
+const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice", "kundli"]);
 
 /**
  * Extract and validate JWT token from Socket.IO handshake
@@ -608,6 +608,8 @@ async function createAndBroadcastMessage({
       ? "[Voice note]"
       : messageType === "image" || messageType === "file"
       ? "[Attachment]"
+      : messageType === "kundli"
+      ? (text || "[Kundli Shared]")
       : (text || "").slice(0, 200);
 
   const updates = {
@@ -825,7 +827,8 @@ function initializeChatSocket(io) {
           const isSocketAttachmentMessage =
             normalizedMessageType === "voice" ||
             normalizedMessageType === "image" ||
-            normalizedMessageType === "file";
+            normalizedMessageType === "file" ||
+            normalizedMessageType === "kundli";
 
           if (!sessionId || (!normalizedText && !isSocketAttachmentMessage)) {
             if (callback) callback({ success: false, error: "Missing data" });

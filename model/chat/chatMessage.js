@@ -33,7 +33,7 @@ const ChatMessage = sequelize.define(
       allowNull: false,
     },
     messageType: {
-      type: DataTypes.ENUM("text", "image", "file", "voice"),
+      type: DataTypes.ENUM("text", "image", "file", "voice", "kundli"),
       defaultValue: "text",
     },
     fileUrl: {

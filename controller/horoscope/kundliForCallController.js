@@ -2,6 +2,7 @@ const Kundli = require("../../model/horoscope/kundli");
 const UserRequest = require("../../model/user/userRequest");
 const CallSession = require("../../model/call/callSession");
 const ChatSession = require("../../model/chat/chatSession");
+const ChatMessage = require("../../model/chat/chatMessage");
 const { Op } = require("sequelize");
 const { generateFreeReportNarratives } = require("../../services/freeReportAiService");
 const { createKundli } = require("./kundliController");
@@ -173,33 +174,44 @@ const getUserKundlisForChat = async (req, res) => {
       });
     }
 
-    const kundlis = await Kundli.findAll({
+    // Find all message records in this chat session where messageType is 'kundli'
+    const kundliMessages = await ChatMessage.findAll({
       where: {
         sessionId,
-        createdBy: astrologerId,
+        messageType: "kundli",
+        isDeleted: false,
       },
-      include: [
-        {
-          model: UserRequest,
-          as: "userRequest",
-          where: { userId: chatSession.userId },
-          attributes: [
-            "id",
-            "fullName",
-            "dateOfbirth",
-            "timeOfbirth",
-            "placeOfBirth",
-            "gender",
-            "createdAt",
-          ],
-        },
+      attributes: ["fileUrl"],
+    });
+
+    const sharedUserRequestIds = Array.from(
+      new Set(kundliMessages.map((m) => m.fileUrl).filter(Boolean))
+    );
+
+    if (sharedUserRequestIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        userRequests: [],
+        userName: "User",
+      });
+    }
+
+    const userRequests = await UserRequest.findAll({
+      where: {
+        id: { [Op.in]: sharedUserRequestIds },
+        userId: chatSession.userId,
+      },
+      attributes: [
+        "id",
+        "fullName",
+        "dateOfbirth",
+        "timeOfbirth",
+        "placeOfBirth",
+        "gender",
+        "createdAt",
       ],
       order: [["createdAt", "DESC"]],
     });
-
-    const userRequests = kundlis
-      .map((kundli) => kundli.userRequest)
-      .filter(Boolean);
 
     res.status(200).json({
       success: true,
@@ -258,8 +270,6 @@ const getKundliShareViewForChat = async (req, res) => {
     const kundli = await Kundli.findOne({
       where: {
         requestId: userRequestId,
-        sessionId,
-        createdBy: astrologerId,
       },
     });
 
@@ -332,8 +342,6 @@ const getKundliForChat = async (req, res) => {
     const kundli = await Kundli.findOne({
       where: {
         requestId: userRequestId,
-        sessionId,
-        createdBy: astrologerId,
       },
       include: [{ model: UserRequest, as: "userRequest" }],
     });
