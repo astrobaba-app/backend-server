@@ -319,43 +319,163 @@ async function ensureLiveChatMessageColumns() {
 async function ensureChatMessageColumns() {
   const queryInterface = sequelize.getQueryInterface();
 
-  const table = await queryInterface.describeTable("chat_messages");
-  const operations = [];
+  try {
+    const table = await queryInterface.describeTable("chat_messages");
+    const operations = [];
 
-  if (!table.reply_to_message_id) {
-    operations.push(
-      queryInterface.addColumn("chat_messages", "reply_to_message_id", {
-        type: DataTypes.UUID,
-        allowNull: true,
-        comment: "If set, this message is a reply to another message in the same session",
-      })
-    );
+    if (!table.user_id && !table.userId) {
+      operations.push(
+        queryInterface.addColumn("chat_messages", "user_id", {
+          type: DataTypes.UUID,
+          allowNull: true,
+          references: { model: "users", key: "id" },
+          onDelete: "CASCADE",
+          onUpdate: "CASCADE",
+        })
+      );
+    }
+
+    if (!table.astrologer_id && !table.astrologerId) {
+      operations.push(
+        queryInterface.addColumn("chat_messages", "astrologer_id", {
+          type: DataTypes.UUID,
+          allowNull: true,
+          references: { model: "astrologers", key: "id" },
+          onDelete: "CASCADE",
+          onUpdate: "CASCADE",
+        })
+      );
+    }
+
+    if (!table.reply_to_message_id) {
+      operations.push(
+        queryInterface.addColumn("chat_messages", "reply_to_message_id", {
+          type: DataTypes.UUID,
+          allowNull: true,
+          comment: "If set, this message is a reply to another message in the same session",
+        })
+      );
+    }
+
+    if (!table.is_deleted) {
+      operations.push(
+        queryInterface.addColumn("chat_messages", "is_deleted", {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+          defaultValue: false,
+          comment: "Soft-delete flag for messages",
+        })
+      );
+    }
+
+    if (!table.deleted_at) {
+      operations.push(
+        queryInterface.addColumn("chat_messages", "deleted_at", {
+          type: DataTypes.DATE,
+          allowNull: true,
+          comment: "Timestamp when message was soft-deleted",
+        })
+      );
+    }
+
+    if (operations.length) {
+      await Promise.all(operations);
+      console.log("Ensured chat_messages reply/delete/user/astrologer columns exist");
+    }
+
+    try {
+      const indexes = await queryInterface.showIndex("chat_messages");
+      const hasCompositeIndex = indexes.some(
+        (idx) => idx.name === "idx_chat_messages_user_astrologer_created"
+      );
+
+      if (!hasCompositeIndex) {
+        await queryInterface.addIndex(
+          "chat_messages",
+          ["user_id", "astrologer_id", "createdAt"],
+          { name: "idx_chat_messages_user_astrologer_created" }
+        );
+        console.log("Created idx_chat_messages_user_astrologer_created index on chat_messages");
+      }
+    } catch (idxErr) {
+      // Index creation check ignored if unsupported or already created
+    }
+  } catch (error) {
+    console.log("chat_messages table will be created by sequelize.sync()");
   }
+}
 
-  if (!table.is_deleted) {
-    operations.push(
-      queryInterface.addColumn("chat_messages", "is_deleted", {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: false,
-        comment: "Soft-delete flag for messages",
-      })
-    );
-  }
+async function autoMigrateHistoryMessages() {
+  try {
+    const ChatHistorySession = require("../model/chat/chatHistorySession");
+    const ChatHistoryMessage = require("../model/chat/chatHistoryMessage");
+    const ChatMessage = require("../model/chat/chatMessage");
+    const ChatSession = require("../model/chat/chatSession");
 
-  if (!table.deleted_at) {
-    operations.push(
-      queryInterface.addColumn("chat_messages", "deleted_at", {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: "Timestamp when message was soft-deleted",
-      })
-    );
-  }
+    const totalHistoryMessages = await ChatHistoryMessage.count();
+    if (totalHistoryMessages === 0) return;
 
-  if (operations.length) {
-    await Promise.all(operations);
-    console.log("Ensured chat_messages reply/delete columns exist");
+    const batchSize = 500;
+    let offset = 0;
+    let migratedCount = 0;
+
+    while (offset < totalHistoryMessages) {
+      const historyMessages = await ChatHistoryMessage.findAll({
+        limit: batchSize,
+        offset: offset,
+        order: [["createdAt", "ASC"]],
+      });
+
+      for (const msg of historyMessages) {
+        const historySession = await ChatHistorySession.findByPk(msg.historySessionId);
+        if (!historySession) continue;
+
+        const messageIdToUse = msg.originalMessageId || msg.id;
+        const targetUserId = historySession.userId;
+        const targetAstrologerId = historySession.astrologerId;
+        const targetSessionId = historySession.sourceSessionId;
+        const createdAtToUse = msg.originalCreatedAt || msg.createdAt;
+
+        const activeSession = await ChatSession.findByPk(targetSessionId);
+        const sessionIdToUse = activeSession ? targetSessionId : null;
+
+        const existing = await ChatMessage.findByPk(messageIdToUse);
+
+        if (existing) {
+          if (!existing.userId || !existing.astrologerId) {
+            await existing.update({
+              userId: targetUserId,
+              astrologerId: targetAstrologerId,
+            });
+          }
+        } else {
+          await ChatMessage.create({
+            id: messageIdToUse,
+            sessionId: sessionIdToUse,
+            userId: targetUserId,
+            astrologerId: targetAstrologerId,
+            senderId: msg.senderId,
+            senderType: msg.senderType,
+            message: msg.message || "",
+            messageType: msg.messageType || "text",
+            fileUrl: msg.fileUrl || null,
+            isDeleted: msg.isDeleted || false,
+            replyToMessageId: msg.replyToMessageId || null,
+            createdAt: createdAtToUse,
+            updatedAt: msg.updatedAt || createdAtToUse,
+          });
+          migratedCount++;
+        }
+      }
+
+      offset += batchSize;
+    }
+
+    if (migratedCount > 0) {
+      console.log(`✓ Auto-migrated ${migratedCount} history messages to unified timeline.`);
+    }
+  } catch (error) {
+    console.error("Auto history migration check note:", error.message);
   }
 }
 
@@ -2294,6 +2414,7 @@ const initDB = (callback) => {
     })
     .then(() => ensureChatSessionColumns())
     .then(() => ensureChatMessageColumns())
+    .then(() => autoMigrateHistoryMessages())
     .then(() => ensureChatMessageVoiceEnumValues())
     .then(() => ensureLiveChatMessageColumns())
     .then(() => ensureBlogColumns())

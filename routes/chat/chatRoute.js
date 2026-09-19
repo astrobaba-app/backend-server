@@ -17,6 +17,7 @@ const {
   approveChatRequest,
   rejectChatRequest,
   endAstrologerChatSession,
+  getConversationMessages,
 } = require("../../controller/chat/chatController");
 const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 const { authorizeRoles } = require("../../middleware/roleMiddleware");
@@ -33,6 +34,7 @@ router.get("/active/:astrologerId", checkForAuthenticationCookie(), getActiveSes
 router.get("/total-minutes/:astrologerId", checkForAuthenticationCookie(), getTotalMinutesWithAstrologer);
 router.get("/v2/sessions/:sessionId/status", checkForAuthenticationCookie(), getChatSessionStatusV2);
 router.get("/v2/history/:historySessionId", checkForAuthenticationCookie(), getChatHistorySessionV2);
+router.get("/conversations/:astrologerId/messages", checkForAuthenticationCookie(), getConversationMessages);
 
 // Astrologer routes
 router.get(

@@ -28,7 +28,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const userInactivityTimers = new Map();
 const walletLimitTimers = new Map();
 const disconnectTimers = new Map();
-const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice"]);
+const CHAT_MESSAGE_TYPES = new Set(["text", "image", "file", "voice", "kundli"]);
 
 /**
  * Extract and validate JWT token from Socket.IO handshake
@@ -124,14 +124,19 @@ function toSessionAccessSnapshot(session) {
   };
 }
 
+function safeIdMatch(a, b) {
+  if (a === null || a === undefined || b === null || b === undefined) return false;
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
 function canAccessSession({ session, authId, isAstrologer }) {
   if (!session) return false;
 
   if (isAstrologer) {
-    return session.astrologerId === authId;
+    return safeIdMatch(session.astrologerId, authId);
   }
 
-  return session.userId === authId;
+  return safeIdMatch(session.userId, authId);
 }
 
 function getSocketSessionCache(socket) {
@@ -603,6 +608,8 @@ async function createAndBroadcastMessage({
       ? "[Voice note]"
       : messageType === "image" || messageType === "file"
       ? "[Attachment]"
+      : messageType === "kundli"
+      ? (text || "[Kundli Shared]")
       : (text || "").slice(0, 200);
 
   const updates = {
@@ -734,7 +741,7 @@ function initializeChatSocket(io) {
             where: { sourceSessionId: sessionId },
           });
 
-          if (archivedSession && (archivedSession.userId === authId || archivedSession.astrologerId === authId)) {
+          if (archivedSession && (safeIdMatch(archivedSession.userId, authId) || safeIdMatch(archivedSession.astrologerId, authId))) {
             socket.emit("chat:ended", {
               sessionId: sessionId,
               endedBy: "system",
@@ -820,7 +827,8 @@ function initializeChatSocket(io) {
           const isSocketAttachmentMessage =
             normalizedMessageType === "voice" ||
             normalizedMessageType === "image" ||
-            normalizedMessageType === "file";
+            normalizedMessageType === "file" ||
+            normalizedMessageType === "kundli";
 
           if (!sessionId || (!normalizedText && !isSocketAttachmentMessage)) {
             if (callback) callback({ success: false, error: "Missing data" });
@@ -852,8 +860,8 @@ function initializeChatSocket(io) {
           }
 
           if (
-            (!isAstrologer && session.userId !== authId) ||
-            (isAstrologer && session.astrologerId !== authId)
+            (!isAstrologer && !safeIdMatch(session.userId, authId)) ||
+            (isAstrologer && !safeIdMatch(session.astrologerId, authId))
           ) {
             if (callback)
               callback({ success: false, error: "Not part of this session" });
@@ -957,8 +965,8 @@ function initializeChatSocket(io) {
         }
 
         if (
-          (!isAstrologer && session.userId !== authId) ||
-          (isAstrologer && session.astrologerId !== authId)
+          (!isAstrologer && !safeIdMatch(session.userId, authId)) ||
+          (isAstrologer && !safeIdMatch(session.astrologerId, authId))
         ) {
           if (callback) callback({ success: false, error: "Not part of this session" });
           return;
@@ -1085,8 +1093,8 @@ function initializeChatSocket(io) {
         if (!session) return;
 
         if (
-          (!isAstrologer && session.userId !== authId) ||
-          (isAstrologer && session.astrologerId !== authId)
+          (!isAstrologer && !safeIdMatch(session.userId, authId)) ||
+          (isAstrologer && !safeIdMatch(session.astrologerId, authId))
         ) {
           return;
         }
@@ -1103,7 +1111,7 @@ function initializeChatSocket(io) {
       try {
         if (!isAstrologer || !sessionId) return;
         const session = await ChatSession.findByPk(sessionId);
-        if (!session || session.astrologerId !== authId) return;
+        if (!session || !safeIdMatch(session.astrologerId, authId)) return;
 
         const approvalStartTime = new Date();
         const pricePerMinute = parseFloat(session.pricePerMinute || 0);
