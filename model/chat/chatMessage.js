@@ -11,12 +11,12 @@ const ChatMessage = sequelize.define(
     },
     sessionId: {
       type: DataTypes.UUID,
-      allowNull: false,
+      allowNull: true,
       references: {
         model: "chat_sessions",
         key: "id",
       },
-      onDelete: "CASCADE",
+      onDelete: "SET NULL",
       onUpdate: "CASCADE",
     },
     senderId: {
@@ -62,6 +62,29 @@ const ChatMessage = sequelize.define(
       field: "reply_to_message_id",
       comment: "If set, this message is a reply to another message in the same session",
     },
+    // Composite conversation identifiers for persistent message timeline
+    userId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "users",
+        key: "id",
+      },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+      field: "user_id",
+    },
+    astrologerId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: {
+        model: "astrologers",
+        key: "id",
+      },
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+      field: "astrologer_id",
+    },
     // Soft-delete flag for messages (content can be hidden but record kept for audit/order)
     isDeleted: {
       type: DataTypes.BOOLEAN,
@@ -78,6 +101,12 @@ const ChatMessage = sequelize.define(
   {
     tableName: "chat_messages",
     timestamps: true,
+    indexes: [
+      { fields: ["sessionId"] },
+      { fields: ["user_id"] },
+      { fields: ["astrologer_id"] },
+      { fields: ["user_id", "astrologer_id", "createdAt"] },
+    ],
   }
 );
 

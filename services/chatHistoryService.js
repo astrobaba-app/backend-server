@@ -78,7 +78,19 @@ async function archiveAndDeleteSession(sessionId, options = {}) {
       }
     }
 
-    await ChatMessage.destroy({ where: { sessionId: session.id }, transaction });
+    // Ensure all live messages in chat_messages have userId and astrologerId set for continuous conversation timeline
+    await ChatMessage.update(
+      {
+        userId: session.userId,
+        astrologerId: session.astrologerId,
+      },
+      {
+        where: { sessionId: session.id },
+        transaction,
+      }
+    );
+
+    // Delete ephemeral live session row; messages are preserved in chat_messages for continuous timeline
     await ChatSession.destroy({ where: { id: session.id }, transaction });
 
     return {

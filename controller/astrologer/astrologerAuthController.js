@@ -674,6 +674,18 @@ const refreshAccessToken = async (req, res) => {
 // Logout
 const logout = async (req, res) => {
   try {
+    const astrologerId = req.user?.id;
+    if (astrologerId) {
+      await Astrologer.update({ isOnline: false }, { where: { id: astrologerId } });
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("astrologer:status_changed", {
+          astrologerId,
+          isOnline: false,
+        });
+      }
+    }
+
     clearTokenCookieAstrologer(res);
 
     res.status(200).json({
@@ -710,6 +722,14 @@ const toggleOnlineStatus = async (req, res) => {
     const newStatus =
       requestedStatus === null ? !astrologer.isOnline : requestedStatus;
     await astrologer.update({ isOnline: newStatus });
+
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("astrologer:status_changed", {
+        astrologerId: astrologer.id,
+        isOnline: newStatus,
+      });
+    }
 
     // Send push notification to followers when astrologer goes online
     if (newStatus === true) {

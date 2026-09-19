@@ -84,12 +84,17 @@ function getRequestExpiryIso(session) {
   return new Date(startedAt + CHAT_REQUEST_TIMEOUT_SECONDS * 1000).toISOString();
 }
 
+function safeIdMatch(a, b) {
+  if (a === null || a === undefined || b === null || b === undefined) return false;
+  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+}
+
 function canAccessChatSession(reqUser, session) {
   if (!reqUser || !session) return false;
   if (reqUser.role === "astrologer") {
-    return session.astrologerId === reqUser.id;
+    return safeIdMatch(session.astrologerId, reqUser.id);
   }
-  return session.userId === reqUser.id;
+  return safeIdMatch(session.userId, reqUser.id);
 }
 
 function getSessionStatusMeta(session) {
@@ -178,6 +183,9 @@ async function cancelPendingChatRequestNotification(session, reason = "cancelled
 
 async function notifyPendingChatRequestClosed(io, session, reason = "cancelled") {
   if (!session) return;
+
+  await redis.del(`astrologer:busy:${session.astrologerId}`).catch(() => null);
+  await redis.del(`user:busy:${session.userId}`).catch(() => null);
 
   await cancelPendingChatRequestNotification(session, reason);
 
@@ -297,6 +305,55 @@ const startChatSession = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Astrologer is currently offline",
+      });
+    }
+
+    // Check if an active or pending chat session already exists between this user & astrologer
+    const existingSession = await ChatSession.findOne({
+      where: {
+        userId,
+        astrologerId,
+        status: "active",
+      },
+    });
+
+    if (existingSession) {
+      const astrologerDetails = await Astrologer.findByPk(astrologerId, {
+        attributes: ["id", "fullName", "photo", "pricePerMinute", "rating"],
+      });
+
+      const io = req.app.get("io");
+      if (io) {
+        const {
+          getAstrologerRoom,
+          getSessionRoom,
+          mapSession,
+        } = require("../../services/chatSocket");
+
+        const payload = {
+          sessionId: existingSession.id,
+          expiresAt: getRequestExpiryIso(existingSession),
+          session: mapSession(existingSession, "astrologer"),
+          user: {
+            id: req.user.id,
+            fullName: req.user.fullName || "User",
+            email: req.user.email || null,
+          },
+        };
+
+        io.to(getAstrologerRoom(astrologerId)).emit("chat:request:new", payload);
+        io.to(getSessionRoom(existingSession.id)).emit("chat:request:new", payload);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Existing chat session active",
+        requestTimeoutSeconds: CHAT_REQUEST_TIMEOUT_SECONDS,
+        requestExpiresAt: getRequestExpiryIso(existingSession),
+        session: {
+          ...existingSession.toJSON(),
+          astrologer: astrologerDetails,
+        },
       });
     }
 
@@ -489,16 +546,14 @@ const endChatSession = async (req, res) => {
       ? requestedReason
       : "user_ended_chat";
 
-    const session = await ChatSession.findOne({
-      where: { id: sessionId, userId },
-    });
+    const session = await ChatSession.findByPk(sessionId);
 
-    if (!session) {
+    if (!session || !canAccessChatSession(req.user, session)) {
       const archived = await ChatHistorySession.findOne({
-        where: { sourceSessionId: sessionId, userId },
+        where: { sourceSessionId: sessionId },
       });
 
-      if (archived) {
+      if (archived && canAccessChatSession(req.user, archived)) {
         return res.status(200).json({
           success: true,
           message: "Chat session already ended",
@@ -758,14 +813,14 @@ const sendMessage = async (req, res) => {
     }
 
     // Verify sender is part of this session
-    if (senderType === "user" && session.userId !== senderId) {
+    if (senderType === "user" && !safeIdMatch(session.userId, senderId)) {
       return res.status(403).json({
         success: false,
         message: "You are not part of this chat session",
       });
     }
 
-    if (senderType === "astrologer" && session.astrologerId !== senderId) {
+    if (senderType === "astrologer" && !safeIdMatch(session.astrologerId, senderId)) {
       return res.status(403).json({
         success: false,
         message: "You are not part of this chat session",
@@ -844,6 +899,8 @@ const sendMessage = async (req, res) => {
 
     const chatMessage = await ChatMessage.create({
       sessionId,
+      userId: session.userId,
+      astrologerId: session.astrologerId,
       senderId,
       senderType,
       message: safeMessage,
@@ -966,13 +1023,16 @@ const getSessionMessages = async (req, res) => {
       });
     }
 
-    const messageWhere = { sessionId };
-
-    // Astrologer sees only current conversation window (fresh start after each approval).
-    // User keeps full chat history for the same astrologer.
-    if (astrologerId && session.startTime) {
-      messageWhere.createdAt = { [Op.gte]: new Date(session.startTime) };
-    }
+    const messageWhere = {
+      [Op.or]: [
+        { sessionId },
+        {
+          userId: session.userId,
+          astrologerId: session.astrologerId,
+        },
+      ],
+      isDeleted: false,
+    };
 
     const { rows: messages, count } = await ChatMessage.findAndCountAll({
       where: messageWhere,
@@ -1332,11 +1392,9 @@ const approveChatRequest = async (req, res) => {
     const { sessionId } = req.params;
     const { forceAccept = false } = req.body || {};
 
-    const session = await ChatSession.findOne({
-      where: { id: sessionId, astrologerId },
-    });
+    const session = await ChatSession.findByPk(sessionId);
 
-    if (!session) {
+    if (!session || !canAccessChatSession(req.user, session)) {
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -1580,11 +1638,9 @@ const rejectChatRequest = async (req, res) => {
     const astrologerId = req.user.id;
     const { sessionId } = req.params;
 
-    const session = await ChatSession.findOne({
-      where: { id: sessionId, astrologerId },
-    });
+    const session = await ChatSession.findByPk(sessionId);
 
-    if (!session) {
+    if (!session || !canAccessChatSession(req.user, session)) {
       return res.status(404).json({
         success: false,
         message: "Chat session not found",
@@ -1641,19 +1697,28 @@ const getUserChatHistory = async (req, res) => {
         {
           model: Astrologer,
           as: "astrologer",
-          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute", "isOnline"],
         },
       ],
     });
 
+    const dedupedSessions = [];
+    const seenAstrologers = new Set();
+    for (const session of historySessions) {
+      if (session.astrologerId && !seenAstrologers.has(session.astrologerId)) {
+        seenAstrologers.add(session.astrologerId);
+        dedupedSessions.push(session);
+      }
+    }
+
     res.status(200).json({
       success: true,
-      historySessions,
+      historySessions: dedupedSessions,
       pagination: {
-        total: count,
+        total: dedupedSessions.length,
         page: pageNumber,
         limit: pageSize,
-        totalPages: Math.ceil(count / pageSize),
+        totalPages: Math.ceil(dedupedSessions.length / pageSize),
       },
     });
   } catch (error) {
@@ -1686,7 +1751,7 @@ const getUserAstrologerChatHistory = async (req, res) => {
         {
           model: Astrologer,
           as: "astrologer",
-          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute"],
+          attributes: ["id", "fullName", "photo", "rating", "pricePerMinute", "isOnline"],
         },
         {
           model: ChatHistoryMessage,
@@ -1839,19 +1904,14 @@ const endAstrologerChatSession = async (req, res) => {
     const astrologerId = req.user.id;
     const { sessionId } = req.params;
 
-    const session = await ChatSession.findOne({
-      where: {
-        id: sessionId,
-        astrologerId,
-      },
-    });
+    const session = await ChatSession.findByPk(sessionId);
 
-    if (!session) {
+    if (!session || !canAccessChatSession(req.user, session)) {
       const archived = await ChatHistorySession.findOne({
-        where: { sourceSessionId: sessionId, astrologerId },
+        where: { sourceSessionId: sessionId },
       });
 
-      if (archived) {
+      if (archived && canAccessChatSession(req.user, archived)) {
         return res.status(200).json({
           success: true,
           message: "Chat session already ended",
@@ -1954,6 +2014,103 @@ const endAstrologerChatSession = async (req, res) => {
   }
 };
 
+// Continuous Conversation Message History with Cursor Pagination (WhatsApp style)
+const getConversationMessages = async (req, res) => {
+  try {
+    const { astrologerId: targetAstrologerId } = req.params;
+    const { limit = 10, before } = req.query;
+    const pageSize = Math.min(Math.max(parseInt(limit, 10) || 10, 1), 50);
+
+    let userId, astrologerId;
+    if (req.user.role === "astrologer") {
+      astrologerId = req.user.id;
+      userId = targetAstrologerId; // Parameter represents userId when called by astrologer
+    } else {
+      userId = req.user.id;
+      astrologerId = targetAstrologerId;
+    }
+
+    if (!userId || !astrologerId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID and Astrologer ID are required",
+      });
+    }
+
+    const where = {
+      [Op.or]: [
+        { userId, astrologerId },
+        { user_id: userId, astrologer_id: astrologerId },
+      ],
+      isDeleted: false,
+    };
+
+    if (before) {
+      const beforeDate = new Date(before);
+      if (!isNaN(beforeDate.getTime())) {
+        where.createdAt = { [Op.lt]: beforeDate };
+      }
+    }
+
+    // Query 1 extra row to determine hasMore
+    const rawMessages = await ChatMessage.findAll({
+      where,
+      limit: pageSize + 1,
+      order: [["createdAt", "DESC"]],
+    });
+
+    const hasMore = rawMessages.length > pageSize;
+    const pageMessages = hasMore ? rawMessages.slice(0, pageSize) : rawMessages;
+
+    // Sort chronologically ascending for client display
+    const chronologicalMessages = pageMessages.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    const nextCursor =
+      hasMore && pageMessages.length > 0
+        ? pageMessages[0].createdAt // Oldest message in this page
+        : null;
+
+    // Check if there is an active session between user and astrologer
+    const activeSession = await ChatSession.findOne({
+      where: {
+        userId,
+        astrologerId,
+        status: "active",
+      },
+      order: [["createdAt", "DESC"]],
+      include: [
+        {
+          model: Astrologer,
+          as: "astrologer",
+          attributes: ["id", "fullName", "photo", "pricePerMinute", "rating", "isOnline"],
+        },
+      ],
+    });
+
+    const astrologer = await Astrologer.findByPk(astrologerId, {
+      attributes: ["id", "fullName", "photo", "pricePerMinute", "rating", "isOnline"],
+    });
+
+    res.status(200).json({
+      success: true,
+      messages: chronologicalMessages,
+      hasMore,
+      nextCursor,
+      activeSession: activeSession ? activeSession.toJSON() : null,
+      astrologer: astrologer ? astrologer.toJSON() : null,
+    });
+  } catch (error) {
+    console.error("Get conversation messages error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch conversation messages",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   startChatSession,
   endChatSession,
@@ -1971,5 +2128,6 @@ module.exports = {
   getTotalMinutesWithAstrologer,
   approveChatRequest,
   rejectChatRequest,
+  getConversationMessages,
 };
 
