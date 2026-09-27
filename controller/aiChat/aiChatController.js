@@ -1851,6 +1851,165 @@ const createChatSessionV2 = async (req, res) => {
   }
 };
 
+/**
+ * Re-activate / continue a past AI chat session from Chat History.
+ * Shared helper for session continuation and auto-reactivation.
+ */
+const reactivateSessionForContinuation = async (session, userId) => {
+  const dbTransaction = await sequelize.transaction();
+
+  try {
+    const lockedSession = await AIChatSession.findByPk(session.id, {
+      transaction: dbTransaction,
+      lock: dbTransaction.LOCK.UPDATE,
+    });
+
+    if (!lockedSession) {
+      await dbTransaction.rollback();
+      return {
+        success: false,
+        statusCode: 404,
+        payload: { success: false, message: "Chat session not found" },
+      };
+    }
+
+    const now = new Date();
+    const profile = ASTROLOGER_PROFILES[lockedSession.astrologerId] || ASTROLOGER_PROFILES["ai-astrologer-devansh"];
+    const pricePerMinute = lockedSession.pricePerMinute || profile.pricePerMinute || AI_CHAT_PRICE_PER_MINUTE;
+
+    const freeChatAllocation = await getAvailableFreeChatAllocation(
+      userId,
+      "ai",
+      dbTransaction
+    );
+
+    let maxDurationSeconds = null;
+    let maxEndTime = null;
+    let walletBalanceAtStart = lockedSession.walletBalanceAtStart;
+
+    if (freeChatAllocation) {
+      const freeFields = buildFreeChatSessionFields(freeChatAllocation, now);
+      maxDurationSeconds = freeFields.maxDurationSeconds;
+      maxEndTime = freeFields.maxEndTime;
+    } else {
+      const { breakdown } = await getAiWalletBreakdown(userId, dbTransaction);
+      if (breakdown.balance < pricePerMinute) {
+        await dbTransaction.rollback();
+        return {
+          success: false,
+          statusCode: 402,
+          payload: {
+            success: false,
+            code: "INSUFFICIENT_AI_BALANCE",
+            message: "Out of balance. Recharge more to chat with AI astrologer.",
+            wallet: {
+              balance: breakdown.balance,
+              aiUsableBalance: breakdown.balance,
+              required: pricePerMinute,
+            },
+          },
+        };
+      }
+
+      const walletLimit = calculateAiWalletLimit(breakdown.balance, pricePerMinute);
+      maxDurationSeconds = walletLimit.maxDurationSeconds;
+      maxEndTime = walletLimit.maxEndTime;
+      walletBalanceAtStart = walletLimit.walletBalanceAtStart;
+    }
+
+    await lockedSession.update(
+      {
+        isActive: true,
+        status: "active",
+        startTime: now,
+        endTime: null,
+        endReason: null,
+        maxDurationSeconds,
+        maxEndTime,
+        walletBalanceAtStart,
+        lastMessageAt: now,
+      },
+      { transaction: dbTransaction }
+    );
+
+    await dbTransaction.commit();
+    scheduleAiChatInactivityAutoEnd(lockedSession);
+
+    // Auto-hydrate Kundli context into Python AI Engine RAM cache if attached
+    let kundliHydrated = false;
+    if (lockedSession.kundliUserRequestId) {
+      try {
+        const [kundliRecord, userRequestRecord] = await Promise.all([
+          Kundli.findOne({ where: { requestId: lockedSession.kundliUserRequestId } }),
+          UserRequest.findOne({ where: { id: lockedSession.kundliUserRequestId } }),
+        ]);
+
+        if (kundliRecord || userRequestRecord) {
+          await cacheAiChatKundliContext(lockedSession.id, kundliRecord, userRequestRecord);
+          kundliHydrated = true;
+        }
+      } catch (kundliErr) {
+        console.error(
+          `Failed to auto-hydrate Kundli context for continued session ${lockedSession.id}:`,
+          kundliErr.message
+        );
+      }
+    }
+
+    return {
+      success: true,
+      session: lockedSession,
+      kundliHydrated,
+    };
+  } catch (error) {
+    await dbTransaction.rollback();
+    throw error;
+  }
+};
+
+/**
+ * Endpoint to re-activate a completed session from Chat History for continuation.
+ */
+const continueChatSessionV2 = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { sessionId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { id: sessionId, userId },
+    });
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: "AI chat session not found",
+      });
+    }
+
+    const reactivateResult = await reactivateSessionForContinuation(session, userId);
+    if (!reactivateResult.success) {
+      return res.status(reactivateResult.statusCode || 402).json(reactivateResult.payload);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Chat session continued successfully",
+      session: formatAiSession(reactivateResult.session),
+      astrologer: buildPublicAiAstrologerProfile(reactivateResult.session.astrologerId),
+      kundliHydrated: reactivateResult.kundliHydrated,
+    });
+  } catch (error) {
+    console.error("Continue AI chat session v2 error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to continue AI chat session",
+      error: error.message,
+    });
+  }
+};
+
+
+
 const getAiAstrologersV2 = async (req, res) => {
   try {
     const astrologers = await Promise.all(
@@ -2531,27 +2690,58 @@ const getChatMessages = async (req, res) => {
       });
     }
 
-    const { rows: messages, count } = await AIChatMessage.findAndCountAll({
-      where: { sessionId },
-      order: [["createdAt", "ASC"], ["id", "ASC"]],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+    const { page: reqPage = 1, limit: reqLimit = 50, beforeMessageId, order = "ASC", latest } = req.query;
+    const parsedLimit = Math.max(1, Math.min(parseInt(reqLimit, 10) || 50, 100));
+    const whereClause = { sessionId };
+
+    if (beforeMessageId) {
+      const refMsg = await AIChatMessage.findOne({
+        where: { id: beforeMessageId, sessionId },
+      });
+      if (refMsg) {
+        whereClause[Op.or] = [
+          { createdAt: { [Op.lt]: refMsg.createdAt } },
+          {
+            createdAt: refMsg.createdAt,
+            id: { [Op.lt]: refMsg.id },
+          },
+        ];
+      }
+    }
+
+    const isLatestChunk = Boolean(beforeMessageId || String(latest) === "true");
+    const queryOrder = isLatestChunk
+      ? [["createdAt", "DESC"], ["id", "DESC"]]
+      : String(order).toUpperCase() === "DESC"
+      ? [["createdAt", "DESC"], ["id", "DESC"]]
+      : [["createdAt", "ASC"], ["id", "ASC"]];
+
+    const calcOffset = beforeMessageId ? 0 : Math.max(0, (parseInt(reqPage, 10) - 1) * parsedLimit);
+
+    const { rows: rawMessages, count } = await AIChatMessage.findAndCountAll({
+      where: whereClause,
+      order: queryOrder,
+      limit: parsedLimit,
+      offset: calcOffset,
     });
+
+    const messages = isLatestChunk ? [...rawMessages].reverse() : rawMessages;
+    const oldestMsgInChunk = messages[0] || null;
+    const hasMore = isLatestChunk
+      ? count > messages.length && oldestMsgInChunk !== null
+      : count > calcOffset + messages.length;
 
     res.status(200).json({
       success: true,
-      session: {
-        id: session.id,
-        title: session.title,
-        createdAt: session.createdAt,
-        lastMessageAt: session.lastMessageAt,
-      },
+      session: formatAiSession(session),
       messages,
       pagination: {
         total: count,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(count / limit),
+        page: parseInt(reqPage, 10) || 1,
+        limit: parsedLimit,
+        totalPages: Math.ceil(count / parsedLimit),
+        hasMore,
+        oldestMessageId: oldestMsgInChunk?.id || null,
       },
     });
   } catch (error) {
@@ -2559,6 +2749,41 @@ const getChatMessages = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch chat messages",
+      error: error.message,
+    });
+  }
+};
+
+/**
+ * Get user's latest chat session for a specific AI Astrologer.
+ */
+const getLatestAiChatSession = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { astrologerId } = req.params;
+
+    const session = await AIChatSession.findOne({
+      where: { userId, astrologerId },
+      order: [["createdAt", "DESC"], ["lastMessageAt", "DESC"]],
+    });
+
+    if (!session) {
+      return res.status(200).json({
+        success: true,
+        session: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      session: formatAiSession(session),
+      astrologer: buildPublicAiAstrologerProfile(session.astrologerId),
+    });
+  } catch (error) {
+    console.error("Get latest AI chat session error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch latest AI chat session",
       error: error.message,
     });
   }
@@ -3330,6 +3555,16 @@ const sendMessageV3 = async (req, res) => {
       });
     }
 
+    const isContinuation = Boolean(
+      requestBody.allowReopen || requestBody.isContinuation || requestBody.allow_reopen
+    );
+    if (isContinuation && (session.status || "active") !== "active") {
+      const reactivateResult = await reactivateSessionForContinuation(session, userId);
+      if (!reactivateResult.success) {
+        return res.status(reactivateResult.statusCode || 402).json(reactivateResult.payload);
+      }
+    }
+
     const sessionState = await enforceActiveAiSession(session);
     if (sessionState.ended) {
       return res.status(402).json({
@@ -3866,6 +4101,8 @@ const submitSessionFeedback = async (req, res) => {
 module.exports = {
   createChatSession,
   createChatSessionV2,
+  continueChatSessionV2,
+  getLatestAiChatSession,
   getAiAstrologersV2,
   sendMessage,
   sendMessageV2,
