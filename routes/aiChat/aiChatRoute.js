@@ -3,6 +3,8 @@ const router = express.Router();
 const {
   createChatSession,
   createChatSessionV2,
+  continueChatSessionV2,
+  getLatestAiChatSession,
   getAiAstrologersV2,
   sendMessage,
   sendMessageV2,
@@ -31,7 +33,9 @@ const checkForAuthenticationCookie = require("../../middleware/authMiddleware");
 
 // Chat routes - All routes require authentication
 router.get("/v2/astrologers", checkForAuthenticationCookie(), getAiAstrologersV2);
+router.get("/v2/astrologers/:astrologerId/latest-session", checkForAuthenticationCookie(), getLatestAiChatSession);
 router.post("/v2/create", checkForAuthenticationCookie(), createChatSessionV2);
+router.post("/v2/session/:sessionId/continue", checkForAuthenticationCookie(), continueChatSessionV2);
 router.post("/v2/session/:sessionId/send", checkForAuthenticationCookie(), sendMessageV2);
 router.post("/v2/session/:sessionId/end", checkForAuthenticationCookie(), endChatSessionV2);
 router.get("/v2/history", checkForAuthenticationCookie(), getAiChatHistoryV2);
