@@ -24,7 +24,7 @@ const CHAT_BILLING_SOURCES = Object.freeze({
 
 const WELCOME_FREE_CHAT_MINUTES = Math.max(
   1,
-  Number.parseInt(process.env.WELCOME_FREE_CHAT_MINUTES || "4", 10) || 4
+  Number.parseInt(process.env.WELCOME_FREE_CHAT_MINUTES || "2", 10) || 2
 );
 
 const WELCOME_FREE_CHAT_CAMPAIGN = "welcome_free_chat";
