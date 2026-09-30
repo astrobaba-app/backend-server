@@ -168,6 +168,13 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    // App language code (en, hi, ta, te, kn); used for notifications sent
+    // outside a request. Synced from the X-App-Language header.
+    preferredLanguage: {
+      type: DataTypes.STRING(8),
+      allowNull: false,
+      defaultValue: "en",
+    },
   },
   {
     tableName: "users",

@@ -476,6 +476,7 @@ const markPostAsDuplicate = ({ post, canonicalPost, semanticSimilarity, titleSim
       type: "general",
       title: "Similar question already exists",
       message: "Your post was marked as duplicate. We linked the original thread for you.",
+      i18n: { key: "forum.duplicatePost" },
       data: {
         source: "forum_duplicate_detector",
         postId: post.id,

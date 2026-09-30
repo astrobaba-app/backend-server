@@ -3112,6 +3112,7 @@ const createAssistantMessagesForQueuedUserMessage = async (job) => {
   pushNotificationService.sendToUser(job.userId, {
     title: "Astrologer replied",
     body: "Open to see full message",
+    i18n: { key: "aiChatReply" },
     data: { type: "ai_chat_message", sessionId: String(job.sessionId) },
   }).catch(err => console.error("Push error (ai chat):", err));
 

@@ -350,6 +350,7 @@ const sendTestNotification = async (req, res) => {
       type: "test",
       title: "Test Notification 🔔",
       message: "This is a test push notification from Graho",
+      i18n: { key: "test" },
       data: { test: true },
       priority: "high",
       sendPush: true,

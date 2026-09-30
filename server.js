@@ -12,6 +12,7 @@ const { startForumAIModerationWorker } = require("./services/forumAIModerationSe
 const { startForumDuplicateWorker } = require("./services/forumDuplicateService");
 const { startInterestClassificationWorker } = require("./services/interestClassificationWorker");
 const { assertDeveloperIdentity } = require("./services/developerIdentityService");
+const { languageMiddleware } = require("./middleware/languageMiddleware");
 const {
   startJobApplicationEmailQueueWorker,
 } = require("./services/jobApplicationEmailQueue");
@@ -125,13 +126,14 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-client-type", "x-recaptcha-token", "x-firebase-appcheck"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-client-type", "x-recaptcha-token", "x-firebase-appcheck", "x-app-language"],
   })
 );
 
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
+app.use(languageMiddleware());
 
 // Serve static files from public directory (for test pages)
 app.use('/public', express.static('public'));

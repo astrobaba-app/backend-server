@@ -1,0 +1,151 @@
+{
+  "messages": {
+    "Kundli created successfully": "కుండలి విజయవంతంగా సృష్టించబడింది",
+    "Kundli deleted successfully": "కుండలి విజయవంతంగా తొలగించబడింది",
+    "Profile updated successfully": "ప్రొఫైల్ విజయవంతంగా అప్‌డేట్ అయింది",
+    "Order placed successfully": "ఆర్డర్ విజయవంతంగా చేయబడింది",
+    "Order cancelled successfully": "ఆర్డర్ విజయవంతంగా రద్దు చేయబడింది",
+    "Order item cancelled successfully": "ఆర్డర్ ఐటమ్ విజయవంతంగా రద్దు చేయబడింది",
+    "Forum post created and queued for moderation": "మీ చర్చ సృష్టించబడింది మరియు సమీక్షకు పంపబడింది",
+    "Post updated and queued for moderation": "పోస్ట్ అప్‌డేట్ చేయబడింది మరియు సమీక్షకు పంపబడింది",
+    "Comment added and queued for moderation": "కామెంట్ జోడించబడింది మరియు సమీక్షకు పంపబడింది",
+    "Comment updated": "కామెంట్ అప్‌డేట్ అయింది",
+    "Comment deleted": "కామెంట్ తొలగించబడింది",
+    "Comment already deleted": "కామెంట్ ఇప్పటికే తొలగించబడింది",
+    "Post permanently deleted": "పోస్ట్ శాశ్వతంగా తొలగించబడింది",
+    "Report submitted successfully. Our moderators will review it.": "రిపోర్ట్ విజయవంతంగా పంపబడింది. మా మోడరేటర్లు దీన్ని సమీక్షిస్తారు.",
+    "Your review request has been submitted. Admin will review it soon.": "మీ సమీక్ష అభ్యర్థన పంపబడింది. అడ్మిన్ త్వరలో దీన్ని సమీక్షిస్తారు.",
+    "Feedback created successfully": "ఫీడ్‌బ్యాక్ విజయవంతంగా పంపబడింది",
+    "Support ticket created successfully. Check your email for confirmation.": "సపోర్ట్ టికెట్ విజయవంతంగా సృష్టించబడింది. నిర్ధారణ కోసం మీ ఇమెయిల్ చూడండి.",
+    "Reply added successfully": "రిప్లై విజయవంతంగా జోడించబడింది",
+    "Talk to an astrologer for free.": "జ్యోతిష్యుడితో ఉచితంగా మాట్లాడండి.",
+
+    "No token found. Please login.": "దయచేసి లాగిన్ అవ్వండి.",
+    "Invalid or expired token.": "మీ సెషన్ గడువు ముగిసింది. దయచేసి మళ్ళీ లాగిన్ అవ్వండి.",
+    "Invalid or expired OTP": "OTP తప్పు లేదా గడువు ముగిసింది",
+    "Mobile number and OTP are required": "మొబైల్ నంబర్ మరియు OTP అవసరం",
+    "Please provide a valid 4-digit OTP": "దయచేసి సరైన 4 అంకెల OTP ఇవ్వండి",
+    "Please provide a valid Indian mobile number": "దయచేసి సరైన భారతీయ మొబైల్ నంబర్ ఇవ్వండి",
+    "Failed to send OTP": "OTP పంపలేకపోయాము",
+    "Hourly OTP limit reached. Please try later.": "గంట OTP పరిమితి చేరుకుంది. దయచేసి తర్వాత ప్రయత్నించండి.",
+    "Daily OTP limit reached. Please try tomorrow.": "ఈరోజు OTP పరిమితి చేరుకుంది. దయచేసి రేపు ప్రయత్నించండి.",
+    "Monthly OTP limit reached. Please contact support.": "ఈ నెల OTP పరిమితి చేరుకుంది. దయచేసి సపోర్ట్‌ను సంప్రదించండి.",
+    "Too many OTP verification attempts. Please request a new OTP.": "చాలా ఎక్కువ OTP ధృవీకరణ ప్రయత్నాలు. దయచేసి కొత్త OTP అభ్యర్థించండి.",
+    "Daily OTP verification limit reached. Please try tomorrow.": "ఈరోజు OTP ధృవీకరణ పరిమితి చేరుకుంది. దయచేసి రేపు ప్రయత్నించండి.",
+    "Monthly OTP verification limit reached. Please contact support.": "ఈ నెల OTP ధృవీకరణ పరిమితి చేరుకుంది. దయచేసి సపోర్ట్‌ను సంప్రదించండి.",
+
+    "Insufficient wallet balance": "వాలెట్‌లో తగినంత బ్యాలెన్స్ లేదు",
+    "Insufficient balance. Please recharge.": "తగినంత బ్యాలెన్స్ లేదు. దయచేసి రీఛార్జ్ చేయండి.",
+    "Insufficient wallet balance. Chat ended.": "వాలెట్‌లో తగినంత బ్యాలెన్స్ లేదు. చాట్ ముగిసింది.",
+    "Insufficient wallet balance. Chat ended. Please recharge to continue.": "వాలెట్‌లో తగినంత బ్యాలెన్స్ లేదు. చాట్ ముగిసింది. కొనసాగించడానికి దయచేసి రీఛార్జ్ చేయండి.",
+    "Insufficient wallet balance. Recharge to start or continue this chat.": "వాలెట్‌లో తగినంత బ్యాలెన్స్ లేదు. ఈ చాట్ ప్రారంభించడానికి లేదా కొనసాగించడానికి రీఛార్జ్ చేయండి.",
+    "Chat ended because wallet balance time limit was reached.": "వాలెట్ బ్యాలెన్స్ సమయ పరిమితి ముగిసినందున చాట్ ముగిసింది.",
+    "Chat request not approved yet": "చాట్ అభ్యర్థన ఇంకా ఆమోదించబడలేదు",
+    "Chat session not found": "చాట్ సెషన్ కనిపించలేదు",
+    "Not part of this session": "మీరు ఈ చాట్ సెషన్‌లో భాగం కాదు",
+    "Missing data": "అవసరమైన సమాచారం లేదు",
+    "Missing session id": "చాట్ సెషన్ సమాచారం లేదు",
+    "Unsupported message type": "ఈ రకమైన సందేశానికి మద్దతు లేదు",
+    "Attachment messages require uploaded file URL": "అటాచ్‌మెంట్ పంపడానికి ఫైల్ అప్‌లోడ్ అవ్వాలి",
+    "Failed to send message": "సందేశం పంపలేకపోయాము",
+    "Failed to end chat": "చాట్ ముగించలేకపోయాము"
+  },
+  "notifications": {
+    "forum": {
+      "newPost": {
+        "title": "Graho లో కొత్త చర్చ",
+        "message": "{{postTitle}}"
+      },
+      "firstComment": {
+        "title": "మీ చర్చపై మొదటి కామెంట్",
+        "message": "\"{{postTitle}}\" పై ఎవరో కామెంట్ చేశారు."
+      },
+      "likeMilestone": {
+        "title": "మీ చర్చకు {{count}} లైక్‌లు",
+        "message": "\"{{postTitle}}\" {{count}} లైక్‌లకు చేరుకుంది."
+      },
+      "commentMilestone": {
+        "title": "మీ చర్చపై {{count}} కామెంట్లు",
+        "message": "\"{{postTitle}}\" {{count}} కామెంట్లకు చేరుకుంది."
+      },
+      "commentReply": {
+        "title": "మీ కామెంట్‌కు కొత్త రిప్లై",
+        "message": "\"{{postTitle}}\" పై మీ కామెంట్‌కు ఎవరో రిప్లై ఇచ్చారు."
+      },
+      "postRemoved": {
+        "title": "మోడరేటర్ బాట్ చర్చను తొలగించింది",
+        "message": "మీ పోస్ట్ తొలగించబడింది: {{reason}}"
+      },
+      "commentRemoved": {
+        "title": "మోడరేటర్ బాట్ కామెంట్‌ను తొలగించింది",
+        "message": "మీ కామెంట్ తొలగించబడింది: {{reason}}"
+      },
+      "duplicatePost": {
+        "title": "ఇలాంటి ప్రశ్న ఇప్పటికే ఉంది",
+        "message": "మీ పోస్ట్ డూప్లికేట్‌గా గుర్తించబడింది. అసలు చర్చను మీ కోసం లింక్ చేశాము."
+      }
+    },
+    "astrologerOnline": {
+      "title": "{{name}} ఇప్పుడు ఆన్‌లైన్‌లో ఉన్నారు! 🟢",
+      "message": "{{name}} సంప్రదింపుల కోసం అందుబాటులో ఉన్నారు. ఇప్పుడే కనెక్ట్ అవ్వండి!"
+    },
+    "aiChatReply": {
+      "title": "జ్యోతిష్యుడు రిప్లై ఇచ్చారు",
+      "message": "పూర్తి సందేశం చూడటానికి తెరవండి"
+    },
+    "support": {
+      "reply": {
+        "title": "టికెట్ {{ticketNumber}} కు రిప్లై",
+        "message": "\"{{subject}}\" కు సపోర్ట్ టీమ్ రిప్లై ఇచ్చింది."
+      },
+      "statusUpdated": {
+        "title": "టికెట్ {{ticketNumber}} అప్‌డేట్ అయింది",
+        "message": "మీ సపోర్ట్ టికెట్ స్థితి {{status}} గా మారింది."
+      }
+    },
+    "report": {
+      "ready": {
+        "title": "{{report}} సిద్ధంగా ఉంది",
+        "message": "మీ రిపోర్ట్ సిద్ధంగా ఉంది, డౌన్‌లోడ్ చేసుకోవచ్చు."
+      },
+      "failed": {
+        "title": "{{report}} అప్‌డేట్",
+        "message": "ప్రస్తుతం మీ రిపోర్ట్ సిద్ధం చేయలేకపోయాము. తాజా స్థితి కోసం దయచేసి నా రిపోర్ట్‌లు తెరవండి."
+      }
+    },
+    "live": {
+      "started": {
+        "title": "{{name}} ఇప్పుడు లైవ్‌లో ఉన్నారు! 🔴",
+        "message": "ఇప్పుడే జాయిన్ అవ్వండి: \"{{title}}\" ₹{{price}}/నిమిషం"
+      },
+      "scheduled": {
+        "title": "రాబోయే లైవ్ సెషన్ 📅",
+        "message": "{{name}} {{date}} న లైవ్‌కి వస్తారు"
+      }
+    },
+    "missedCall": {
+      "title": "మిస్డ్ కాల్",
+      "message": "{{name}} నుండి వచ్చిన కాల్ మిస్ అయ్యారు"
+    },
+    "test": {
+      "title": "టెస్ట్ నోటిఫికేషన్ 🔔",
+      "message": "ఇది Graho నుండి వచ్చిన టెస్ట్ పుష్ నోటిఫికేషన్"
+    }
+  },
+  "labels": {
+    "reports": {
+      "daily_kundali": "రోజువారీ రిపోర్ట్",
+      "yearly_kundali": "వార్షిక రిపోర్ట్",
+      "wealth_kundali": "సంపద రిపోర్ట్",
+      "sade_sati_kundali": "ఏలినాటి శని రిపోర్ట్",
+      "palmistry": "హస్తరేఖ రిపోర్ట్",
+      "default": "మీ రిపోర్ట్"
+    },
+    "ticketStatus": {
+      "open": "తెరిచి ఉంది",
+      "in_progress": "ప్రోగ్రెస్‌లో ఉంది",
+      "resolved": "పరిష్కరించబడింది",
+      "closed": "మూసివేయబడింది"
+    }
+  }
+}

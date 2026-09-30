@@ -750,6 +750,7 @@ const toggleOnlineStatus = async (req, res) => {
                 type: 'astrologer_online',
                 title: `${astrologer.fullName} is now Online! 🟢`,
                 message: `${astrologer.fullName} is available for consultation. Connect now!`,
+                i18n: { key: 'astrologerOnline', vars: { name: astrologer.fullName } },
                 data: {
                   astrologerId: astrologer.id,
                   astrologerName: astrologer.fullName,
@@ -818,6 +819,7 @@ const goOnline = async (req, res) => {
               type: 'astrologer_online',
               title: `${astrologer.fullName} is now Online! 🟢`,
               message: `${astrologer.fullName} is available for consultation. Connect now!`,
+                i18n: { key: 'astrologerOnline', vars: { name: astrologer.fullName } },
               data: {
                 astrologerId: astrologer.id,
                 astrologerName: astrologer.fullName,

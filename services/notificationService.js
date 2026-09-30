@@ -4,6 +4,7 @@ const BroadcastLog = require("../model/admin/broadcastLog");
 const DeviceToken = require("../model/user/deviceToken");
 const pushNotificationService = require("./pushNotificationService");
 const { Op, literal } = require("sequelize");
+const { renderNotification } = require("../i18n");
 
 const MAX_PUSH_ATTEMPTS = 3;
 const DEFAULT_PENDING_PUSH_LIMIT = 3;
@@ -25,19 +26,31 @@ const PENDING_PUSH_MAX_AGE_HOURS = getPositiveIntegerEnv(
 
 class NotificationService {
   /**
-   * Send notification to specific user
+   * Send notification to specific user.
+   * Pass `i18n: { key, vars }` to render title/message from the
+   * `notifications.<key>` templates in the user's preferred language;
+   * `title`/`message` stay as the fallback text.
    */
-  async sendToUser(userId, { type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true }) {
+  async sendToUser(userId, { type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true, i18n = null }) {
     try {
       // Ensure the target user actually exists in the users table to
       // avoid foreign key violations (e.g. when passing an astrologerId).
-      const user = await User.findByPk(userId, { attributes: ["id"] });
+      const user = await User.findByPk(userId, { attributes: ["id", "preferredLanguage"] });
 
       if (!user) {
         console.warn(
           `NotificationService.sendToUser: user not found for id=${userId}, skipping notification of type=${type}`
         );
         return null;
+      }
+
+      if (i18n?.key) {
+        ({ title, message } = renderNotification(
+          user.preferredLanguage,
+          i18n.key,
+          i18n.vars,
+          { title, message }
+        ));
       }
 
       const notification = await Notification.create({
@@ -83,14 +96,34 @@ class NotificationService {
   }
 
   /**
-   * Broadcast notification to all users
+   * Broadcast notification to all users.
+   * Pass `i18n: { key, vars }` to send each user the text in their language.
    */
-  async broadcastToAll({ type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true }) {
+  async broadcastToAll({ type, title, message, data = {}, actionUrl = null, priority = "medium", sendPush = true, i18n = null }) {
     try {
       // Get all users (User model doesn't have isActive column)
       const users = await User.findAll({
-        attributes: ["id"],
+        attributes: ["id", "preferredLanguage"],
       });
+
+      // Render once per language, then look up per user.
+      const contentByLanguage = new Map();
+      const languageByUserId = new Map(
+        users.map((user) => [String(user.id), user.preferredLanguage])
+      );
+      const getContent = (userId) => {
+        if (!i18n?.key) {
+          return { title, message };
+        }
+        const language = languageByUserId.get(String(userId)) || "en";
+        if (!contentByLanguage.has(language)) {
+          contentByLanguage.set(
+            language,
+            renderNotification(language, i18n.key, i18n.vars, { title, message })
+          );
+        }
+        return contentByLanguage.get(language);
+      };
       const pushEligibleUsers = sendPush
         ? await DeviceToken.findAll({
             attributes: ["userId"],
@@ -112,8 +145,7 @@ class NotificationService {
           return Notification.create({
             userId: user.id,
             type,
-            title,
-            message,
+            ...getContent(userId),
             data: {
               ...data,
               pushResendEligible,
@@ -146,6 +178,14 @@ class NotificationService {
               type: String(type),
               actionUrl: String(actionUrl || ""),
             },
+            ...(i18n?.key
+              ? {
+                  contentForUser: (userId) => {
+                    const content = getContent(userId);
+                    return { title: content.title, body: content.message };
+                  },
+                }
+              : {}),
           });
           pushSuccessCount = pushResult?.successCount ?? 0;
           pushFailureCount = pushResult?.failureCount ?? 0;
@@ -348,6 +388,14 @@ class NotificationService {
       },
       actionUrl: `/live/${liveSession.id}`,
       priority: "high",
+      i18n: {
+        key: "live.started",
+        vars: {
+          name: astrologer.fullName,
+          title: liveSession.title,
+          price: liveSession.pricePerMinute,
+        },
+      },
     });
   }
 
@@ -369,6 +417,10 @@ class NotificationService {
       },
       actionUrl: `/live/${liveSession.id}`,
       priority: "medium",
+      i18n: {
+        key: "live.scheduled",
+        vars: { name: astrologer.fullName, date: new Date(scheduledAt) },
+      },
     });
   }
 
@@ -405,6 +457,7 @@ class NotificationService {
       },
       actionUrl: `/astrologer/${astrologer.id}`,
       priority: "medium",
+      i18n: { key: "missedCall", vars: { name: astrologer.fullName } },
     });
   }
 

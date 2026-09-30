@@ -346,6 +346,7 @@ const notifyPostRemoval = async (post, reason) => {
     type: "general",
     title: "Discussion removed by moderator bot",
     message: `Your post was removed: ${reason}`,
+    i18n: { key: "forum.postRemoved", vars: { reason } },
     data: {
       source: "forum_ai_moderator",
       postId: post.id,
@@ -362,6 +363,7 @@ const notifyCommentRemoval = async (comment, reason) => {
     type: "general",
     title: "Comment removed by moderator bot",
     message: `Your comment was removed: ${reason}`,
+    i18n: { key: "forum.commentRemoved", vars: { reason } },
     data: {
       source: "forum_ai_moderator",
       postId: comment.postId,

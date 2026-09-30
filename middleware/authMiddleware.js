@@ -2,6 +2,18 @@ const { validateToken } = require("../services/authService");
 const { parse } = require("cookie");
 const Astrologer = require("../model/astrologer/astrologer");
 const Admin = require("../model/admin/admin");
+// Remember the app language on the user so notifications sent later (cron,
+// queues, other users' actions) use it. Responses only follow the header, so
+// clients that don't send it (website, admin) keep getting English.
+function syncPreferredLanguage(req, user) {
+  const requested = req.requestedLang;
+
+  if (requested && requested !== user.preferredLanguage) {
+    user.update({ preferredLanguage: requested }).catch((error) => {
+      console.error("[Auth] Failed to save preferred language:", error.message);
+    });
+  }
+}
 
 
 function checkForAuthenticationCookie() {
@@ -65,7 +77,7 @@ function checkForAuthenticationCookie() {
       } else {
         const User = require("../model/user/userAuth");
         const user = await User.findByPk(userPayload.id, {
-          attributes: ["id", "isActive", "sessionVersion"],
+          attributes: ["id", "isActive", "sessionVersion", "preferredLanguage"],
         });
 
         if (!user || user.isActive === false) {
@@ -79,6 +91,8 @@ function checkForAuthenticationCookie() {
         if (tokenSessionVersion !== (user.sessionVersion || 0)) {
           return res.status(401).json({ error: "Invalid or expired token." });
         }
+
+        syncPreferredLanguage(req, user);
       }
       next();
     } catch (error) {

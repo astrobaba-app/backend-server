@@ -1,0 +1,151 @@
+{
+  "messages": {
+    "Kundli created successfully": "ஜாதகம் வெற்றிகரமாக உருவாக்கப்பட்டது",
+    "Kundli deleted successfully": "ஜாதகம் வெற்றிகரமாக நீக்கப்பட்டது",
+    "Profile updated successfully": "சுயவிவரம் வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது",
+    "Order placed successfully": "ஆர்டர் வெற்றிகரமாகச் செய்யப்பட்டது",
+    "Order cancelled successfully": "ஆர்டர் வெற்றிகரமாக ரத்து செய்யப்பட்டது",
+    "Order item cancelled successfully": "ஆர்டர் பொருள் வெற்றிகரமாக ரத்து செய்யப்பட்டது",
+    "Forum post created and queued for moderation": "உங்கள் விவாதம் உருவாக்கப்பட்டு மதிப்பாய்வுக்கு அனுப்பப்பட்டது",
+    "Post updated and queued for moderation": "பதிவு புதுப்பிக்கப்பட்டு மதிப்பாய்வுக்கு அனுப்பப்பட்டது",
+    "Comment added and queued for moderation": "கருத்து சேர்க்கப்பட்டு மதிப்பாய்வுக்கு அனுப்பப்பட்டது",
+    "Comment updated": "கருத்து புதுப்பிக்கப்பட்டது",
+    "Comment deleted": "கருத்து நீக்கப்பட்டது",
+    "Comment already deleted": "கருத்து ஏற்கனவே நீக்கப்பட்டுவிட்டது",
+    "Post permanently deleted": "பதிவு நிரந்தரமாக நீக்கப்பட்டது",
+    "Report submitted successfully. Our moderators will review it.": "புகார் வெற்றிகரமாக அனுப்பப்பட்டது. எங்கள் மதிப்பாய்வாளர்கள் இதைப் பரிசீலிப்பார்கள்.",
+    "Your review request has been submitted. Admin will review it soon.": "உங்கள் மறுபரிசீலனை கோரிக்கை அனுப்பப்பட்டது. நிர்வாகி விரைவில் இதைப் பரிசீலிப்பார்.",
+    "Feedback created successfully": "கருத்து வெற்றிகரமாக அனுப்பப்பட்டது",
+    "Support ticket created successfully. Check your email for confirmation.": "உதவி டிக்கெட் வெற்றிகரமாக உருவாக்கப்பட்டது. உறுதிப்படுத்தலுக்கு உங்கள் மின்னஞ்சலைப் பார்க்கவும்.",
+    "Reply added successfully": "பதில் வெற்றிகரமாகச் சேர்க்கப்பட்டது",
+    "Talk to an astrologer for free.": "ஜோதிடருடன் இலவசமாகப் பேசுங்கள்.",
+
+    "No token found. Please login.": "தயவுசெய்து உள்நுழையவும்.",
+    "Invalid or expired token.": "உங்கள் அமர்வு காலாவதியாகிவிட்டது. மீண்டும் உள்நுழையவும்.",
+    "Invalid or expired OTP": "OTP தவறானது அல்லது காலாவதியானது",
+    "Mobile number and OTP are required": "மொபைல் எண் மற்றும் OTP தேவை",
+    "Please provide a valid 4-digit OTP": "சரியான 4 இலக்க OTP-ஐ உள்ளிடவும்",
+    "Please provide a valid Indian mobile number": "சரியான இந்திய மொபைல் எண்ணை உள்ளிடவும்",
+    "Failed to send OTP": "OTP அனுப்ப முடியவில்லை",
+    "Hourly OTP limit reached. Please try later.": "ஒரு மணி நேர OTP வரம்பை அடைந்துவிட்டீர்கள். பிறகு முயற்சிக்கவும்.",
+    "Daily OTP limit reached. Please try tomorrow.": "இன்றைய OTP வரம்பை அடைந்துவிட்டீர்கள். நாளை முயற்சிக்கவும்.",
+    "Monthly OTP limit reached. Please contact support.": "இந்த மாத OTP வரம்பை அடைந்துவிட்டீர்கள். உதவி மையத்தைத் தொடர்பு கொள்ளவும்.",
+    "Too many OTP verification attempts. Please request a new OTP.": "அதிகமான OTP சரிபார்ப்பு முயற்சிகள். புதிய OTP-ஐக் கோரவும்.",
+    "Daily OTP verification limit reached. Please try tomorrow.": "இன்றைய OTP சரிபார்ப்பு வரம்பை அடைந்துவிட்டீர்கள். நாளை முயற்சிக்கவும்.",
+    "Monthly OTP verification limit reached. Please contact support.": "இந்த மாத OTP சரிபார்ப்பு வரம்பை அடைந்துவிட்டீர்கள். உதவி மையத்தைத் தொடர்பு கொள்ளவும்.",
+
+    "Insufficient wallet balance": "வாலட்டில் போதுமான இருப்பு இல்லை",
+    "Insufficient balance. Please recharge.": "போதுமான இருப்பு இல்லை. தயவுசெய்து ரீசார்ஜ் செய்யவும்.",
+    "Insufficient wallet balance. Chat ended.": "வாலட்டில் போதுமான இருப்பு இல்லை. சாட் முடிந்தது.",
+    "Insufficient wallet balance. Chat ended. Please recharge to continue.": "வாலட்டில் போதுமான இருப்பு இல்லை. சாட் முடிந்தது. தொடர ரீசார்ஜ் செய்யவும்.",
+    "Insufficient wallet balance. Recharge to start or continue this chat.": "வாலட்டில் போதுமான இருப்பு இல்லை. இந்த சாட்டைத் தொடங்க அல்லது தொடர ரீசார்ஜ் செய்யவும்.",
+    "Chat ended because wallet balance time limit was reached.": "வாலட் இருப்பு நேர வரம்பு முடிந்ததால் சாட் முடிந்தது.",
+    "Chat request not approved yet": "சாட் கோரிக்கை இன்னும் ஏற்கப்படவில்லை",
+    "Chat session not found": "சாட் அமர்வு கிடைக்கவில்லை",
+    "Not part of this session": "நீங்கள் இந்த சாட் அமர்வில் இல்லை",
+    "Missing data": "தேவையான தகவல் இல்லை",
+    "Missing session id": "சாட் அமர்வு தகவல் இல்லை",
+    "Unsupported message type": "இந்த வகை செய்தி ஆதரிக்கப்படவில்லை",
+    "Attachment messages require uploaded file URL": "இணைப்பை அனுப்ப கோப்பு பதிவேற்றப்பட வேண்டும்",
+    "Failed to send message": "செய்தியை அனுப்ப முடியவில்லை",
+    "Failed to end chat": "சாட்டை முடிக்க முடியவில்லை"
+  },
+  "notifications": {
+    "forum": {
+      "newPost": {
+        "title": "Graho-வில் புதிய விவாதம்",
+        "message": "{{postTitle}}"
+      },
+      "firstComment": {
+        "title": "உங்கள் விவாதத்தில் முதல் கருத்து",
+        "message": "\"{{postTitle}}\" இல் ஒருவர் கருத்து தெரிவித்துள்ளார்."
+      },
+      "likeMilestone": {
+        "title": "உங்கள் விவாதத்திற்கு {{count}} லைக்குகள்",
+        "message": "\"{{postTitle}}\" {{count}} லைக்குகளைப் பெற்றுள்ளது."
+      },
+      "commentMilestone": {
+        "title": "உங்கள் விவாதத்தில் {{count}} கருத்துகள்",
+        "message": "\"{{postTitle}}\" {{count}} கருத்துகளைப் பெற்றுள்ளது."
+      },
+      "commentReply": {
+        "title": "உங்கள் கருத்துக்கு புதிய பதில்",
+        "message": "\"{{postTitle}}\" இல் உங்கள் கருத்துக்கு ஒருவர் பதிலளித்துள்ளார்."
+      },
+      "postRemoved": {
+        "title": "மதிப்பாய்வு பாட் விவாதத்தை நீக்கியது",
+        "message": "உங்கள் பதிவு நீக்கப்பட்டது: {{reason}}"
+      },
+      "commentRemoved": {
+        "title": "மதிப்பாய்வு பாட் கருத்தை நீக்கியது",
+        "message": "உங்கள் கருத்து நீக்கப்பட்டது: {{reason}}"
+      },
+      "duplicatePost": {
+        "title": "இதே போன்ற கேள்வி ஏற்கனவே உள்ளது",
+        "message": "உங்கள் பதிவு நகலாகக் குறிக்கப்பட்டது. அசல் விவாதத்தை உங்களுக்காக இணைத்துள்ளோம்."
+      }
+    },
+    "astrologerOnline": {
+      "title": "{{name}} இப்போது ஆன்லைனில் உள்ளார்! 🟢",
+      "message": "{{name}} ஆலோசனைக்குக் கிடைக்கிறார். இப்போதே இணையுங்கள்!"
+    },
+    "aiChatReply": {
+      "title": "ஜோதிடர் பதிலளித்தார்",
+      "message": "முழு செய்தியைப் பார்க்கத் திறக்கவும்"
+    },
+    "support": {
+      "reply": {
+        "title": "டிக்கெட் {{ticketNumber}} க்கு பதில்",
+        "message": "\"{{subject}}\" க்கு உதவிக் குழு பதிலளித்துள்ளது."
+      },
+      "statusUpdated": {
+        "title": "டிக்கெட் {{ticketNumber}} புதுப்பிக்கப்பட்டது",
+        "message": "உங்கள் உதவி டிக்கெட்டின் நிலை {{status}} என மாற்றப்பட்டது."
+      }
+    },
+    "report": {
+      "ready": {
+        "title": "{{report}} தயார்",
+        "message": "உங்கள் அறிக்கை தயாராக உள்ளது, பதிவிறக்கம் செய்யலாம்."
+      },
+      "failed": {
+        "title": "{{report}} நிலை",
+        "message": "இப்போது உங்கள் அறிக்கையைத் தயாரிக்க முடியவில்லை. சமீபத்திய நிலையைப் பார்க்க எனது அறிக்கைகளைத் திறக்கவும்."
+      }
+    },
+    "live": {
+      "started": {
+        "title": "{{name}} இப்போது நேரலையில்! 🔴",
+        "message": "இப்போதே இணையுங்கள்: \"{{title}}\" ₹{{price}}/நிமிடம்"
+      },
+      "scheduled": {
+        "title": "வரவிருக்கும் நேரலை அமர்வு 📅",
+        "message": "{{name}} {{date}} அன்று நேரலைக்கு வருவார்"
+      }
+    },
+    "missedCall": {
+      "title": "தவறிய அழைப்பு",
+      "message": "{{name}} இடமிருந்து வந்த அழைப்பைத் தவறவிட்டீர்கள்"
+    },
+    "test": {
+      "title": "சோதனை அறிவிப்பு 🔔",
+      "message": "இது Graho-வின் சோதனை புஷ் அறிவிப்பு"
+    }
+  },
+  "labels": {
+    "reports": {
+      "daily_kundali": "தினசரி அறிக்கை",
+      "yearly_kundali": "வருடாந்திர அறிக்கை",
+      "wealth_kundali": "செல்வ அறிக்கை",
+      "sade_sati_kundali": "ஏழரைச் சனி அறிக்கை",
+      "palmistry": "கைரேகை அறிக்கை",
+      "default": "உங்கள் அறிக்கை"
+    },
+    "ticketStatus": {
+      "open": "திறந்துள்ளது",
+      "in_progress": "செயலில் உள்ளது",
+      "resolved": "தீர்க்கப்பட்டது",
+      "closed": "மூடப்பட்டது"
+    }
+  }
+}

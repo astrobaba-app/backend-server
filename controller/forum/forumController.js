@@ -52,6 +52,7 @@ const notifyNewForumPost = async (post) => {
     priority: "medium",
     title: "New Discussion on Graho",
     message: post.title,
+    i18n: { key: "forum.newPost", vars: { postTitle: post.title } },
     actionUrl: `/forum/${post.id}`,
     data: {
       notificationCategory: "forum_post",
@@ -132,6 +133,7 @@ const sendForumPostOwnerNotification = async (post, actorUserId, payload) => {
     priority: payload.priority || "medium",
     title: payload.title,
     message: payload.message,
+    ...(payload.i18n ? { i18n: payload.i18n } : {}),
     actionUrl: `/forum/${post.id}`,
     data: {
       notificationCategory: "forum_post",
@@ -157,6 +159,7 @@ const notifyFirstForumComment = async (post, comment, count) => {
       forumEvent: "first_comment",
       title: "First comment on your discussion",
       message: `Someone commented on "${post.title}".`,
+      i18n: { key: "forum.firstComment", vars: { postTitle: post.title } },
       commentId: comment.id,
       count,
     });
@@ -178,6 +181,10 @@ const notifyForumLikeMilestone = async (post, actorUserId) => {
       milestone: likeCount,
       title: `${likeCount} likes on your discussion`,
       message: `"${post.title}" reached ${likeCount} likes.`,
+      i18n: {
+        key: "forum.likeMilestone",
+        vars: { postTitle: post.title, count: likeCount },
+      },
       count: likeCount,
       skipActorSelf: false,
     });
@@ -199,6 +206,10 @@ const notifyForumCommentMilestone = async (post, comment) => {
       milestone: commentCount,
       title: `${commentCount} comments on your discussion`,
       message: `"${post.title}" reached ${commentCount} comments.`,
+      i18n: {
+        key: "forum.commentMilestone",
+        vars: { postTitle: post.title, count: commentCount },
+      },
       commentId: comment.id,
       count: commentCount,
       skipActorSelf: false,
@@ -224,6 +235,7 @@ const notifyForumCommentReply = async (post, parentComment, replyComment) => {
       priority: "medium",
       title: "New reply to your comment",
       message: `Someone replied to your comment on "${post.title}".`,
+      i18n: { key: "forum.commentReply", vars: { postTitle: post.title } },
       actionUrl: `/forum/${post.id}`,
       data: {
         notificationCategory: "forum_post",

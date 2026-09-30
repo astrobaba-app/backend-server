@@ -3,6 +3,7 @@ const DeviceToken = require("../model/user/deviceToken");
 const AstrologerDeviceToken = require("../model/astrologer/astrologerDeviceToken");
 const User = require("../model/user/userAuth");
 const { Op } = require("sequelize");
+const { renderNotification } = require("../i18n");
 
 const CHAT_ALERTS_CHANNEL_ID = "graho_chat_alerts_v3";
 const GENERAL_ALERTS_CHANNEL_ID = "graho_general_alerts_v3";
@@ -132,8 +133,22 @@ class PushNotificationService {
     };
   }
 
-  async sendToUser(userId, { title, body, data = {}, imageUrl = null }) {
+  /**
+   * Pass `i18n: { key, vars }` to render title/body from the
+   * `notifications.<key>` templates in the user's preferred language.
+   */
+  async sendToUser(userId, { title, body, data = {}, imageUrl = null, i18n = null }) {
     try {
+      if (i18n?.key) {
+        const user = await User.findByPk(userId, { attributes: ["preferredLanguage"] });
+        const content = renderNotification(user?.preferredLanguage, i18n.key, i18n.vars, {
+          title,
+          message: body,
+        });
+        title = content.title;
+        body = content.message;
+      }
+
       return await this.sendToTokenModel(DeviceToken, "userId", userId, {
         title,
         body,
@@ -178,13 +193,19 @@ class PushNotificationService {
   }
 
   /**
-   * Send push notification to multiple users
+   * Send push notification to multiple users.
+   * `contentForUser(userId) => { title, body }` overrides the text per user
+   * (used for per-language broadcasts).
    */
-  async sendToMultipleUsers(userIds, { title, body, data = {}, imageUrl = null }) {
+  async sendToMultipleUsers(userIds, { title, body, data = {}, imageUrl = null, contentForUser = null }) {
     try {
       const results = await Promise.allSettled(
         userIds.map((userId) =>
-          this.sendToUser(userId, { title, body, data, imageUrl })
+          this.sendToUser(userId, {
+            ...(contentForUser ? contentForUser(userId) : { title, body }),
+            data,
+            imageUrl,
+          })
         )
       );
 
@@ -275,7 +296,7 @@ class PushNotificationService {
   /**
    * Broadcast push notification to all users with active tokens
    */
-  async broadcastToAll({ title, body, data = {}, imageUrl = null }) {
+  async broadcastToAll({ title, body, data = {}, imageUrl = null, contentForUser = null }) {
     try {
       // Get all users with active device tokens
       const activeUsers = await DeviceToken.findAll({
@@ -299,6 +320,7 @@ class PushNotificationService {
         body,
         data,
         imageUrl,
+        contentForUser,
       });
 
       return {

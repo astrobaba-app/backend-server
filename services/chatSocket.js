@@ -17,6 +17,11 @@ const {
 } = require("./chatFeedbackPromptService");
 const { getWalletBalanceBreakdown } = require("./walletService");
 const pushNotificationService = require("./pushNotificationService");
+const { DEFAULT_LANGUAGE, resolveLanguage } = require("../i18n");
+const {
+  LANGUAGE_HEADER,
+  localizeResponseBody,
+} = require("../middleware/languageMiddleware");
 const {
   CHAT_BILLING_SOURCES,
   calculateFreeChatWindow,
@@ -712,6 +717,27 @@ function initializeChatSocket(io) {
 
     const isAstrologer = role === "astrologer";
     socket.data.sessionAccessCache = new Map();
+
+    // App language for this connection: header, or `auth.language` for
+    // clients that can't set handshake headers.
+    socket.data.lang = resolveLanguage(
+      socket.handshake.headers?.[LANGUAGE_HEADER] ||
+        socket.handshake.auth?.language ||
+        socket.handshake.query?.lang
+    );
+
+    // Translate the fixed `error` / `message` text of every ack callback.
+    if (socket.data.lang !== DEFAULT_LANGUAGE) {
+      socket.use((packet, next) => {
+        const lastIndex = packet.length - 1;
+        const ack = packet[lastIndex];
+        if (typeof ack === "function") {
+          packet[lastIndex] = (response, ...rest) =>
+            ack(localizeResponseBody(socket.data.lang, response), ...rest);
+        }
+        next();
+      });
+    }
 
     console.log("[Socket.IO] User connected");
 

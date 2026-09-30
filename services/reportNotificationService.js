@@ -51,6 +51,15 @@ const notifyReportGenerationStatus = async (reportRequest, statusOverride) => {
       type: "general",
       title,
       message,
+      i18n: {
+        key: isCompleted ? "report.ready" : "report.failed",
+        vars: {
+          report: {
+            key: `labels.reports.${REPORT_LABELS[reportRequest.reportType] ? reportRequest.reportType : "default"}`,
+            fallback: reportLabel,
+          },
+        },
+      },
       actionUrl: "/reports",
       priority: isCompleted ? "high" : "medium",
       data: {

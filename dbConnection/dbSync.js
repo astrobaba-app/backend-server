@@ -2421,6 +2421,16 @@ async function ensureUserAuthColumns() {
       );
     }
 
+    if (!table.preferredLanguage && !table.preferred_language) {
+      operations.push(
+        queryInterface.addColumn("users", "preferredLanguage", {
+          type: DataTypes.STRING(8),
+          allowNull: false,
+          defaultValue: "en",
+        })
+      );
+    }
+
     if (operations.length) {
       await Promise.all(operations);
       console.log("Ensured users table auth columns exist");

@@ -73,6 +73,7 @@ const notifyTicketUser = async (ticket, payload) => {
       priority: payload.priority || "high",
       title: payload.title,
       message: payload.message,
+      ...(payload.i18n ? { i18n: payload.i18n } : {}),
       actionUrl: getSupportTicketActionUrl(ticket),
       data: {
         notificationCategory: "support_ticket",
@@ -653,6 +654,10 @@ const replyToTicketAdmin = async (req, res) => {
         supportEvent: "admin_reply",
         title: `Reply on ticket ${ticket.ticketNumber}`,
         message: `Support replied to "${ticket.subject}".`,
+        i18n: {
+          key: "support.reply",
+          vars: { ticketNumber: ticket.ticketNumber, subject: ticket.subject },
+        },
         data: {
           replyId: reply.id,
         },
@@ -743,6 +748,16 @@ const updateTicketStatus = async (req, res) => {
         supportEvent: "status_updated",
         title: `Ticket ${ticket.ticketNumber} updated`,
         message: `Your support ticket status changed to ${formatTicketStatus(status)}.`,
+        i18n: {
+          key: "support.statusUpdated",
+          vars: {
+            ticketNumber: ticket.ticketNumber,
+            status: {
+              key: `labels.ticketStatus.${status}`,
+              fallback: formatTicketStatus(status),
+            },
+          },
+        },
         data: {
           oldStatus,
           status,

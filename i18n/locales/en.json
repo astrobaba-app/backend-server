@@ -1,0 +1,101 @@
+{
+  "messages": {},
+  "notifications": {
+    "forum": {
+      "newPost": {
+        "title": "New Discussion on Graho",
+        "message": "{{postTitle}}"
+      },
+      "firstComment": {
+        "title": "First comment on your discussion",
+        "message": "Someone commented on \"{{postTitle}}\"."
+      },
+      "likeMilestone": {
+        "title": "{{count}} likes on your discussion",
+        "message": "\"{{postTitle}}\" reached {{count}} likes."
+      },
+      "commentMilestone": {
+        "title": "{{count}} comments on your discussion",
+        "message": "\"{{postTitle}}\" reached {{count}} comments."
+      },
+      "commentReply": {
+        "title": "New reply to your comment",
+        "message": "Someone replied to your comment on \"{{postTitle}}\"."
+      },
+      "postRemoved": {
+        "title": "Discussion removed by moderator bot",
+        "message": "Your post was removed: {{reason}}"
+      },
+      "commentRemoved": {
+        "title": "Comment removed by moderator bot",
+        "message": "Your comment was removed: {{reason}}"
+      },
+      "duplicatePost": {
+        "title": "Similar question already exists",
+        "message": "Your post was marked as duplicate. We linked the original thread for you."
+      }
+    },
+    "astrologerOnline": {
+      "title": "{{name}} is now Online! 🟢",
+      "message": "{{name}} is available for consultation. Connect now!"
+    },
+    "aiChatReply": {
+      "title": "Astrologer replied",
+      "message": "Open to see full message"
+    },
+    "support": {
+      "reply": {
+        "title": "Reply on ticket {{ticketNumber}}",
+        "message": "Support replied to \"{{subject}}\"."
+      },
+      "statusUpdated": {
+        "title": "Ticket {{ticketNumber}} updated",
+        "message": "Your support ticket status changed to {{status}}."
+      }
+    },
+    "report": {
+      "ready": {
+        "title": "{{report}} is ready",
+        "message": "Your report has been prepared and is ready to download."
+      },
+      "failed": {
+        "title": "{{report}} update",
+        "message": "We could not prepare your report right now. Please open My Reports to check the latest status."
+      }
+    },
+    "live": {
+      "started": {
+        "title": "{{name}} is now LIVE! 🔴",
+        "message": "Join now: \"{{title}}\" at ₹{{price}}/min"
+      },
+      "scheduled": {
+        "title": "Upcoming Live Session 📅",
+        "message": "{{name}} will go live on {{date}}"
+      }
+    },
+    "missedCall": {
+      "title": "Missed Call",
+      "message": "You missed a call from {{name}}"
+    },
+    "test": {
+      "title": "Test Notification 🔔",
+      "message": "This is a test push notification from Graho"
+    }
+  },
+  "labels": {
+    "reports": {
+      "daily_kundali": "Daily report",
+      "yearly_kundali": "Yearly report",
+      "wealth_kundali": "Wealth report",
+      "sade_sati_kundali": "Sade Sati report",
+      "palmistry": "Palm report",
+      "default": "Your report"
+    },
+    "ticketStatus": {
+      "open": "Open",
+      "in_progress": "In Progress",
+      "resolved": "Resolved",
+      "closed": "Closed"
+    }
+  }
+}
