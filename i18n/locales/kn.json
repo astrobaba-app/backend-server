@@ -48,7 +48,12 @@
     "Unsupported message type": "ಈ ರೀತಿಯ ಸಂದೇಶಕ್ಕೆ ಬೆಂಬಲವಿಲ್ಲ",
     "Attachment messages require uploaded file URL": "ಲಗತ್ತು ಕಳುಹಿಸಲು ಫೈಲ್ ಅಪ್‌ಲೋಡ್ ಆಗಿರಬೇಕು",
     "Failed to send message": "ಸಂದೇಶ ಕಳುಹಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
-    "Failed to end chat": "ಚಾಟ್ ಮುಗಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ"
+    "Failed to end chat": "ಚಾಟ್ ಮುಗಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+
+    "Language preference updated successfully": "ಭಾಷೆಯ ಆದ್ಯತೆ ಯಶಸ್ವಿಯಾಗಿ ಅಪ್‌ಡೇಟ್ ಆಗಿದೆ",
+    "Invalid language. Supported languages: en, hi, ta, te, kn": "ಅಮಾನ್ಯ ಭಾಷೆ. ಬೆಂಬಲಿತ ಭಾಷೆಗಳು: en, hi, ta, te, kn",
+    "Failed to update language preference": "ಭಾಷೆಯ ಆದ್ಯತೆಯನ್ನು ಅಪ್‌ಡೇಟ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+    "User not found": "ಬಳಕೆದಾರರು ಕಂಡುಬಂದಿಲ್ಲ"
   },
   "notifications": {
     "forum": {

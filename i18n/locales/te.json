@@ -48,7 +48,12 @@
     "Unsupported message type": "ఈ రకమైన సందేశానికి మద్దతు లేదు",
     "Attachment messages require uploaded file URL": "అటాచ్‌మెంట్ పంపడానికి ఫైల్ అప్‌లోడ్ అవ్వాలి",
     "Failed to send message": "సందేశం పంపలేకపోయాము",
-    "Failed to end chat": "చాట్ ముగించలేకపోయాము"
+    "Failed to end chat": "చాట్ ముగించలేకపోయాము",
+
+    "Language preference updated successfully": "భాష ప్రాధాన్యత విజయవంతంగా అప్‌డేట్ అయింది",
+    "Invalid language. Supported languages: en, hi, ta, te, kn": "చెల్లని భాష. మద్దతు ఉన్న భాషలు: en, hi, ta, te, kn",
+    "Failed to update language preference": "భాష ప్రాధాన్యతను అప్‌డేట్ చేయలేకపోయాము",
+    "User not found": "వినియోగదారు కనిపించలేదు"
   },
   "notifications": {
     "forum": {

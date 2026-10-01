@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getProfile,
   updateProfile,
+  updateLanguagePreference,
 } = require("../../controller/profileController/userProfileController");
 const {
   requestAccountDeletion,
@@ -16,6 +17,7 @@ const { getUserHomeCardConfig } = require("../../controller/admin/homeCardContro
 // All profile routes are protected
 router.get("/profile", checkForAuthenticationCookie(), getProfile);
 router.put("/profile", checkForAuthenticationCookie(), updateProfile);
+router.put("/language", checkForAuthenticationCookie(), updateLanguagePreference);
 
 // Account deletion routes
 router.post("/account-deletion", checkForAuthenticationCookie(), requestAccountDeletion);

@@ -48,7 +48,12 @@
     "Unsupported message type": "इस प्रकार का संदेश समर्थित नहीं है",
     "Attachment messages require uploaded file URL": "अटैचमेंट भेजने के लिए फ़ाइल अपलोड होना ज़रूरी है",
     "Failed to send message": "संदेश नहीं भेजा जा सका",
-    "Failed to end chat": "चैट समाप्त नहीं की जा सकी"
+    "Failed to end chat": "चैट समाप्त नहीं की जा सकी",
+
+    "Language preference updated successfully": "भाषा की पसंद सफलतापूर्वक अपडेट हो गई",
+    "Invalid language. Supported languages: en, hi, ta, te, kn": "अमान्य भाषा। समर्थित भाषाएँ: en, hi, ta, te, kn",
+    "Failed to update language preference": "भाषा की पसंद अपडेट नहीं हो सकी",
+    "User not found": "उपयोगकर्ता नहीं मिला"
   },
   "notifications": {
     "forum": {

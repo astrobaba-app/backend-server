@@ -48,7 +48,12 @@
     "Unsupported message type": "இந்த வகை செய்தி ஆதரிக்கப்படவில்லை",
     "Attachment messages require uploaded file URL": "இணைப்பை அனுப்ப கோப்பு பதிவேற்றப்பட வேண்டும்",
     "Failed to send message": "செய்தியை அனுப்ப முடியவில்லை",
-    "Failed to end chat": "சாட்டை முடிக்க முடியவில்லை"
+    "Failed to end chat": "சாட்டை முடிக்க முடியவில்லை",
+
+    "Language preference updated successfully": "மொழி விருப்பம் வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது",
+    "Invalid language. Supported languages: en, hi, ta, te, kn": "தவறான மொழி. ஆதரிக்கப்படும் மொழிகள்: en, hi, ta, te, kn",
+    "Failed to update language preference": "மொழி விருப்பத்தைப் புதுப்பிக்க முடியவில்லை",
+    "User not found": "பயனர் கிடைக்கவில்லை"
   },
   "notifications": {
     "forum": {

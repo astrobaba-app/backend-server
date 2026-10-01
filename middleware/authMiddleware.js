@@ -5,14 +5,22 @@ const Admin = require("../model/admin/admin");
 // Remember the app language on the user so notifications sent later (cron,
 // queues, other users' actions) use it. Responses only follow the header, so
 // clients that don't send it (website, admin) keep getting English.
+// Runs after the response so an explicit change via PUT /api/user/language
+// (which sets req.skipLanguageSync) is never overwritten by a stale header.
 function syncPreferredLanguage(req, user) {
   const requested = req.requestedLang;
 
-  if (requested && requested !== user.preferredLanguage) {
+  if (!requested || requested === user.preferredLanguage || !req.res) {
+    return;
+  }
+
+  req.res.once("finish", () => {
+    if (req.skipLanguageSync) return;
+
     user.update({ preferredLanguage: requested }).catch((error) => {
       console.error("[Auth] Failed to save preferred language:", error.message);
     });
-  }
+  });
 }
 
 

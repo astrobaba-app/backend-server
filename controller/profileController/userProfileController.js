@@ -3,6 +3,16 @@ const { validatePincode, isValidState, isValidCity } = require("../../utils/indi
 const {
   normalizeIndianMobile,
 } = require("../../services/phoneNumberService");
+const { SUPPORTED_LANGUAGES } = require("../../i18n");
+
+// Accepts the language code or its English name.
+const LANGUAGE_ALIASES = {
+  en: "en", english: "en",
+  hi: "hi", hindi: "hi",
+  ta: "ta", tamil: "ta",
+  te: "te", telugu: "te",
+  kn: "kn", kannada: "kn",
+};
 
 const isOnboardingProfileComplete = (user) =>
   Boolean(
@@ -286,7 +296,58 @@ const updateProfile = async (req, res) => {
   }
 };
 
+/**
+ * PUT /api/user/language
+ * Body: { "language": "en" | "hi" | "ta" | "te" | "kn" } (names like "hindi" also work)
+ */
+const updateLanguagePreference = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const language = LANGUAGE_ALIASES[String(req.body?.language || "").trim().toLowerCase()];
+
+    if (!language) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid language. Supported languages: en, hi, ta, te, kn",
+        supportedLanguages: SUPPORTED_LANGUAGES,
+      });
+    }
+
+    const user = await User.findByPk(userId, { attributes: ["id", "preferredLanguage"] });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.preferredLanguage !== language) {
+      await user.update({ preferredLanguage: language });
+    }
+
+    // Don't let the auth middleware's header sync overwrite this choice, and
+    // reply in the newly chosen language.
+    req.skipLanguageSync = true;
+    req.lang = language;
+
+    res.status(200).json({
+      success: true,
+      message: "Language preference updated successfully",
+      preferredLanguage: language,
+    });
+  } catch (error) {
+    console.error("Update language preference error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update language preference",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getProfile,
   updateProfile,
+  updateLanguagePreference,
 };
